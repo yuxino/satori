@@ -1,5 +1,6 @@
 import SwiftUI
 import SatoriCore
+import UniformTypeIdentifiers
 
 struct LearningInspector: View {
     enum Mode: String, CaseIterable, Identifiable {
@@ -21,6 +22,12 @@ struct LearningInspector: View {
     @State private var isThinking = false
     @State private var hasQwenConfiguration = false
     @State private var allowsWebSearch = false
+    @State private var attachments: [LearningImageAttachment] = []
+    @State private var isImportingImage = false
+    @State private var attachmentStatus = ""
+    @State private var lastQuestion = ""
+    @State private var lastAttachmentNames: [String] = []
+    @State private var requestTask: Task<Void, Never>?
 
     private let quickPrompts = [
         "这一页主要在讲什么？",
@@ -48,6 +55,13 @@ struct LearningInspector: View {
         .onReceive(NotificationCenter.default.publisher(for: .qwenConfigurationDidChange)) { _ in
             hasQwenConfiguration = QwenConfigurationStore.read() != nil
         }
+        .fileImporter(
+            isPresented: $isImportingImage,
+            allowedContentTypes: [.image],
+            allowsMultipleSelection: true,
+            onCompletion: importImages
+        )
+        .onDisappear { requestTask?.cancel() }
     }
 
     private var inspectorHeader: some View {
@@ -75,18 +89,31 @@ struct LearningInspector: View {
 
     private var understandingView: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    contextCard
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        contextCard
 
-                    if let response {
-                        responseCard(response)
-                    } else {
-                        promptStarter
+                        if !lastQuestion.isEmpty {
+                            submittedQuestionCard
+                        }
+
+                        if let response {
+                            responseCard(response)
+                        } else {
+                            promptStarter
+                        }
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id("learning-response-bottom")
                     }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .onChange(of: response?.text) { _, _ in
+                    proxy.scrollTo("learning-response-bottom", anchor: .bottom)
+                }
             }
 
             Divider()
@@ -130,7 +157,7 @@ struct LearningInspector: View {
 
             ForEach(quickPrompts, id: \.self) { prompt in
                 Button {
-                    question = prompt
+                    askAssistant(prompt)
                 } label: {
                     HStack {
                         Text(prompt)
@@ -158,7 +185,10 @@ struct LearningInspector: View {
     private func responseCard(_ response: LearningResponse) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label(response.sourceKind.localizedTitle, systemImage: "checkmark.seal")
+                Label(
+                    isThinking ? "Qwen 正在回答" : response.sourceKind.localizedTitle,
+                    systemImage: isThinking ? "sparkles" : "checkmark.seal"
+                )
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(SatoriTheme.lavender)
                 Spacer()
@@ -168,10 +198,19 @@ struct LearningInspector: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Text(response.text)
+            if response.text.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(allowsWebSearch ? "正在阅读当前页并搜索资料…" : "正在阅读当前页…")
+                        .foregroundStyle(.secondary)
+                }
                 .font(.callout)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(response.text)
+                    .font(.callout)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if !response.citations.isEmpty {
                 Divider()
                 Text("网页来源")
@@ -191,17 +230,68 @@ struct LearningInspector: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(.quaternary))
     }
 
+    private var submittedQuestionCard: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("我的问题")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(lastQuestion)
+                .font(.callout)
+                .textSelection(.enabled)
+            if !lastAttachmentNames.isEmpty {
+                Label("附加了 \(lastAttachmentNames.count) 张图片", systemImage: "photo.on.rectangle.angled")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(13)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(SatoriTheme.lavenderSoft.opacity(0.7), in: RoundedRectangle(cornerRadius: 12))
+    }
+
     private var composer: some View {
-        VStack(spacing: 10) {
-            TextEditor(text: $question)
-                .font(.body)
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .frame(minHeight: 72, maxHeight: 110)
-                .background(.background, in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(SatoriTheme.lavender.opacity(0.25)))
+        VStack(alignment: .leading, spacing: 10) {
+            if !attachments.isEmpty {
+                attachmentStrip
+            }
+
+            ZStack(alignment: .topLeading) {
+                if question.isEmpty {
+                    Text("问这一页，也可以附上图片…")
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 12)
+                        .allowsHitTesting(false)
+                }
+                TextEditor(text: $question)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .frame(minHeight: 72, maxHeight: 110)
+                    .onKeyPress(.return, phases: .down) { keyPress in
+                        if keyPress.modifiers.contains(.shift) { return .ignored }
+                        if canSend { askAssistant() }
+                        return .handled
+                    }
+            }
+            .background(.background, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(SatoriTheme.lavender.opacity(0.25)))
+
+            if !attachmentStatus.isEmpty {
+                Text(attachmentStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             HStack {
+                Button("添加图片", systemImage: "photo.badge.plus") {
+                    isImportingImage = true
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .help("添加图片（最多 4 张）")
+                .disabled(attachments.count >= 4 || isThinking)
+
                 Toggle(isOn: $allowsWebSearch) {
                     Label("联网", systemImage: "globe")
                 }
@@ -210,25 +300,69 @@ struct LearningInspector: View {
                 .help("允许这次提问使用 Qwen 网页搜索")
                 Spacer()
                 Button {
-                    askAssistant()
+                    if isThinking {
+                        stopAssistant()
+                    } else {
+                        askAssistant()
+                    }
                 } label: {
                     if isThinking {
-                        ProgressView().controlSize(.small)
+                        Label("停止", systemImage: "stop.fill")
                     } else {
-                        Label("帮我理解", systemImage: "arrow.up")
+                        Label("发送", systemImage: "arrow.up")
                     }
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(SatoriTheme.lavender)
-                .disabled(question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isThinking)
+                .disabled(!isThinking && !canSend)
             }
-            Text(allowsWebSearch ? "发送当前页，并允许 Qwen 搜索网页" : "仅在提问时发送当前 PDF 第 \(pageIndex + 1) 页")
+            Text(composerHint)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(14)
         .background(.bar)
+    }
+
+    private var attachmentStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 9) {
+                ForEach(attachments) { attachment in
+                    ZStack(alignment: .topTrailing) {
+                        Image(nsImage: attachment.preview)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 64, height: 52)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+                            .help(attachment.name)
+                        Button {
+                            attachments.removeAll { $0.id == attachment.id }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .symbolRenderingMode(.palette)
+                                .foregroundStyle(.white, .black.opacity(0.7))
+                        }
+                        .buttonStyle(.plain)
+                        .offset(x: 5, y: -5)
+                        .help("移除 \(attachment.name)")
+                    }
+                    .padding(.top, 5)
+                    .padding(.trailing, 5)
+                }
+            }
+        }
+        .frame(height: 62)
+    }
+
+    private var canSend: Bool {
+        !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isThinking
+    }
+
+    private var composerHint: String {
+        let context = allowsWebSearch ? "会发送当前页、附件并联网" : "只在提问时发送当前页和附件"
+        return "Enter 发送 · Shift+Enter 换行 · \(context)"
     }
 
     private var directoryView: some View {
@@ -266,8 +400,8 @@ struct LearningInspector: View {
         }
     }
 
-    private func askAssistant() {
-        let request = question.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func askAssistant(_ suppliedQuestion: String? = nil) {
+        let request = (suppliedQuestion ?? question).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty else { return }
         guard let configuration = QwenConfigurationStore.read() else {
             hasQwenConfiguration = false
@@ -286,16 +420,49 @@ struct LearningInspector: View {
             )
             return
         }
+        let submittedAttachments = attachments
+        lastQuestion = request
+        lastAttachmentNames = submittedAttachments.map(\.name)
+        question = ""
+        attachments = []
+        attachmentStatus = ""
+        response = LearningResponse(text: "", sourceKind: .currentPDF, pageIndex: pageIndex)
         isThinking = true
         let assistant = QwenLearningAssistant(
             apiKey: configuration.apiKey,
             modelID: configuration.modelID,
             pageContent: pageContent,
+            additionalImagesJPEG: submittedAttachments.map(\.jpegData),
             allowsWebSearch: allowsWebSearch
         )
-        Task {
-            response = await assistant.explain(request: request, pageIndex: pageIndex)
+        requestTask = Task {
+            for await update in assistant.streamExplain(request: request, pageIndex: pageIndex) {
+                if Task.isCancelled { break }
+                response = update
+            }
             isThinking = false
+            requestTask = nil
+        }
+    }
+
+    private func stopAssistant() {
+        requestTask?.cancel()
+        requestTask = nil
+        isThinking = false
+        if response?.text.isEmpty == true {
+            response = LearningResponse(text: "已停止这次回答。", sourceKind: .inference, pageIndex: pageIndex)
+        }
+    }
+
+    private func importImages(_ result: Result<[URL], Error>) {
+        do {
+            let urls = try result.get()
+            let remaining = max(0, 4 - attachments.count)
+            let selected = Array(urls.prefix(remaining))
+            attachments.append(contentsOf: try selected.map(LearningImageAttachmentLoader.load))
+            attachmentStatus = urls.count > remaining ? "每次最多附加 4 张图片，其余图片没有加入。" : ""
+        } catch {
+            attachmentStatus = error.localizedDescription
         }
     }
 }

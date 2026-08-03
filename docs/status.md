@@ -27,6 +27,8 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Current-page text and scanned-page images are connected to the Model Studio compatible Responses API with `store: false`
 - The saved model preference defaults to `qwen3.8-max`, with `qwen3.7-plus` and `qwen3.7-flash` available as balanced and efficient choices
 - Optional per-question web search with returned URL citations
+- Enter-to-send learning composer with Shift+Enter line breaks, one-click quick prompts, and a cancellable streaming answer card
+- Up to four removable local image attachments per question, resized and JPEG-compressed on device before the request and not persisted
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 

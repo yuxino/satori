@@ -25,6 +25,8 @@
 - 自动保存阅读位置
 - 同一课程内切换、替换或移除 PDF；不会删除电脑上的原文件
 - 当前页文字或扫描图像可通过阿里云百炼 Qwen 获得解释
+- 提问支持 Enter 发送、Shift+Enter 换行，并可临时附加最多 4 张本地图片
+- Qwen 回答会实时流式显示，可随时停止并保留已经生成的内容
 - 可按单次问题主动启用网页搜索，并显示返回的网页来源
 - 百炼 API Key 只保存在 macOS 钥匙串；北京地域的连接地址由 Satori 内置
 
@@ -37,6 +39,8 @@
 默认使用当前高能力档的 `qwen3.8-max`；也可以在设置里改为更均衡的 `qwen3.7-plus` 或更节省的 `qwen3.7-flash`。模型选择保存在本机，API Key 只进入 macOS 钥匙串。
 
 获取方式见[百炼 API Key 官方文档](https://help.aliyun.com/zh/model-studio/get-api-key/)；内置地址依据[百炼 Base URL 总览](https://help.aliyun.com/zh/model-studio/base-url)。密钥不会写入仓库，也不要通过聊天、截图或提交记录分享。
+
+提问始终会带上当前 PDF 页；你选择的附图会先在本机缩放压缩，只在本次提问时发给 Qwen，不会进入项目资料库或写入 Git。
 
 ## 从源码运行
 

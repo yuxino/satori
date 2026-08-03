@@ -32,7 +32,7 @@ struct SatoriCoreTests {
             transport: FixtureAssistantTransport(
                 expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
                 expectedModelID: "qwen3.8-max",
-                expectsImage: false,
+                expectedImageCount: 0,
                 expectsWebSearch: true
             )
         ).explain(request: "解释这一页", pageIndex: 2)
@@ -48,11 +48,31 @@ struct SatoriCoreTests {
             transport: FixtureAssistantTransport(
                 expectedEndpoint: "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/responses",
                 expectedModelID: "qwen3.7-plus",
-                expectsImage: true,
+                expectedImageCount: 1,
                 expectsWebSearch: false
             )
         ).explain(request: "解释扫描页", pageIndex: 4)
         precondition(imageResponse.text == "fixture explanation", "Expected scanned-page output text")
+
+        let streamingAssistant = QwenLearningAssistant(
+            apiKey: "fixture-key",
+            pageContent: .text("fixture page text"),
+            additionalImagesJPEG: [Data([0xFF, 0xD8, 0xFF])],
+            allowsWebSearch: true,
+            transport: FixtureAssistantTransport(
+                expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
+                expectedModelID: "qwen3.8-max",
+                expectedImageCount: 1,
+                expectsWebSearch: true
+            )
+        )
+        var streamUpdates: [LearningResponse] = []
+        for await update in streamingAssistant.streamExplain(request: "结合附图解释", pageIndex: 5) {
+            streamUpdates.append(update)
+        }
+        precondition(streamUpdates.first?.text == "fixture ", "Expected first streaming text delta")
+        precondition(streamUpdates.last?.text == "fixture explanation", "Expected assembled streaming response")
+        precondition(streamUpdates.last?.citations.first?.url.absoluteString == "https://example.com/source", "Expected final streaming citations")
         print("Satori core checks passed")
     }
 }
@@ -67,30 +87,53 @@ private enum TestError: Error { case missingValue }
 private struct FixtureAssistantTransport: AssistantTransport {
     let expectedEndpoint: String
     let expectedModelID: String
-    let expectsImage: Bool
+    let expectedImageCount: Int
     let expectsWebSearch: Bool
 
     func send(_ request: URLRequest) async throws -> AssistantTransportResponse {
+        try validate(request, expectsStreaming: false)
+
+        return AssistantTransportResponse(data: Data(Self.completedResponse.utf8), statusCode: 200)
+    }
+
+    func stream(_ request: URLRequest) -> AsyncThrowingStream<Data, Error> {
+        AsyncThrowingStream { continuation in
+            do {
+                try validate(request, expectsStreaming: true)
+                [
+                    #"{"type":"response.output_text.delta","delta":"fixture "}"#,
+                    #"{"type":"response.output_text.delta","delta":"explanation"}"#,
+                    #"{"type":"response.completed","response":\#(Self.completedResponse)}"#
+                ].forEach { continuation.yield(Data($0.utf8)) }
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+    }
+
+    private func validate(_ request: URLRequest, expectsStreaming: Bool) throws {
         precondition(request.url?.absoluteString == expectedEndpoint, "Expected Responses endpoint")
         precondition(request.value(forHTTPHeaderField: "Authorization") == "Bearer fixture-key", "Expected bearer authentication")
         let body = try XCTUnwrap(request.httpBody)
         let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
         precondition(json["model"] as? String == expectedModelID, "Expected configured Qwen learning model")
         precondition(json["store"] as? Bool == false, "Expected response storage to be disabled")
+        precondition(json["stream"] as? Bool == expectsStreaming, "Expected configured streaming mode")
         let tools = json["tools"] as? [[String: String]]
         precondition((tools?.first?["type"] == "web_search") == expectsWebSearch, "Expected opt-in web search behavior")
 
         let input = try XCTUnwrap(json["input"] as? [[String: Any]])
         let content = try XCTUnwrap(input.first?["content"] as? [[String: Any]])
-        if expectsImage {
-            precondition(content.first?["type"] as? String == "input_image", "Expected scanned page image input")
-            let imageURL = content.first?["image_url"] as? String
-            precondition(imageURL?.hasPrefix("data:image/jpeg;base64,") == true, "Expected Base64 JPEG data URL")
-        } else {
+        let images = content.filter { $0["type"] as? String == "input_image" }
+        precondition(images.count == expectedImageCount, "Expected page and attachment image inputs")
+        precondition(images.allSatisfy { ($0["image_url"] as? String)?.hasPrefix("data:image/jpeg;base64,") == true }, "Expected Base64 JPEG data URLs")
+        if expectedImageCount == 0 {
             precondition(content.first?["type"] as? String == "input_text", "Expected extracted PDF text input")
         }
+    }
 
-        let fixture = """
+    private static let completedResponse = """
         {
           "output": [{
             "type": "web_search_call",
@@ -113,6 +156,4 @@ private struct FixtureAssistantTransport: AssistantTransport {
           }]
         }
         """
-        return AssistantTransportResponse(data: Data(fixture.utf8), statusCode: 200)
-    }
 }
