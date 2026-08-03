@@ -19,7 +19,7 @@ struct LearningInspector: View {
     @State private var question = ""
     @State private var response: LearningResponse?
     @State private var isThinking = false
-    @State private var hasAPIKey = false
+    @State private var hasQwenConfiguration = false
     @State private var allowsWebSearch = false
 
     private let quickPrompts = [
@@ -41,9 +41,12 @@ struct LearningInspector: View {
             }
         }
         .background(Color(nsColor: .controlBackgroundColor))
-        .onAppear { hasAPIKey = OpenAIKeyStore.read()?.isEmpty == false }
+        .onAppear { hasQwenConfiguration = QwenConfigurationStore.read() != nil }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { hasAPIKey = OpenAIKeyStore.read()?.isEmpty == false }
+            if phase == .active { hasQwenConfiguration = QwenConfigurationStore.read() != nil }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .qwenConfigurationDidChange)) { _ in
+            hasQwenConfiguration = QwenConfigurationStore.read() != nil
         }
     }
 
@@ -144,8 +147,8 @@ struct LearningInspector: View {
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(.quaternary))
             }
 
-            if !hasAPIKey {
-                Button("连接 OpenAI", systemImage: "key") { openSettings() }
+            if !hasQwenConfiguration {
+                Button("连接 Qwen", systemImage: "key") { openSettings() }
                     .buttonStyle(.bordered)
                     .tint(SatoriTheme.lavender)
             }
@@ -204,7 +207,7 @@ struct LearningInspector: View {
                 }
                 .toggleStyle(.button)
                 .controlSize(.small)
-                .help("允许这次提问使用 OpenAI 网页搜索")
+                .help("允许这次提问使用 Qwen 网页搜索")
                 Spacer()
                 Button {
                     askAssistant()
@@ -219,7 +222,7 @@ struct LearningInspector: View {
                 .tint(SatoriTheme.lavender)
                 .disabled(question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isThinking)
             }
-            Text(allowsWebSearch ? "发送当前页，并允许 OpenAI 搜索网页" : "仅在提问时发送当前 PDF 第 \(pageIndex + 1) 页")
+            Text(allowsWebSearch ? "发送当前页，并允许 Qwen 搜索网页" : "仅在提问时发送当前 PDF 第 \(pageIndex + 1) 页")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -266,10 +269,10 @@ struct LearningInspector: View {
     private func askAssistant() {
         let request = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty else { return }
-        guard let apiKey = OpenAIKeyStore.read(), !apiKey.isEmpty else {
-            hasAPIKey = false
+        guard let configuration = QwenConfigurationStore.read() else {
+            hasQwenConfiguration = false
             response = LearningResponse(
-                text: "请先在设置中连接 OpenAI。API Key 只会保存在 macOS 钥匙串中。",
+                text: "请先在设置中连接 Qwen。百炼 API Key 只会保存在 macOS 钥匙串中。",
                 sourceKind: .inference,
                 pageIndex: pageIndex
             )
@@ -284,8 +287,9 @@ struct LearningInspector: View {
             return
         }
         isThinking = true
-        let assistant = OpenAILearningAssistant(
-            apiKey: apiKey,
+        let assistant = QwenLearningAssistant(
+            apiKey: configuration.apiKey,
+            apiHost: configuration.apiHost,
             pageContent: pageContent,
             allowsWebSearch: allowsWebSearch
         )

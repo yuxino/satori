@@ -16,8 +16,8 @@ Satori is a local-first macOS learning workspace. Its primary job is to help a l
 - Build for macOS only unless the user explicitly expands scope.
 - Keep study files, reading position, project structure, and learning history local by default.
 - Do not add source PDFs to Git. Store file bookmarks or local references instead.
-- Treat OpenAI as an on-demand reasoning/search service, not as file hosting.
-- Store a user-supplied OpenAI API key in macOS Keychain. Do not add plaintext key files or environment-variable fallbacks.
+- Treat Alibaba Cloud Model Studio Qwen as an on-demand reasoning/search service, not as file hosting.
+- Store a user-supplied Model Studio API key in macOS Keychain and its API Host as a local preference. Do not add plaintext key files or environment-variable fallbacks.
 
 ## Engineering rules
 

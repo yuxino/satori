@@ -14,7 +14,7 @@ struct SatoriApp: App {
         .windowStyle(.automatic)
 
         Settings {
-            OpenAISettingsView()
+            QwenSettingsView()
         }
     }
 }

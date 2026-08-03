@@ -25,15 +25,24 @@ struct SatoriCoreTests {
         let response = await UnconfiguredLearningAssistant().explain(request: "解释", pageIndex: 7)
         precondition(response.sourceKind == .inference, "Expected explicit source label")
 
-        let apiResponse = await OpenAILearningAssistant(
+        let apiResponse = await QwenLearningAssistant(
             apiKey: "fixture-key",
+            apiHost: URL(string: "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")!,
             pageContent: .text("fixture page text"),
             allowsWebSearch: true,
-            transport: FixtureOpenAITransport()
+            transport: FixtureAssistantTransport(expectsImage: false, expectsWebSearch: true)
         ).explain(request: "解释这一页", pageIndex: 2)
         precondition(apiResponse.text == "fixture explanation", "Expected Responses API output text")
         precondition(apiResponse.sourceKind == .web, "Expected web source label when citations are returned")
         precondition(apiResponse.citations.first?.url.absoluteString == "https://example.com/source", "Expected URL citation")
+
+        let imageResponse = await QwenLearningAssistant(
+            apiKey: "fixture-key",
+            apiHost: URL(string: "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/")!,
+            pageContent: .imageJPEG(Data([0xFF, 0xD8, 0xFF])),
+            transport: FixtureAssistantTransport(expectsImage: true, expectsWebSearch: false)
+        ).explain(request: "解释扫描页", pageIndex: 4)
+        precondition(imageResponse.text == "fixture explanation", "Expected scanned-page output text")
         print("Satori core checks passed")
     }
 }
@@ -45,31 +54,53 @@ private func XCTUnwrap<T>(_ value: T?) throws -> T {
 
 private enum TestError: Error { case missingValue }
 
-private struct FixtureOpenAITransport: OpenAITransport {
-    func send(_ request: URLRequest) async throws -> OpenAITransportResponse {
+private struct FixtureAssistantTransport: AssistantTransport {
+    let expectsImage: Bool
+    let expectsWebSearch: Bool
+
+    func send(_ request: URLRequest) async throws -> AssistantTransportResponse {
+        precondition(request.url?.absoluteString == "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/responses", "Expected workspace Responses endpoint")
+        precondition(request.value(forHTTPHeaderField: "Authorization") == "Bearer fixture-key", "Expected bearer authentication")
         let body = try XCTUnwrap(request.httpBody)
         let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
-        precondition(json["model"] as? String == "gpt-5.6-terra", "Expected balanced learning model")
+        precondition(json["model"] as? String == "qwen3.7-plus", "Expected multimodal Qwen learning model")
         precondition(json["store"] as? Bool == false, "Expected response storage to be disabled")
         let tools = json["tools"] as? [[String: String]]
-        precondition(tools?.first?["type"] == "web_search", "Expected opt-in web search tool")
+        precondition((tools?.first?["type"] == "web_search") == expectsWebSearch, "Expected opt-in web search behavior")
+
+        let input = try XCTUnwrap(json["input"] as? [[String: Any]])
+        let content = try XCTUnwrap(input.first?["content"] as? [[String: Any]])
+        if expectsImage {
+            precondition(content.first?["type"] as? String == "input_image", "Expected scanned page image input")
+            let imageURL = content.first?["image_url"] as? String
+            precondition(imageURL?.hasPrefix("data:image/jpeg;base64,") == true, "Expected Base64 JPEG data URL")
+        } else {
+            precondition(content.first?["type"] as? String == "input_text", "Expected extracted PDF text input")
+        }
 
         let fixture = """
         {
           "output": [{
+            "type": "web_search_call",
+            "status": "completed",
+            "action": {
+              "type": "search",
+              "query": "fixture query",
+              "sources": [{
+                "type": "url",
+                "url": "https://example.com/source"
+              }]
+            }
+          }, {
             "type": "message",
             "content": [{
               "type": "output_text",
               "text": "fixture explanation",
-              "annotations": [{
-                "type": "url_citation",
-                "title": "Fixture source",
-                "url": "https://example.com/source"
-              }]
+              "annotations": []
             }]
           }]
         }
         """
-        return OpenAITransportResponse(data: Data(fixture.utf8), statusCode: 200)
+        return AssistantTransportResponse(data: Data(fixture.utf8), statusCode: 200)
     }
 }

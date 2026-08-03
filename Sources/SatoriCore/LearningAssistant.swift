@@ -47,7 +47,7 @@ public enum LearningPageContent: Sendable, Equatable {
     case imageJPEG(Data)
 }
 
-public struct OpenAITransportResponse: Sendable {
+public struct AssistantTransportResponse: Sendable {
     public let data: Data
     public let statusCode: Int
 
@@ -57,8 +57,8 @@ public struct OpenAITransportResponse: Sendable {
     }
 }
 
-public protocol OpenAITransport: Sendable {
-    func send(_ request: URLRequest) async throws -> OpenAITransportResponse
+public protocol AssistantTransport: Sendable {
+    func send(_ request: URLRequest) async throws -> AssistantTransportResponse
 }
 
 public protocol LearningAssistant: Sendable {
@@ -70,34 +70,38 @@ public struct UnconfiguredLearningAssistant: LearningAssistant {
 
     public func explain(request: String, pageIndex: Int?) async -> LearningResponse {
         LearningResponse(
-            text: "AI 理解助手尚未配置 OpenAI API Key。Satori 已保留你的阅读位置；配置后，这里会优先结合当前 PDF 的页码解释问题。",
+            text: "AI 理解助手尚未配置百炼 API Key 和 API Host。Satori 已保留你的阅读位置；配置后，这里会优先结合当前 PDF 的页码解释问题。",
             sourceKind: .inference,
             pageIndex: pageIndex
         )
     }
 }
 
-public struct OpenAILearningAssistant: LearningAssistant {
+public struct QwenLearningAssistant: LearningAssistant {
     private let apiKey: String
+    private let apiHost: URL
     private let pageContent: LearningPageContent
     private let allowsWebSearch: Bool
-    private let transport: any OpenAITransport
+    private let transport: any AssistantTransport
 
     public init(
         apiKey: String,
+        apiHost: URL,
         pageContent: LearningPageContent,
         allowsWebSearch: Bool = false,
-        transport: (any OpenAITransport)? = nil
+        transport: (any AssistantTransport)? = nil
     ) {
         self.apiKey = apiKey
+        self.apiHost = apiHost
         self.pageContent = pageContent
         self.allowsWebSearch = allowsWebSearch
-        self.transport = transport ?? URLSessionOpenAITransport()
+        self.transport = transport ?? URLSessionAssistantTransport()
     }
 
     public func explain(request: String, pageIndex: Int?) async -> LearningResponse {
         do {
-            var urlRequest = URLRequest(url: URL(string: "https://api.openai.com/v1/responses")!)
+            let endpoint = apiHost.appending(path: "responses")
+            var urlRequest = URLRequest(url: endpoint)
             urlRequest.httpMethod = "POST"
             urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -106,7 +110,7 @@ public struct OpenAILearningAssistant: LearningAssistant {
             let transportResponse = try await transport.send(urlRequest)
             guard (200..<300).contains(transportResponse.statusCode) else {
                 let apiError = try? JSONDecoder().decode(APIErrorEnvelope.self, from: transportResponse.data)
-                throw AssistantError.api(apiError?.error.message ?? "OpenAI 返回了错误 \(transportResponse.statusCode)")
+                throw AssistantError.api(apiError?.error.message ?? "百炼返回了错误 \(transportResponse.statusCode)")
             }
 
             let envelope = try JSONDecoder().decode(ResponsesEnvelope.self, from: transportResponse.data)
@@ -122,6 +126,13 @@ public struct OpenAILearningAssistant: LearningAssistant {
                           let url = URL(string: urlString) else { return nil }
                     return LearningCitation(title: annotation.title ?? url.host() ?? urlString, url: url)
                 }
+                + envelope.output
+                    .compactMap(\.action)
+                    .flatMap(\.sources)
+                    .compactMap { source -> LearningCitation? in
+                        guard let url = URL(string: source.url) else { return nil }
+                        return LearningCitation(title: url.host() ?? source.url, url: url)
+                    }
 
             return LearningResponse(
                 text: text,
@@ -143,18 +154,17 @@ public struct OpenAILearningAssistant: LearningAssistant {
         let context: InputContent
         switch pageContent {
         case let .text(text):
-            context = .init(type: "input_text", text: "用户正在阅读 PDF 第 \(pageNumber) 页。\n\n当前页原文：\n\(text)", imageURL: nil, detail: nil)
+            context = .init(type: "input_text", text: "用户正在阅读 PDF 第 \(pageNumber) 页。\n\n当前页原文：\n\(text)", imageURL: nil)
         case let .imageJPEG(data):
             context = .init(
                 type: "input_image",
                 text: nil,
-                imageURL: "data:image/jpeg;base64,\(data.base64EncodedString())",
-                detail: "auto"
+                imageURL: "data:image/jpeg;base64,\(data.base64EncodedString())"
             )
         }
 
         return ResponsesRequest(
-            model: "gpt-5.6-terra",
+            model: "qwen3.7-plus",
             instructions: """
             你是 Satori 的学习理解助手。默认使用简体中文，直接回答问题。
             优先依据用户提供的当前 PDF 页面；不要假装看到了未提供的页面。
@@ -165,11 +175,9 @@ public struct OpenAILearningAssistant: LearningAssistant {
             input: [
                 .init(role: "user", content: [
                     context,
-                    .init(type: "input_text", text: "我的问题：\(question)", imageURL: nil, detail: nil)
+                    .init(type: "input_text", text: "我的问题：\(question)", imageURL: nil)
                 ])
             ],
-            reasoning: .init(effort: "low"),
-            text: .init(verbosity: "medium"),
             tools: allowsWebSearch ? [.init(type: "web_search")] : nil,
             store: false,
             maxOutputTokens: 1400
@@ -182,13 +190,13 @@ public struct OpenAILearningAssistant: LearningAssistant {
     }
 }
 
-private struct URLSessionOpenAITransport: OpenAITransport {
-    func send(_ request: URLRequest) async throws -> OpenAITransportResponse {
+private struct URLSessionAssistantTransport: AssistantTransport {
+    func send(_ request: URLRequest) async throws -> AssistantTransportResponse {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw AssistantError.invalidResponse
         }
-        return OpenAITransportResponse(data: data, statusCode: httpResponse.statusCode)
+        return AssistantTransportResponse(data: data, statusCode: httpResponse.statusCode)
     }
 }
 
@@ -196,14 +204,12 @@ private struct ResponsesRequest: Encodable {
     let model: String
     let instructions: String
     let input: [InputMessage]
-    let reasoning: Reasoning
-    let text: TextOptions
     let tools: [Tool]?
     let store: Bool
     let maxOutputTokens: Int
 
     enum CodingKeys: String, CodingKey {
-        case model, instructions, input, reasoning, text, tools, store
+        case model, instructions, input, tools, store
         case maxOutputTokens = "max_output_tokens"
     }
 }
@@ -217,16 +223,13 @@ private struct InputContent: Encodable {
     let type: String
     let text: String?
     let imageURL: String?
-    let detail: String?
 
     enum CodingKeys: String, CodingKey {
-        case type, text, detail
+        case type, text
         case imageURL = "image_url"
     }
 }
 
-private struct Reasoning: Encodable { let effort: String }
-private struct TextOptions: Encodable { let verbosity: String }
 private struct Tool: Encodable { let type: String }
 
 private struct ResponsesEnvelope: Decodable {
@@ -235,13 +238,30 @@ private struct ResponsesEnvelope: Decodable {
 
 private struct OutputItem: Decodable {
     let content: [OutputContent]
+    let action: WebSearchAction?
 
-    enum CodingKeys: String, CodingKey { case content }
+    enum CodingKeys: String, CodingKey { case content, action }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         content = try container.decodeIfPresent([OutputContent].self, forKey: .content) ?? []
+        action = try container.decodeIfPresent(WebSearchAction.self, forKey: .action)
     }
+}
+
+private struct WebSearchAction: Decodable {
+    let sources: [WebSearchSource]
+
+    enum CodingKeys: String, CodingKey { case sources }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sources = try container.decodeIfPresent([WebSearchSource].self, forKey: .sources) ?? []
+    }
+}
+
+private struct WebSearchSource: Decodable {
+    let url: String
 }
 
 private struct OutputContent: Decodable {
@@ -275,8 +295,8 @@ private enum AssistantError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidResponse: "OpenAI 返回了无法识别的响应。"
-        case .emptyOutput: "OpenAI 没有返回可显示的文字。"
+        case .invalidResponse: "百炼返回了无法识别的响应。"
+        case .emptyOutput: "Qwen 没有返回可显示的文字。"
         case let .api(message): message
         }
     }

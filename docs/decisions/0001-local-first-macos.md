@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted - 2026-08-03
+Accepted - 2026-08-03; AI provider portion superseded by [0002](0002-qwen-model-studio.md) on 2026-08-04
 
 ## Context
 

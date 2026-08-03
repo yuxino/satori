@@ -10,7 +10,7 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Platform: macOS only
 - Product focus: PDF understanding rather than compulsory note-taking
 - Initial plan: Advanced Programming, Software Engineering, and Operating Systems
-- Storage: local-first; OpenAI is used on demand for reasoning and search
+- Storage: local-first; Alibaba Cloud Model Studio Qwen is used on demand for reasoning and search
 - Toolchain: native Swift Package Manager app, following the user's `mimi` and `kiri` projects
 
 ## Completed in the first build
@@ -22,9 +22,9 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Persisted page-based reading position
 - Always-visible current/total page indicator with previous, next, and direct page jump controls
 - Per-course PDF menu for switching, replacing, or removing an incorrect import without deleting the original file
-- Keychain-only OpenAI API-key settings screen; no plaintext key path
+- Keychain-only Model Studio API-key settings plus a local API Host preference; no plaintext key path
 - A visible AI assistant boundary that labels its current response source
-- Current-page text and scanned-page images are connected to the OpenAI Responses API with `store: false`
+- Current-page text and scanned-page images are connected to the Model Studio compatible Responses API using `qwen3.7-plus` with `store: false`
 - Optional per-question web search with returned URL citations
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
