@@ -24,12 +24,14 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Per-course PDF menu for switching, replacing, or removing an incorrect import without deleting the original file
 - Keychain-only OpenAI API-key settings screen; no plaintext key path
 - A visible AI assistant boundary that labels its current response source
+- Current-page text and scanned-page images are connected to the OpenAI Responses API with `store: false`
+- Optional per-question web search with returned URL citations
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 
 ## Next milestone
 
-Connect the assistant boundary to the OpenAI Responses API after the user supplies an API key, then add OCR-based editable table-of-contents extraction and source/URL/code attachments.
+Add OCR-based editable table-of-contents extraction and source/URL/code attachments, then persist multi-turn learning conversations.
 
 ## Open questions
 

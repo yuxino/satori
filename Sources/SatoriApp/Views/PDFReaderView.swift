@@ -17,6 +17,8 @@ struct PDFReaderView: NSViewRepresentable {
         view.autoScales = true
         view.displayMode = .singlePageContinuous
         view.displayDirection = .vertical
+        view.backgroundColor = .underPageBackgroundColor
+        view.pageShadowsEnabled = true
         view.document = PDFDocument(url: url)
         if let page = view.document?.page(at: initialPosition.pageIndex) { view.go(to: page) }
         context.coordinator.observe(view)

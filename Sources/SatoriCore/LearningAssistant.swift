@@ -20,12 +20,45 @@ public struct LearningResponse: Sendable, Equatable {
     public var text: String
     public var sourceKind: LearningSourceKind
     public var pageIndex: Int?
+    public var citations: [LearningCitation]
 
-    public init(text: String, sourceKind: LearningSourceKind, pageIndex: Int? = nil) {
+    public init(text: String, sourceKind: LearningSourceKind, pageIndex: Int? = nil, citations: [LearningCitation] = []) {
         self.text = text
         self.sourceKind = sourceKind
         self.pageIndex = pageIndex
+        self.citations = citations
     }
+}
+
+public struct LearningCitation: Sendable, Equatable, Identifiable {
+    public let id: UUID
+    public var title: String
+    public var url: URL
+
+    public init(id: UUID = UUID(), title: String, url: URL) {
+        self.id = id
+        self.title = title
+        self.url = url
+    }
+}
+
+public enum LearningPageContent: Sendable, Equatable {
+    case text(String)
+    case imageJPEG(Data)
+}
+
+public struct OpenAITransportResponse: Sendable {
+    public let data: Data
+    public let statusCode: Int
+
+    public init(data: Data, statusCode: Int) {
+        self.data = data
+        self.statusCode = statusCode
+    }
+}
+
+public protocol OpenAITransport: Sendable {
+    func send(_ request: URLRequest) async throws -> OpenAITransportResponse
 }
 
 public protocol LearningAssistant: Sendable {
@@ -41,5 +74,210 @@ public struct UnconfiguredLearningAssistant: LearningAssistant {
             sourceKind: .inference,
             pageIndex: pageIndex
         )
+    }
+}
+
+public struct OpenAILearningAssistant: LearningAssistant {
+    private let apiKey: String
+    private let pageContent: LearningPageContent
+    private let allowsWebSearch: Bool
+    private let transport: any OpenAITransport
+
+    public init(
+        apiKey: String,
+        pageContent: LearningPageContent,
+        allowsWebSearch: Bool = false,
+        transport: (any OpenAITransport)? = nil
+    ) {
+        self.apiKey = apiKey
+        self.pageContent = pageContent
+        self.allowsWebSearch = allowsWebSearch
+        self.transport = transport ?? URLSessionOpenAITransport()
+    }
+
+    public func explain(request: String, pageIndex: Int?) async -> LearningResponse {
+        do {
+            var urlRequest = URLRequest(url: URL(string: "https://api.openai.com/v1/responses")!)
+            urlRequest.httpMethod = "POST"
+            urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            urlRequest.httpBody = try JSONEncoder().encode(makeRequest(question: request, pageIndex: pageIndex))
+
+            let transportResponse = try await transport.send(urlRequest)
+            guard (200..<300).contains(transportResponse.statusCode) else {
+                let apiError = try? JSONDecoder().decode(APIErrorEnvelope.self, from: transportResponse.data)
+                throw AssistantError.api(apiError?.error.message ?? "OpenAI 返回了错误 \(transportResponse.statusCode)")
+            }
+
+            let envelope = try JSONDecoder().decode(ResponsesEnvelope.self, from: transportResponse.data)
+            let contents = envelope.output.flatMap(\.content)
+            let text = contents.compactMap(\.text).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { throw AssistantError.emptyOutput }
+
+            let citations = contents
+                .flatMap(\.annotations)
+                .compactMap { annotation -> LearningCitation? in
+                    guard annotation.type == "url_citation",
+                          let urlString = annotation.url,
+                          let url = URL(string: urlString) else { return nil }
+                    return LearningCitation(title: annotation.title ?? url.host() ?? urlString, url: url)
+                }
+
+            return LearningResponse(
+                text: text,
+                sourceKind: citations.isEmpty ? .currentPDF : .web,
+                pageIndex: pageIndex,
+                citations: uniqueCitations(citations)
+            )
+        } catch {
+            return LearningResponse(
+                text: "暂时没能完成解释：\(error.localizedDescription)",
+                sourceKind: .inference,
+                pageIndex: pageIndex
+            )
+        }
+    }
+
+    private func makeRequest(question: String, pageIndex: Int?) -> ResponsesRequest {
+        let pageNumber = (pageIndex ?? 0) + 1
+        let context: InputContent
+        switch pageContent {
+        case let .text(text):
+            context = .init(type: "input_text", text: "用户正在阅读 PDF 第 \(pageNumber) 页。\n\n当前页原文：\n\(text)", imageURL: nil, detail: nil)
+        case let .imageJPEG(data):
+            context = .init(
+                type: "input_image",
+                text: nil,
+                imageURL: "data:image/jpeg;base64,\(data.base64EncodedString())",
+                detail: "auto"
+            )
+        }
+
+        return ResponsesRequest(
+            model: "gpt-5.6-terra",
+            instructions: """
+            你是 Satori 的学习理解助手。默认使用简体中文，直接回答问题。
+            优先依据用户提供的当前 PDF 页面；不要假装看到了未提供的页面。
+            回答依次包含“原文依据”“解释”；只有确实超出原文时才增加“补充推断”，并明确标注。
+            原文依据要短，不要大段复述。解释应帮助用户建立概念联系，可以给一个具体例子。
+            如果页面信息不足，直接说明缺少什么。不要要求用户做笔记或背诵。
+            """,
+            input: [
+                .init(role: "user", content: [
+                    context,
+                    .init(type: "input_text", text: "我的问题：\(question)", imageURL: nil, detail: nil)
+                ])
+            ],
+            reasoning: .init(effort: "low"),
+            text: .init(verbosity: "medium"),
+            tools: allowsWebSearch ? [.init(type: "web_search")] : nil,
+            store: false,
+            maxOutputTokens: 1400
+        )
+    }
+
+    private func uniqueCitations(_ citations: [LearningCitation]) -> [LearningCitation] {
+        var seen = Set<URL>()
+        return citations.filter { seen.insert($0.url).inserted }
+    }
+}
+
+private struct URLSessionOpenAITransport: OpenAITransport {
+    func send(_ request: URLRequest) async throws -> OpenAITransportResponse {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AssistantError.invalidResponse
+        }
+        return OpenAITransportResponse(data: data, statusCode: httpResponse.statusCode)
+    }
+}
+
+private struct ResponsesRequest: Encodable {
+    let model: String
+    let instructions: String
+    let input: [InputMessage]
+    let reasoning: Reasoning
+    let text: TextOptions
+    let tools: [Tool]?
+    let store: Bool
+    let maxOutputTokens: Int
+
+    enum CodingKeys: String, CodingKey {
+        case model, instructions, input, reasoning, text, tools, store
+        case maxOutputTokens = "max_output_tokens"
+    }
+}
+
+private struct InputMessage: Encodable {
+    let role: String
+    let content: [InputContent]
+}
+
+private struct InputContent: Encodable {
+    let type: String
+    let text: String?
+    let imageURL: String?
+    let detail: String?
+
+    enum CodingKeys: String, CodingKey {
+        case type, text, detail
+        case imageURL = "image_url"
+    }
+}
+
+private struct Reasoning: Encodable { let effort: String }
+private struct TextOptions: Encodable { let verbosity: String }
+private struct Tool: Encodable { let type: String }
+
+private struct ResponsesEnvelope: Decodable {
+    let output: [OutputItem]
+}
+
+private struct OutputItem: Decodable {
+    let content: [OutputContent]
+
+    enum CodingKeys: String, CodingKey { case content }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        content = try container.decodeIfPresent([OutputContent].self, forKey: .content) ?? []
+    }
+}
+
+private struct OutputContent: Decodable {
+    let text: String?
+    let annotations: [OutputAnnotation]
+
+    enum CodingKeys: String, CodingKey { case text, annotations }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decodeIfPresent(String.self, forKey: .text)
+        annotations = try container.decodeIfPresent([OutputAnnotation].self, forKey: .annotations) ?? []
+    }
+}
+
+private struct OutputAnnotation: Decodable {
+    let type: String
+    let title: String?
+    let url: String?
+}
+
+private struct APIErrorEnvelope: Decodable {
+    struct APIError: Decodable { let message: String }
+    let error: APIError
+}
+
+private enum AssistantError: LocalizedError {
+    case invalidResponse
+    case emptyOutput
+    case api(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidResponse: "OpenAI 返回了无法识别的响应。"
+        case .emptyOutput: "OpenAI 没有返回可显示的文字。"
+        case let .api(message): message
+        }
     }
 }

@@ -9,7 +9,7 @@ struct SatoriApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(store)
-                .frame(minWidth: 980, minHeight: 680)
+                .frame(minWidth: 1120, minHeight: 720)
         }
         .windowStyle(.automatic)
 

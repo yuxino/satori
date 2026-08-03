@@ -15,5 +15,6 @@ struct ContentView: View {
                 ContentUnavailableView("选择一门课程", systemImage: "books.vertical", description: Text("从左侧开始你的学习项目。"))
             }
         }
+        .navigationSplitViewStyle(.balanced)
     }
 }

@@ -24,6 +24,16 @@ struct SatoriCoreTests {
 
         let response = await UnconfiguredLearningAssistant().explain(request: "解释", pageIndex: 7)
         precondition(response.sourceKind == .inference, "Expected explicit source label")
+
+        let apiResponse = await OpenAILearningAssistant(
+            apiKey: "fixture-key",
+            pageContent: .text("fixture page text"),
+            allowsWebSearch: true,
+            transport: FixtureOpenAITransport()
+        ).explain(request: "解释这一页", pageIndex: 2)
+        precondition(apiResponse.text == "fixture explanation", "Expected Responses API output text")
+        precondition(apiResponse.sourceKind == .web, "Expected web source label when citations are returned")
+        precondition(apiResponse.citations.first?.url.absoluteString == "https://example.com/source", "Expected URL citation")
         print("Satori core checks passed")
     }
 }
@@ -34,3 +44,32 @@ private func XCTUnwrap<T>(_ value: T?) throws -> T {
 }
 
 private enum TestError: Error { case missingValue }
+
+private struct FixtureOpenAITransport: OpenAITransport {
+    func send(_ request: URLRequest) async throws -> OpenAITransportResponse {
+        let body = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        precondition(json["model"] as? String == "gpt-5.6-terra", "Expected balanced learning model")
+        precondition(json["store"] as? Bool == false, "Expected response storage to be disabled")
+        let tools = json["tools"] as? [[String: String]]
+        precondition(tools?.first?["type"] == "web_search", "Expected opt-in web search tool")
+
+        let fixture = """
+        {
+          "output": [{
+            "type": "message",
+            "content": [{
+              "type": "output_text",
+              "text": "fixture explanation",
+              "annotations": [{
+                "type": "url_citation",
+                "title": "Fixture source",
+                "url": "https://example.com/source"
+              }]
+            }]
+          }]
+        }
+        """
+        return OpenAITransportResponse(data: Data(fixture.utf8), statusCode: 200)
+    }
+}
