@@ -21,6 +21,6 @@ Satori is a local-first macOS learning workspace. Its primary job is to help a l
 
 ## Engineering rules
 
-- Prefer native SwiftUI, PDFKit, and SwiftData before introducing third-party dependencies.
+- Follow the established `mimi`/`kiri` pattern: native Swift Package Manager app, SwiftUI, PDFKit, and local JSON persistence before introducing third-party dependencies or an Xcode project.
 - Add tests for new persistence and parsing behavior; visually check material UI changes.
 - Make small, focused commits. Do not stage unrelated files.

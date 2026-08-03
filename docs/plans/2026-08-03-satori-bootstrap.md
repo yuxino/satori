@@ -2,25 +2,25 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Create the first runnable macOS shell for a local-first PDF understanding workspace.
+**Goal:** Create the first runnable macOS shell for a local-first PDF understanding workspace, using the same Swift Package Manager workflow as `mimi` and `kiri`.
 
-**Architecture:** A native SwiftUI app owns local learning-plan data through SwiftData. PDFKit renders PDFs and supplies page coordinates for restoring reading position. AI and OCR are isolated behind protocols so the app shell remains usable before API configuration.
+**Architecture:** A native SwiftUI app owns local learning-plan data through a versioned JSON store. PDFKit renders PDFs and supplies page coordinates for restoring reading position. AI and OCR are isolated behind protocols so the app shell remains usable before API configuration.
 
-**Tech Stack:** Swift 6, SwiftUI, SwiftData, PDFKit, XCTest, macOS Keychain.
+**Tech Stack:** Swift 6, SwiftUI, PDFKit, Swift Package Manager, local JSON persistence, macOS Keychain.
 
 ---
 
 ### Task 1: Create the macOS app target
 
 **Files:**
-- Create: `Satori.xcodeproj`
-- Create: `Satori/SatoriApp.swift`
-- Create: `Satori/ContentView.swift`
-- Create: `SatoriTests/SatoriTests.swift`
+- Create: `Package.swift`
+- Create: `Sources/SatoriApp/SatoriApp.swift`
+- Create: `Sources/SatoriApp/ContentView.swift`
+- Create: `tests/SatoriCoreTests/main.swift`
 
-**Step 1:** Create a macOS SwiftUI app named Satori with a SwiftData model container.
+**Step 1:** Create a macOS Swift Package named Satori with a SwiftUI executable target and a local persistence boundary.
 
-**Step 2:** Build the app with `xcodebuild` and verify that it exits successfully.
+**Step 2:** Build the app with `swift build` and verify that it exits successfully.
 
 **Step 3:** Launch the app and visually verify that the empty learning-plan screen appears.
 
