@@ -14,6 +14,7 @@ fi
 mkdir -p "$contents_dir/MacOS" "$contents_dir/Resources"
 cp "$project_root/.build/release/satori" "$contents_dir/MacOS/satori"
 cp "$project_root/Resources/Info.plist" "$contents_dir/Info.plist"
+cp "$project_root/Resources/satori.icns" "$contents_dir/Resources/satori.icns"
 chmod 755 "$contents_dir/MacOS/satori"
 
 plutil -lint "$contents_dir/Info.plist" >/dev/null

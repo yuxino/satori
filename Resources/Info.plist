@@ -10,6 +10,8 @@
     <string>satori</string>
     <key>CFBundleIdentifier</key>
     <string>com.yuxino.satori</string>
+    <key>CFBundleIconFile</key>
+    <string>satori.icns</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
