@@ -35,7 +35,7 @@
 需要 macOS 14+ 和 Swift 6。
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/yuxino/satori.git
 cd satori
 swift run satori-core-tests
 ./scripts/package-app.sh
