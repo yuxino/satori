@@ -32,7 +32,9 @@
 
 ## 连接 Qwen
 
-在阿里云百炼创建按量付费 API Key。创建成功时会同时显示完整的 **API Key** 和 **API Host**，请立即保存。打开 Satori 设置，把两项粘贴进去即可；模型默认为同时支持文字、图片和网页搜索的 `qwen3.7-plus`。
+在阿里云百炼创建按量付费 API Key。创建成功时会同时显示完整的 **API Key** 和 **API Host**，请立即保存。打开 Satori 设置，把两项粘贴进去即可。
+
+默认使用当前高能力档的 `qwen3.8-max`；也可以在设置里改为更均衡的 `qwen3.7-plus` 或更节省的 `qwen3.7-flash`。模型选择和 API Host 保存在本机，API Key 只进入 macOS 钥匙串。
 
 获取方式见[百炼官方文档](https://help.aliyun.com/zh/model-studio/get-api-key/)。密钥不会写入仓库，也不要通过聊天、截图或提交记录分享。
 

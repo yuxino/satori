@@ -18,6 +18,7 @@ Satori is a local-first macOS learning workspace. Its primary job is to help a l
 - Do not add source PDFs to Git. Store file bookmarks or local references instead.
 - Treat Alibaba Cloud Model Studio Qwen as an on-demand reasoning/search service, not as file hosting.
 - Store a user-supplied Model Studio API key in macOS Keychain and its API Host as a local preference. Do not add plaintext key files or environment-variable fallbacks.
+- Keep the active Qwen model configurable and persisted locally; use the strongest model that still supports text, scanned-page images, and web search as the default.
 
 ## Engineering rules
 

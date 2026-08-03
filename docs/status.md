@@ -24,7 +24,8 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Per-course PDF menu for switching, replacing, or removing an incorrect import without deleting the original file
 - Keychain-only Model Studio API-key settings plus a local API Host preference; no plaintext key path
 - A visible AI assistant boundary that labels its current response source
-- Current-page text and scanned-page images are connected to the Model Studio compatible Responses API using `qwen3.7-plus` with `store: false`
+- Current-page text and scanned-page images are connected to the Model Studio compatible Responses API with `store: false`
+- The saved model preference defaults to `qwen3.8-max`, with `qwen3.7-plus` and `qwen3.7-flash` available as balanced and efficient choices
 - Optional per-question web search with returned URL citations
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.

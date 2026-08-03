@@ -78,8 +78,11 @@ public struct UnconfiguredLearningAssistant: LearningAssistant {
 }
 
 public struct QwenLearningAssistant: LearningAssistant {
+    public static let defaultModelID = "qwen3.8-max"
+
     private let apiKey: String
     private let apiHost: URL
+    private let modelID: String
     private let pageContent: LearningPageContent
     private let allowsWebSearch: Bool
     private let transport: any AssistantTransport
@@ -87,12 +90,15 @@ public struct QwenLearningAssistant: LearningAssistant {
     public init(
         apiKey: String,
         apiHost: URL,
+        modelID: String = QwenLearningAssistant.defaultModelID,
         pageContent: LearningPageContent,
         allowsWebSearch: Bool = false,
         transport: (any AssistantTransport)? = nil
     ) {
         self.apiKey = apiKey
         self.apiHost = apiHost
+        let normalizedModelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.modelID = normalizedModelID.isEmpty ? Self.defaultModelID : normalizedModelID
         self.pageContent = pageContent
         self.allowsWebSearch = allowsWebSearch
         self.transport = transport ?? URLSessionAssistantTransport()
@@ -164,7 +170,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         }
 
         return ResponsesRequest(
-            model: "qwen3.7-plus",
+            model: modelID,
             instructions: """
             你是 Satori 的学习理解助手。默认使用简体中文，直接回答问题。
             优先依据用户提供的当前 PDF 页面；不要假装看到了未提供的页面。

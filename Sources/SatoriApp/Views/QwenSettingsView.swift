@@ -1,8 +1,10 @@
 import SwiftUI
+import SatoriCore
 
 struct QwenSettingsView: View {
     @State private var key = ""
     @State private var apiHost = ""
+    @State private var modelID = QwenLearningAssistant.defaultModelID
     @State private var status = ""
 
     var body: some View {
@@ -12,6 +14,18 @@ struct QwenSettingsView: View {
                     .textContentType(.password)
                 TextField("API Host", text: $apiHost, prompt: Text("https://…/compatible-mode/v1"))
                     .textContentType(.URL)
+
+                Picker("模型", selection: $modelID) {
+                    ForEach(QwenModelOption.allCases) { option in
+                        Text(option.title).tag(option.rawValue)
+                    }
+                }
+
+                if let option = QwenModelOption(rawValue: modelID) {
+                    Text(option.explanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 Text("创建百炼 API Key 后，把弹窗中的完整 API Key 和 API Host 一起粘贴到这里。密钥只保存在这台 Mac 的钥匙串中。")
                     .font(.caption)
@@ -23,7 +37,7 @@ struct QwenSettingsView: View {
                 HStack {
                     Button("保存连接") {
                         do {
-                            try QwenConfigurationStore.save(apiKey: key, apiHost: apiHost)
+                            try QwenConfigurationStore.save(apiKey: key, apiHost: apiHost, modelID: modelID)
                             apiHost = QwenConfigurationStore.readAPIHostString()
                             status = "已保存，可以开始使用 Qwen"
                         } catch { status = error.localizedDescription }
@@ -35,6 +49,7 @@ struct QwenSettingsView: View {
                             try QwenConfigurationStore.remove()
                             key = ""
                             apiHost = ""
+                            modelID = QwenLearningAssistant.defaultModelID
                             status = "已移除 Qwen 连接"
                         } catch { status = error.localizedDescription }
                     }
@@ -53,6 +68,7 @@ struct QwenSettingsView: View {
         .onAppear {
             key = QwenConfigurationStore.readAPIKey() ?? ""
             apiHost = QwenConfigurationStore.readAPIHostString()
+            modelID = QwenConfigurationStore.readModelID()
         }
     }
 }

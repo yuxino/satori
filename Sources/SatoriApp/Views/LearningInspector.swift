@@ -290,6 +290,7 @@ struct LearningInspector: View {
         let assistant = QwenLearningAssistant(
             apiKey: configuration.apiKey,
             apiHost: configuration.apiHost,
+            modelID: configuration.modelID,
             pageContent: pageContent,
             allowsWebSearch: allowsWebSearch
         )

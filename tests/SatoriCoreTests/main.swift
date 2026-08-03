@@ -30,7 +30,7 @@ struct SatoriCoreTests {
             apiHost: URL(string: "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")!,
             pageContent: .text("fixture page text"),
             allowsWebSearch: true,
-            transport: FixtureAssistantTransport(expectsImage: false, expectsWebSearch: true)
+            transport: FixtureAssistantTransport(expectedModelID: "qwen3.8-max", expectsImage: false, expectsWebSearch: true)
         ).explain(request: "解释这一页", pageIndex: 2)
         precondition(apiResponse.text == "fixture explanation", "Expected Responses API output text")
         precondition(apiResponse.sourceKind == .web, "Expected web source label when citations are returned")
@@ -39,8 +39,9 @@ struct SatoriCoreTests {
         let imageResponse = await QwenLearningAssistant(
             apiKey: "fixture-key",
             apiHost: URL(string: "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/")!,
+            modelID: "qwen3.7-plus",
             pageContent: .imageJPEG(Data([0xFF, 0xD8, 0xFF])),
-            transport: FixtureAssistantTransport(expectsImage: true, expectsWebSearch: false)
+            transport: FixtureAssistantTransport(expectedModelID: "qwen3.7-plus", expectsImage: true, expectsWebSearch: false)
         ).explain(request: "解释扫描页", pageIndex: 4)
         precondition(imageResponse.text == "fixture explanation", "Expected scanned-page output text")
         print("Satori core checks passed")
@@ -55,6 +56,7 @@ private func XCTUnwrap<T>(_ value: T?) throws -> T {
 private enum TestError: Error { case missingValue }
 
 private struct FixtureAssistantTransport: AssistantTransport {
+    let expectedModelID: String
     let expectsImage: Bool
     let expectsWebSearch: Bool
 
@@ -63,7 +65,7 @@ private struct FixtureAssistantTransport: AssistantTransport {
         precondition(request.value(forHTTPHeaderField: "Authorization") == "Bearer fixture-key", "Expected bearer authentication")
         let body = try XCTUnwrap(request.httpBody)
         let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
-        precondition(json["model"] as? String == "qwen3.7-plus", "Expected multimodal Qwen learning model")
+        precondition(json["model"] as? String == expectedModelID, "Expected configured Qwen learning model")
         precondition(json["store"] as? Bool == false, "Expected response storage to be disabled")
         let tools = json["tools"] as? [[String: String]]
         precondition((tools?.first?["type"] == "web_search") == expectsWebSearch, "Expected opt-in web search behavior")
