@@ -53,6 +53,24 @@ final class AppModel: ObservableObject {
         save()
     }
 
+    func replacePDF(_ url: URL, in courseID: UUID, documentID: UUID) {
+        guard let courseIndex = plan.courses.firstIndex(where: { $0.id == courseID }),
+              let documentIndex = plan.courses[courseIndex].documents.firstIndex(where: { $0.id == documentID }),
+              let replacement = try? DocumentBookmarkStore.makeDocument(from: url) else { return }
+        plan.courses[courseIndex].documents[documentIndex] = replacement
+        selectedDocumentID = replacement.id
+        save()
+    }
+
+    func removeDocument(courseID: UUID, documentID: UUID) {
+        guard let courseIndex = plan.courses.firstIndex(where: { $0.id == courseID }) else { return }
+        plan.courses[courseIndex].documents.removeAll { $0.id == documentID }
+        if selectedDocumentID == documentID {
+            selectedDocumentID = plan.courses[courseIndex].documents.last?.id
+        }
+        save()
+    }
+
     func updateReadingPosition(courseID: UUID, documentID: UUID, pageIndex: Int, normalizedOffset: Double = 0) {
         guard let courseIndex = plan.courses.firstIndex(where: { $0.id == courseID }),
               let documentIndex = plan.courses[courseIndex].documents.firstIndex(where: { $0.id == documentID }) else { return }

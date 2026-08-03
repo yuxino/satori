@@ -5,9 +5,12 @@ import SatoriCore
 struct PDFReaderView: NSViewRepresentable {
     let url: URL
     let initialPosition: ReadingPosition
+    @Binding var currentPageIndex: Int
     let onPositionChanged: (Int, Double) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(onPositionChanged: onPositionChanged) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(currentPageIndex: $currentPageIndex, onPositionChanged: onPositionChanged)
+    }
 
     func makeNSView(context: Context) -> PDFView {
         let view = PDFView()
@@ -20,7 +23,14 @@ struct PDFReaderView: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ view: PDFView, context: Context) {}
+    func updateNSView(_ view: PDFView, context: Context) {
+        guard let document = view.document, document.pageCount > 0 else { return }
+        let targetIndex = min(max(currentPageIndex, 0), document.pageCount - 1)
+        let visibleIndex = view.currentPage.map(document.index(for:))
+        if visibleIndex != targetIndex, let page = document.page(at: targetIndex) {
+            view.go(to: page)
+        }
+    }
 
     static func dismantleNSView(_ view: PDFView, coordinator: Coordinator) {
         coordinator.stopObserving()
@@ -28,9 +38,11 @@ struct PDFReaderView: NSViewRepresentable {
 
     final class Coordinator: NSObject {
         private weak var observedView: PDFView?
+        private let currentPageIndex: Binding<Int>
         private let onPositionChanged: (Int, Double) -> Void
 
-        init(onPositionChanged: @escaping (Int, Double) -> Void) {
+        init(currentPageIndex: Binding<Int>, onPositionChanged: @escaping (Int, Double) -> Void) {
+            self.currentPageIndex = currentPageIndex
             self.onPositionChanged = onPositionChanged
         }
 
@@ -46,7 +58,9 @@ struct PDFReaderView: NSViewRepresentable {
 
         @MainActor @objc private func pageChanged() {
             guard let view = observedView, let document = view.document, let page = view.currentPage else { return }
-            onPositionChanged(document.index(for: page), 0)
+            let pageIndex = document.index(for: page)
+            currentPageIndex.wrappedValue = pageIndex
+            onPositionChanged(pageIndex, 0)
         }
     }
 }

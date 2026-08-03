@@ -20,6 +20,8 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Local JSON persistence in Application Support
 - PDF import, text/scanned/mixed classification, and PDFKit reader
 - Persisted page-based reading position
+- Always-visible current/total page indicator with previous, next, and direct page jump controls
+- Per-course PDF menu for switching, replacing, or removing an incorrect import without deleting the original file
 - Keychain-only OpenAI API-key settings screen; no plaintext key path
 - A visible AI assistant boundary that labels its current response source
 
