@@ -1,0 +1,10 @@
+.DS_Store
+DerivedData/
+build/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.pdf
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
