@@ -289,7 +289,6 @@ struct LearningInspector: View {
         isThinking = true
         let assistant = QwenLearningAssistant(
             apiKey: configuration.apiKey,
-            apiHost: configuration.apiHost,
             modelID: configuration.modelID,
             pageContent: pageContent,
             allowsWebSearch: allowsWebSearch

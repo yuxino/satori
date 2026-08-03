@@ -10,11 +10,12 @@ Satori needs one affordable model path that can understand extracted PDF text, i
 
 ## Decision
 
-Use Alibaba Cloud Model Studio's OpenAI-compatible Responses API. Default to `qwen3.8-max`, the current high-capability multimodal model, while allowing the user to select `qwen3.7-plus` or `qwen3.7-flash` when balancing quality, latency, and cost. Ask the user for the API Key and API Host shown by Model Studio because the host varies by region, workspace, and billing plan. Store the key in macOS Keychain and the non-secret host and model ID as local preferences.
+Use Alibaba Cloud Model Studio's OpenAI-compatible Responses API. Default to `qwen3.8-max`, the current high-capability multimodal model, while allowing the user to select `qwen3.7-plus` or `qwen3.7-flash` when balancing quality, latency, and cost. Satori targets the China (Beijing) region and internally uses Alibaba's supported shared endpoint, `https://dashscope.aliyuncs.com/compatible-mode/v1`, so the user supplies only the API Key. Store the key in macOS Keychain and the model ID as a local preference.
 
 ## Consequences
 
 - Text and scanned PDFs keep one learning flow, while the model quality tier remains configurable.
 - Satori does not need an Alibaba SDK or a second search provider.
-- The user needs a paid Model Studio account rather than an OpenAI API account.
+- The user needs a China (Beijing) Model Studio API Key rather than an OpenAI API account.
+- The settings UI stays simple, while the assistant initializer retains endpoint injection for tests and a future migration to workspace-specific domains.
 - A future provider switch should add a provider abstraction only when a second provider is actually required.

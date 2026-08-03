@@ -26,17 +26,17 @@
 - 同一课程内切换、替换或移除 PDF；不会删除电脑上的原文件
 - 当前页文字或扫描图像可通过阿里云百炼 Qwen 获得解释
 - 可按单次问题主动启用网页搜索，并显示返回的网页来源
-- 百炼 API Key 只保存在 macOS 钥匙串；API Host 作为本地设置保存
+- 百炼 API Key 只保存在 macOS 钥匙串；北京地域的连接地址由 Satori 内置
 
 目前的界面仍在重做中。接下来的重点不是继续堆功能，而是把“选一本书 → 阅读 → 遇到不懂的地方 → 获得带来源的解释 → 回到原文”做成一条真正顺手的学习路径。
 
 ## 连接 Qwen
 
-在阿里云百炼创建按量付费 API Key。创建成功时会同时显示完整的 **API Key** 和 **API Host**，请立即保存。打开 Satori 设置，把两项粘贴进去即可。
+在阿里云百炼的**华北 2（北京）**地域创建按量付费 API Key。创建成功后请立即保存完整的 **API Key**，再粘贴到 Satori 设置；API Host 无需填写，应用已使用阿里官方仍支持的北京共享地址。
 
-默认使用当前高能力档的 `qwen3.8-max`；也可以在设置里改为更均衡的 `qwen3.7-plus` 或更节省的 `qwen3.7-flash`。模型选择和 API Host 保存在本机，API Key 只进入 macOS 钥匙串。
+默认使用当前高能力档的 `qwen3.8-max`；也可以在设置里改为更均衡的 `qwen3.7-plus` 或更节省的 `qwen3.7-flash`。模型选择保存在本机，API Key 只进入 macOS 钥匙串。
 
-获取方式见[百炼官方文档](https://help.aliyun.com/zh/model-studio/get-api-key/)。密钥不会写入仓库，也不要通过聊天、截图或提交记录分享。
+获取方式见[百炼 API Key 官方文档](https://help.aliyun.com/zh/model-studio/get-api-key/)；内置地址依据[百炼 Base URL 总览](https://help.aliyun.com/zh/model-studio/base-url)。密钥不会写入仓库，也不要通过聊天、截图或提交记录分享。
 
 ## 从源码运行
 

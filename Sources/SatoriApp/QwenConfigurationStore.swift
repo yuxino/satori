@@ -8,7 +8,6 @@ extension Notification.Name {
 
 struct QwenConfiguration {
     let apiKey: String
-    let apiHost: URL
     let modelID: String
 }
 
@@ -39,14 +38,14 @@ enum QwenModelOption: String, CaseIterable, Identifiable {
 enum QwenConfigurationStore {
     private static let service = "com.yuxino.satori"
     private static let account = "qwen-api-key"
-    private static let apiHostDefaultsKey = "qwen-api-host"
+    private static let legacyAPIHostDefaultsKey = "qwen-api-host"
     private static let modelDefaultsKey = "qwen-model-id"
 
     static func read() -> QwenConfiguration? {
+        UserDefaults.standard.removeObject(forKey: legacyAPIHostDefaultsKey)
         guard let apiKey = readAPIKey(),
-              !apiKey.isEmpty,
-              let apiHost = readAPIHost() else { return nil }
-        return QwenConfiguration(apiKey: apiKey, apiHost: apiHost, modelID: readModelID())
+              !apiKey.isEmpty else { return nil }
+        return QwenConfiguration(apiKey: apiKey, modelID: readModelID())
     }
 
     static func readAPIKey() -> String? {
@@ -63,36 +62,15 @@ enum QwenConfigurationStore {
         return String(data: data, encoding: .utf8)
     }
 
-    static func readAPIHostString() -> String {
-        UserDefaults.standard.string(forKey: apiHostDefaultsKey) ?? ""
-    }
-
     static func readModelID() -> String {
         let saved = UserDefaults.standard.string(forKey: modelDefaultsKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return saved.isEmpty ? QwenLearningAssistant.defaultModelID : saved
     }
 
-    static func normalizedAPIHost(_ value: String) throws -> URL {
-        var trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        while trimmed.hasSuffix("/") { trimmed.removeLast() }
-        if trimmed.hasSuffix("/responses") {
-            trimmed.removeLast("/responses".count)
-        }
-
-        guard let components = URLComponents(string: trimmed),
-              components.scheme == "https",
-              components.host?.isEmpty == false,
-              let url = components.url else {
-            throw ConfigurationError.invalidAPIHost
-        }
-        return url
-    }
-
-    static func save(apiKey: String, apiHost: String, modelID: String) throws {
+    static func save(apiKey: String, modelID: String) throws {
         let normalizedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedKey.isEmpty else { throw ConfigurationError.emptyAPIKey }
-        let normalizedHost = try normalizedAPIHost(apiHost)
         let normalizedModelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedModelID.isEmpty else { throw ConfigurationError.emptyModelID }
 
@@ -110,7 +88,7 @@ enum QwenConfigurationStore {
             let status = SecItemAdd(add as CFDictionary, nil)
             guard status == errSecSuccess else { throw KeychainError.status(status) }
         }
-        UserDefaults.standard.set(normalizedHost.absoluteString, forKey: apiHostDefaultsKey)
+        UserDefaults.standard.removeObject(forKey: legacyAPIHostDefaultsKey)
         UserDefaults.standard.set(normalizedModelID, forKey: modelDefaultsKey)
         NotificationCenter.default.post(name: .qwenConfigurationDidChange, object: nil)
     }
@@ -123,26 +101,20 @@ enum QwenConfigurationStore {
         ]
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw KeychainError.status(status) }
-        UserDefaults.standard.removeObject(forKey: apiHostDefaultsKey)
+        UserDefaults.standard.removeObject(forKey: legacyAPIHostDefaultsKey)
         UserDefaults.standard.removeObject(forKey: modelDefaultsKey)
         NotificationCenter.default.post(name: .qwenConfigurationDidChange, object: nil)
-    }
-
-    private static func readAPIHost() -> URL? {
-        try? normalizedAPIHost(readAPIHostString())
     }
 }
 
 private enum ConfigurationError: LocalizedError {
     case emptyAPIKey
     case emptyModelID
-    case invalidAPIHost
 
     var errorDescription: String? {
         switch self {
         case .emptyAPIKey: "请输入百炼 API Key。"
         case .emptyModelID: "请选择一个 Qwen 模型。"
-        case .invalidAPIHost: "API Host 应是百炼提供的 https 地址。"
         }
     }
 }

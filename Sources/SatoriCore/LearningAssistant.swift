@@ -70,7 +70,7 @@ public struct UnconfiguredLearningAssistant: LearningAssistant {
 
     public func explain(request: String, pageIndex: Int?) async -> LearningResponse {
         LearningResponse(
-            text: "AI 理解助手尚未配置百炼 API Key 和 API Host。Satori 已保留你的阅读位置；配置后，这里会优先结合当前 PDF 的页码解释问题。",
+            text: "AI 理解助手尚未配置百炼 API Key。Satori 已保留你的阅读位置；配置后，这里会优先结合当前 PDF 的页码解释问题。",
             sourceKind: .inference,
             pageIndex: pageIndex
         )
@@ -79,6 +79,7 @@ public struct UnconfiguredLearningAssistant: LearningAssistant {
 
 public struct QwenLearningAssistant: LearningAssistant {
     public static let defaultModelID = "qwen3.8-max"
+    public static let defaultAPIHost = URL(string: "https://dashscope.aliyuncs.com/compatible-mode/v1")!
 
     private let apiKey: String
     private let apiHost: URL
@@ -89,7 +90,7 @@ public struct QwenLearningAssistant: LearningAssistant {
 
     public init(
         apiKey: String,
-        apiHost: URL,
+        apiHost: URL = QwenLearningAssistant.defaultAPIHost,
         modelID: String = QwenLearningAssistant.defaultModelID,
         pageContent: LearningPageContent,
         allowsWebSearch: Bool = false,

@@ -22,7 +22,7 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Persisted page-based reading position
 - Always-visible current/total page indicator with previous, next, and direct page jump controls
 - Per-course PDF menu for switching, replacing, or removing an incorrect import without deleting the original file
-- Keychain-only Model Studio API-key settings plus a local API Host preference; no plaintext key path
+- Keychain-only Model Studio API-key settings with the supported China (Beijing) shared endpoint built in; no plaintext key path or Host field
 - A visible AI assistant boundary that labels its current response source
 - Current-page text and scanned-page images are connected to the Model Studio compatible Responses API with `store: false`
 - The saved model preference defaults to `qwen3.8-max`, with `qwen3.7-plus` and `qwen3.7-flash` available as balanced and efficient choices
