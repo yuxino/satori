@@ -22,6 +22,59 @@ struct SatoriCoreTests {
         precondition(document.readingPosition.pageIndex == 7, "Expected reading page to persist")
         precondition(document.readingPosition.normalizedPageOffset == 0.4, "Expected reading offset to persist")
 
+        let firstDocumentID = UUID()
+        let secondDocumentID = UUID()
+        let sessionFile = root.appending(path: "learning-sessions.json")
+        let sessionStore = LearningSessionStore(fileURL: sessionFile)
+        let savedTurn = LearningTurn(
+            question: "为什么需要循环？",
+            answer: "循环把重复规则写成有限步骤。",
+            pageIndex: 2,
+            sourceKind: .currentPDF,
+            attachmentCount: 1
+        )
+        try await sessionStore.save([savedTurn], for: firstDocumentID)
+        try await sessionStore.save([
+            LearningTurn(question: "什么是进程？", answer: "运行中的程序。", pageIndex: 8, sourceKind: .currentPDF)
+        ], for: secondDocumentID)
+        let restoredSessionStore = LearningSessionStore(fileURL: sessionFile)
+        let restoredFirstTurns = try await restoredSessionStore.turns(for: firstDocumentID)
+        let restoredSecondTurns = try await restoredSessionStore.turns(for: secondDocumentID)
+        precondition(restoredFirstTurns == [savedTurn], "Expected first document learning session to persist")
+        precondition(restoredSecondTurns.count == 1, "Expected document sessions to remain isolated")
+        try await restoredSessionStore.save([], for: firstDocumentID)
+        let replacedFirstTurns = try await restoredSessionStore.turns(for: firstDocumentID)
+        precondition(replacedFirstTurns.isEmpty, "Expected a document session to be replaceable")
+        try await restoredSessionStore.clear(for: secondDocumentID)
+        let clearedSecondTurns = try await restoredSessionStore.turns(for: secondDocumentID)
+        precondition(clearedSecondTurns.isEmpty, "Expected clearing one document session")
+
+        let markdown = """
+        **原文依据**
+
+        这是包含 `t=t*i` 的解释。
+
+        - 第一条
+        - 第二条
+
+        1. 第一步
+        2. 第二步
+
+        > 重要联系
+
+        ```c
+        for (i = 2; i <= 10; i++) {
+            t *= i;
+        }
+        ```
+        """
+        let markdownBlocks = LearningMarkdownParser.parse(markdown)
+        precondition(markdownBlocks.first == .heading(level: 3, text: "原文依据"), "Expected bold section label to become a heading")
+        precondition(markdownBlocks.contains(.unorderedList(["第一条", "第二条"])), "Expected unordered list parsing")
+        precondition(markdownBlocks.contains(.orderedList(["第一步", "第二步"])), "Expected ordered list parsing")
+        precondition(markdownBlocks.contains(.quote("重要联系")), "Expected quote parsing")
+        precondition(markdownBlocks.contains(.code(language: "c", content: "for (i = 2; i <= 10; i++) {\n    t *= i;\n}")), "Expected fenced code parsing")
+
         let response = await UnconfiguredLearningAssistant().explain(request: "解释", pageIndex: 7)
         precondition(response.sourceKind == .inference, "Expected explicit source label")
 
@@ -33,7 +86,8 @@ struct SatoriCoreTests {
                 expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
                 expectedModelID: "qwen3.8-max",
                 expectedImageCount: 0,
-                expectsWebSearch: true
+                expectsWebSearch: true,
+                expectedHistoryTurnCount: 0
             )
         ).explain(request: "解释这一页", pageIndex: 2)
         precondition(apiResponse.text == "fixture explanation", "Expected Responses API output text")
@@ -49,7 +103,8 @@ struct SatoriCoreTests {
                 expectedEndpoint: "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/responses",
                 expectedModelID: "qwen3.7-plus",
                 expectedImageCount: 1,
-                expectsWebSearch: false
+                expectsWebSearch: false,
+                expectedHistoryTurnCount: 0
             )
         ).explain(request: "解释扫描页", pageIndex: 4)
         precondition(imageResponse.text == "fixture explanation", "Expected scanned-page output text")
@@ -58,12 +113,16 @@ struct SatoriCoreTests {
             apiKey: "fixture-key",
             pageContent: .text("fixture page text"),
             additionalImagesJPEG: [Data([0xFF, 0xD8, 0xFF])],
+            conversationContext: [
+                .init(question: "之前的问题", answer: "之前的回答")
+            ],
             allowsWebSearch: true,
             transport: FixtureAssistantTransport(
                 expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
                 expectedModelID: "qwen3.8-max",
                 expectedImageCount: 1,
-                expectsWebSearch: true
+                expectsWebSearch: true,
+                expectedHistoryTurnCount: 1
             )
         )
         var streamUpdates: [LearningResponse] = []
@@ -89,6 +148,7 @@ private struct FixtureAssistantTransport: AssistantTransport {
     let expectedModelID: String
     let expectedImageCount: Int
     let expectsWebSearch: Bool
+    let expectedHistoryTurnCount: Int
 
     func send(_ request: URLRequest) async throws -> AssistantTransportResponse {
         try validate(request, expectsStreaming: false)
@@ -124,7 +184,14 @@ private struct FixtureAssistantTransport: AssistantTransport {
         precondition((tools?.first?["type"] == "web_search") == expectsWebSearch, "Expected opt-in web search behavior")
 
         let input = try XCTUnwrap(json["input"] as? [[String: Any]])
-        let content = try XCTUnwrap(input.first?["content"] as? [[String: Any]])
+        precondition(input.count == expectedHistoryTurnCount * 2 + 1, "Expected bounded conversation messages before the current question")
+        if expectedHistoryTurnCount > 0 {
+            precondition(input.first?["role"] as? String == "user", "Expected prior user message")
+            precondition(input.dropFirst().first?["role"] as? String == "assistant", "Expected prior assistant message")
+            let assistantContent = try XCTUnwrap(input.dropFirst().first?["content"] as? [[String: Any]])
+            precondition(assistantContent.first?["type"] as? String == "output_text", "Expected prior answer output content")
+        }
+        let content = try XCTUnwrap(input.last?["content"] as? [[String: Any]])
         let images = content.filter { $0["type"] as? String == "input_image" }
         precondition(images.count == expectedImageCount, "Expected page and attachment image inputs")
         precondition(images.allSatisfy { ($0["image_url"] as? String)?.hasPrefix("data:image/jpeg;base64,") == true }, "Expected Base64 JPEG data URLs")

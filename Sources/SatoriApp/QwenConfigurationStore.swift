@@ -1,12 +1,11 @@
 import Foundation
-import Security
 import SatoriCore
 
 extension Notification.Name {
     static let qwenConfigurationDidChange = Notification.Name("qwenConfigurationDidChange")
 }
 
-struct QwenConfiguration {
+struct QwenConfiguration: Sendable {
     let apiKey: String
     let modelID: String
 }
@@ -36,30 +35,31 @@ enum QwenModelOption: String, CaseIterable, Identifiable {
 }
 
 enum QwenConfigurationStore {
-    private static let service = "com.yuxino.satori"
-    private static let account = "qwen-api-key"
     private static let legacyAPIHostDefaultsKey = "qwen-api-host"
     private static let modelDefaultsKey = "qwen-model-id"
+    private static let configuredDefaultsKey = "qwen-is-configured"
+    private static let storageDirectoryName = "satori"
+    private static let keyFilename = "qwen-api-key"
 
     static func read() -> QwenConfiguration? {
         UserDefaults.standard.removeObject(forKey: legacyAPIHostDefaultsKey)
         guard let apiKey = readAPIKey(),
               !apiKey.isEmpty else { return nil }
+        UserDefaults.standard.set(true, forKey: configuredDefaultsKey)
         return QwenConfiguration(apiKey: apiKey, modelID: readModelID())
     }
 
+    static func hasSavedConfigurationMarker() -> Bool {
+        UserDefaults.standard.bool(forKey: configuredDefaultsKey)
+    }
+
     static func readAPIKey() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        guard let url = try? storageURL(),
+              let data = try? Data(contentsOf: url),
+              let key = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !key.isEmpty else { return nil }
+        return key
     }
 
     static func readModelID() -> String {
@@ -74,36 +74,54 @@ enum QwenConfigurationStore {
         let normalizedModelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedModelID.isEmpty else { throw ConfigurationError.emptyModelID }
 
-        let data = Data(normalizedKey.utf8)
-        let lookup: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        let update = SecItemUpdate(lookup as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-        if update != errSecSuccess {
-            guard update == errSecItemNotFound else { throw KeychainError.status(update) }
-            var add = lookup
-            add[kSecValueData as String] = data
-            let status = SecItemAdd(add as CFDictionary, nil)
-            guard status == errSecSuccess else { throw KeychainError.status(status) }
-        }
+        let url = try storageURL(createDirectory: true)
+        try Data(normalizedKey.utf8).write(to: url, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o600))],
+            ofItemAtPath: url.path
+        )
         UserDefaults.standard.removeObject(forKey: legacyAPIHostDefaultsKey)
         UserDefaults.standard.set(normalizedModelID, forKey: modelDefaultsKey)
-        NotificationCenter.default.post(name: .qwenConfigurationDidChange, object: nil)
+        UserDefaults.standard.set(true, forKey: configuredDefaultsKey)
+        postConfigurationDidChange()
     }
 
     static func remove() throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        let status = SecItemDelete(query as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else { throw KeychainError.status(status) }
+        if let url = try? storageURL(), FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
         UserDefaults.standard.removeObject(forKey: legacyAPIHostDefaultsKey)
         UserDefaults.standard.removeObject(forKey: modelDefaultsKey)
-        NotificationCenter.default.post(name: .qwenConfigurationDidChange, object: nil)
+        UserDefaults.standard.set(false, forKey: configuredDefaultsKey)
+        postConfigurationDidChange()
+    }
+
+    private static func postConfigurationDidChange() {
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .qwenConfigurationDidChange, object: nil)
+        }
+    }
+
+    private static func storageURL(createDirectory: Bool = false) throws -> URL {
+        guard let applicationSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first else {
+            throw LocalConfigurationError.applicationSupportUnavailable
+        }
+        let directory = applicationSupport.appendingPathComponent(storageDirectoryName, isDirectory: true)
+        if createDirectory {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: NSNumber(value: Int16(0o700))]
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: NSNumber(value: Int16(0o700))],
+                ofItemAtPath: directory.path
+            )
+        }
+        return directory.appendingPathComponent(keyFilename, isDirectory: false)
     }
 }
 
@@ -119,12 +137,8 @@ private enum ConfigurationError: LocalizedError {
     }
 }
 
-private enum KeychainError: LocalizedError {
-    case status(OSStatus)
+private enum LocalConfigurationError: LocalizedError {
+    case applicationSupportUnavailable
 
-    var errorDescription: String? { "无法更新 macOS 钥匙串（错误 \(statusCode)）。" }
-
-    private var statusCode: OSStatus {
-        if case let .status(value) = self { value } else { errSecInternalError }
-    }
+    var errorDescription: String? { "无法访问 Satori 的本机配置目录。" }
 }

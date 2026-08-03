@@ -172,12 +172,16 @@ private struct DocumentWorkspace: View {
 
             if showsInspector {
                 LearningInspector(
+                    documentID: document.id,
                     pageIndex: currentPageIndex,
                     directory: course.learningDirectory,
                     documentURL: url,
+                    onNavigateToPage: { targetPage in
+                        currentPageIndex = min(max(targetPage, 0), pageCount - 1)
+                    },
                     onClose: { showsInspector = false }
                 )
-                .frame(minWidth: 330, idealWidth: 370, maxWidth: 480)
+                .frame(minWidth: 360, idealWidth: 430, maxWidth: 620)
             }
         }
     }

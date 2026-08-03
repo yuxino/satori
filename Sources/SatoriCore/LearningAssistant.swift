@@ -30,7 +30,7 @@ public struct LearningResponse: Sendable, Equatable {
     }
 }
 
-public struct LearningCitation: Sendable, Equatable, Identifiable {
+public struct LearningCitation: Codable, Sendable, Equatable, Identifiable {
     public let id: UUID
     public var title: String
     public var url: URL
@@ -87,6 +87,7 @@ public struct QwenLearningAssistant: LearningAssistant {
     private let modelID: String
     private let pageContent: LearningPageContent
     private let additionalImagesJPEG: [Data]
+    private let conversationContext: [LearningConversationContext]
     private let allowsWebSearch: Bool
     private let transport: any AssistantTransport
 
@@ -96,6 +97,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         modelID: String = QwenLearningAssistant.defaultModelID,
         pageContent: LearningPageContent,
         additionalImagesJPEG: [Data] = [],
+        conversationContext: [LearningConversationContext] = [],
         allowsWebSearch: Bool = false,
         transport: (any AssistantTransport)? = nil
     ) {
@@ -105,6 +107,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         self.modelID = normalizedModelID.isEmpty ? Self.defaultModelID : normalizedModelID
         self.pageContent = pageContent
         self.additionalImagesJPEG = additionalImagesJPEG
+        self.conversationContext = conversationContext
         self.allowsWebSearch = allowsWebSearch
         self.transport = transport ?? URLSessionAssistantTransport()
     }
@@ -224,18 +227,29 @@ public struct QwenLearningAssistant: LearningAssistant {
         }
         content.append(.init(type: "input_text", text: "我的问题：\(question)", imageURL: nil))
 
+        var input = conversationContext.suffix(6).flatMap { turn in
+            [
+                InputMessage(role: "user", content: [
+                    .init(type: "input_text", text: String(turn.question.prefix(1_200)), imageURL: nil)
+                ]),
+                InputMessage(role: "assistant", content: [
+                    .init(type: "output_text", text: String(turn.answer.prefix(6_000)), imageURL: nil)
+                ])
+            ]
+        }
+        input.append(.init(role: "user", content: content))
+
         return ResponsesRequest(
             model: modelID,
             instructions: """
             你是 Satori 的学习理解助手。默认使用简体中文，直接回答问题。
             优先依据用户提供的当前 PDF 页面；不要假装看到了未提供的页面。
+            可以参考前面的本地学习问答理解“这里”“刚才”等追问，但本轮页面证据优先。
             回答依次包含“原文依据”“解释”；只有确实超出原文时才增加“补充推断”，并明确标注。
             原文依据要短，不要大段复述。解释应帮助用户建立概念联系，可以给一个具体例子。
             如果页面信息不足，直接说明缺少什么。不要要求用户做笔记或背诵。
             """,
-            input: [
-                .init(role: "user", content: content)
-            ],
+            input: input,
             tools: allowsWebSearch ? [.init(type: "web_search")] : nil,
             store: false,
             stream: streamsResponse,
