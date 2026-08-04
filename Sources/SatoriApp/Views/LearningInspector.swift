@@ -32,8 +32,6 @@ struct LearningInspector: View {
 
     let documentID: UUID
     let pageIndex: Int
-    let selectedText: String
-    let selectionCommand: SelectionCommand?
     let documentURL: URL
     let onNavigateToPage: (Int) -> Void
     let onClose: () -> Void
@@ -58,9 +56,6 @@ struct LearningInspector: View {
     @State private var attachments: [LearningImageAttachment] = []
     @State private var isImportingImage = false
     @State private var attachmentStatus = ""
-    /// Selection text pinned from a PDF toolbar command. Used when the live PDF
-    /// selection has already been cleared by the button click.
-    @State private var pinnedSelectionText = ""
     @FocusState private var isQuestionFocused: Bool
     @State private var requestTask: Task<Void, Never>?
     @State private var showsClearConfirmation = false
@@ -112,9 +107,6 @@ struct LearningInspector: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .qwenConfigurationDidChange)) { _ in
             refreshConfigurationState()
-        }
-        .onChange(of: selectionCommand) { _, command in
-            handleSelectionCommand(command)
         }
         .fileImporter(
             isPresented: $isImportingImage,
@@ -446,17 +438,6 @@ struct LearningInspector: View {
         .padding(.vertical, SatoriTheme.Spacing.xxl)
     }
 
-    /// The passage "选中内容" asks about: the live PDF highlight when there is
-    /// one, otherwise the text pinned from a selection-toolbar command.
-    private var activeSelection: String {
-        let live = ExtractedTextNormalizer.normalize(selectedText)
-        return live.isEmpty ? pinnedSelectionText : live
-    }
-
-    private var hasSelection: Bool {
-        !activeSelection.isEmpty
-    }
-
     /// Turns grouped by the page they belong to, so the panel reads as
     /// per-page margin notes on the book rather than a disconnected chat log.
     private struct PageSection: Identifiable {
@@ -479,43 +460,21 @@ struct LearningInspector: View {
             || (response != nil && draftPageIndex == pageIndex)
     }
 
-    /// A quiet status header for the ask space: it shows what the next question
-    /// is grounded in — the passage you highlighted, or the page you're reading.
-    /// No picker: the reader's action decides. Highlight something → that's the
-    /// context; highlight nothing → it's the current page.
+    /// A quiet status header for the ask space: every question is grounded in
+    /// the page you're reading. Nothing to choose.
     private var askScopeHeader: some View {
-        VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
-            HStack(spacing: SatoriTheme.Spacing.sm) {
-                Image(systemName: scopeIcon)
-                    .font(.caption)
-                    .foregroundStyle(SatoriTheme.iconChrome)
-                Text(scopeSummary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-
-            if hasSelection {
-                Text(activeSelection)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                    .padding(9)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
-            }
+        HStack(spacing: SatoriTheme.Spacing.sm) {
+            Image(systemName: "doc.text")
+                .font(.caption)
+                .foregroundStyle(SatoriTheme.iconChrome)
+            Text("将基于第 \(pageIndex + 1) 页提问")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
         }
         .padding(SatoriTheme.Spacing.md)
         .background(SatoriTheme.paperRaised.opacity(0.8), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous).strokeBorder(SatoriTheme.hairline))
-    }
-
-    private var scopeIcon: String {
-        hasSelection ? "text.cursor" : "doc.text"
-    }
-
-    private var scopeSummary: String {
-        hasSelection ? "将基于选中的内容提问" : "将基于第 \(pageIndex + 1) 页提问"
     }
 
     private var promptStarter: some View {
@@ -1035,9 +994,8 @@ struct LearningInspector: View {
     }
 
     private var composerHint: String {
-        let scope = hasSelection ? "选中内容" : "第 \(pageIndex + 1) 页"
         let web = allowsWebSearch ? "、联网" : ""
-        return "Enter 发送 · Shift+Enter 换行 · ⌘V 贴图 · 依据\(scope)、最近对话、附件\(web)"
+        return "Enter 发送 · Shift+Enter 换行 · ⌘V 贴图 · 依据第 \(pageIndex + 1) 页、最近对话、附件\(web)"
     }
 
     @MainActor
@@ -1057,27 +1015,14 @@ struct LearningInspector: View {
     private func askAssistant(
         _ suppliedQuestion: String? = nil,
         pageOverride: Int? = nil,
-        selectionOverride: String? = nil,
         excludingTurnID: UUID? = nil
     ) {
         let request = (suppliedQuestion ?? question).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty, !isThinking else { return }
 
         let targetPageIndex = pageOverride ?? pageIndex
-        // Retries carry a page override and always re-ask against that page; a
-        // selection override comes from the PDF toolbar's "解释这段". Otherwise:
-        // use the live selection if there is one, else the current page.
-        let usesSelection = selectionOverride != nil || (pageOverride == nil && hasSelection)
-        let extractionScope: PDFPageContextExtractor.Scope
-        if usesSelection {
-            let selectionText = selectionOverride ?? activeSelection
-            // Selection answers carry the surrounding pages as context, so the
-            // model isn't answering a single line in a vacuum.
-            extractionScope = .selectionWithContext(selectionText, pageIndex: targetPageIndex)
-        } else {
-            extractionScope = .page(targetPageIndex)
-        }
-        let effectiveScope: ContextScope = usesSelection ? .selection : .page
+        let extractionScope: PDFPageContextExtractor.Scope = .page(targetPageIndex)
+        let effectiveScope: ContextScope = .page
 
         guard let pageContent = PDFPageContextExtractor.extract(from: documentURL, scope: extractionScope) else {
             draftQuestion = request
@@ -1145,28 +1090,6 @@ struct LearningInspector: View {
             } else {
                 completeDraft(with: latestResponse, completion: .completed)
             }
-        }
-    }
-
-    /// Reacts to a Cursor-style command from the PDF selection toolbar.
-    /// "解释这段" asks immediately; "就这段提问" pins the passage and lets the
-    /// reader type.
-    private func handleSelectionCommand(_ command: SelectionCommand?) {
-        guard let command else { return }
-        let text = ExtractedTextNormalizer.normalize(command.text)
-        guard !text.isEmpty else { return }
-
-        pinnedSelectionText = text
-
-        switch command.action {
-        case .explain:
-            showsNotes = false
-            isShowingRun = false
-            askAssistant("解释我选中的这段内容", selectionOverride: text)
-        case .compose:
-            showsNotes = false
-            isShowingRun = false
-            isQuestionFocused = true
         }
     }
 

@@ -128,8 +128,6 @@ private struct DocumentWorkspace: View {
     @State private var currentPageIndex: Int
     @State private var pageInput = ""
     @State private var showsInspector = true
-    @State private var selectedText = ""
-    @State private var selectionCommand: SelectionCommand?
     @State private var panelWidth: CGFloat = 430
     @State private var isDraggingDivider = false
 
@@ -170,15 +168,6 @@ private struct DocumentWorkspace: View {
                             pageIndex: pageIndex,
                             normalizedOffset: offset
                         )
-                    },
-                    onSelectionChanged: { selectedText = $0 },
-                    onExplainSelection: { text in
-                        showsInspector = true
-                        selectionCommand = SelectionCommand(text: text, action: .explain)
-                    },
-                    onComposeSelection: { text in
-                        showsInspector = true
-                        selectionCommand = SelectionCommand(text: text, action: .compose)
                     }
                 )
             }
@@ -190,8 +179,6 @@ private struct DocumentWorkspace: View {
                 LearningInspector(
                     documentID: document.id,
                     pageIndex: currentPageIndex,
-                    selectedText: selectedText,
-                    selectionCommand: selectionCommand,
                     documentURL: url,
                     onNavigateToPage: { targetPage in
                         currentPageIndex = min(max(targetPage, 0), pageCount - 1)
@@ -335,15 +322,4 @@ private struct DocumentWorkspace: View {
         currentPageIndex = min(max(requestedPage - 1, 0), pageCount - 1)
         pageInput = ""
     }
-}
-
-/// A one-shot instruction from the PDF's selection toolbar to the learning
-/// panel. The unique id makes repeated commands over the same text distinct,
-/// so `onChange` still fires when the reader picks the same passage twice.
-struct SelectionCommand: Equatable {
-    enum Action { case explain, compose }
-
-    let id = UUID()
-    let text: String
-    let action: Action
 }
