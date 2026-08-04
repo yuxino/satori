@@ -168,6 +168,15 @@ private struct DocumentWorkspace: View {
                             pageIndex: pageIndex,
                             normalizedOffset: offset
                         )
+                        // Feed the progress bar: record this page as read.
+                        Task {
+                            try? await LearningStatsStore.shared.recordPageRead(
+                                documentID: document.id,
+                                pageIndex: pageIndex,
+                                pageCount: document.pageCount
+                            )
+                            NotificationCenter.default.post(name: .learningStatsDidChange, object: nil)
+                        }
                     }
                 )
             }

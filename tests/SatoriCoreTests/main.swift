@@ -282,6 +282,41 @@ struct SatoriCoreTests {
         due = try await reviewStore.dueQuestions(for: docID, now: soon)
         precondition(due.contains { $0.id == q2.id }, "Expected again-rated question to return within minutes")
 
+        // Gamification: streaks, progress, and badges from real behavior.
+        let statsFile = root.appending(path: "learning-stats.json")
+        let statsStore = LearningStatsStore(fileURL: statsFile)
+        let statsDoc = UUID()
+        let day1 = Calendar.current.startOfDay(for: .now)
+        let day2 = Calendar.current.date(byAdding: .day, value: 1, to: day1)!
+        let day3 = Calendar.current.date(byAdding: .day, value: 2, to: day1)!
+
+        try await statsStore.recordPageRead(documentID: statsDoc, pageIndex: 0, pageCount: 5, on: day1)
+        try await statsStore.recordQuestion(documentID: statsDoc, on: day1)
+        var stats = try await statsStore.current()
+        precondition(stats.streakDays == 1, "Expected day-1 streak to start at 1")
+        precondition(stats.unlockedBadges.contains(.firstQuestion), "Expected first-question badge")
+        precondition(stats.unlockedBadges.contains(.firstCodeRun) == false, "Expected no code badge yet")
+
+        // Same day activity doesn't bump the streak; next day does.
+        try await statsStore.recordQuestion(documentID: statsDoc, on: day1)
+        stats = try await statsStore.current()
+        precondition(stats.streakDays == 1, "Expected same-day activity to keep streak at 1")
+
+        try await statsStore.recordCodeRun(documentID: statsDoc, on: day2)
+        try await statsStore.recordPageRead(documentID: statsDoc, pageIndex: 1, pageCount: 5, on: day3)
+        stats = try await statsStore.current()
+        precondition(stats.streakDays == 3, "Expected three consecutive days")
+        precondition(stats.unlockedBadges.contains(.threeDayStreak), "Expected 3-day streak badge")
+
+        // Reading all pages of the book → 100% progress + first-book badge.
+        for page in 0..<5 {
+            try await statsStore.recordPageRead(documentID: statsDoc, pageIndex: page, pageCount: 5, on: day3)
+        }
+        stats = try await statsStore.current()
+        let docActivity = stats.documentCounts[statsDoc]!
+        precondition(docActivity.progress == 1.0, "Expected 100% progress after reading every page")
+        precondition(stats.unlockedBadges.contains(.firstBook), "Expected first-book badge")
+
         print("Satori core checks passed")
     }
 }

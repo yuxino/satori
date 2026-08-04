@@ -20,6 +20,9 @@ struct PlanSidebar: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             brandHeader
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            StreakCard()
+        }
     }
 
     private var brandHeader: some View {
@@ -91,4 +94,58 @@ private struct CourseRow: View {
         guard let document = currentDocument else { return "尚未导入教材" }
         return "第 \(document.readingPosition.pageIndex + 1) / \(max(document.pageCount, 1)) 页"
     }
+}
+
+/// A compact progress card pinned to the sidebar's bottom: today's streak and
+/// how many badges you've earned — visible every time the app opens, so the
+/// sense of moving forward is always in view.
+private struct StreakCard: View {
+    @State private var stats: LearningStats?
+
+    var body: some View {
+        HStack(spacing: SatoriTheme.Spacing.sm) {
+            // Flame: the current streak.
+            HStack(spacing: 6) {
+                Image(systemName: "flame.fill")
+                    .foregroundStyle((stats?.streakDays ?? 0) > 0 ? SatoriTheme.gold : Color.secondary.opacity(0.5))
+                    .font(.system(size: 15))
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("\(stats?.streakDays ?? 0) 天")
+                        .font(.callout.weight(.semibold))
+                        .monospacedDigit()
+                    Text("连续学习")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            // Badges earned count.
+            HStack(spacing: 6) {
+                Image(systemName: "medal.fill")
+                    .foregroundStyle(SatoriTheme.accent)
+                    .font(.system(size: 13))
+                Text("\(stats?.unlockedBadges.count ?? 0) 徽章")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
+        .task { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: .learningStatsDidChange)) { _ in
+            Task { await load() }
+        }
+    }
+
+    private func load() async {
+        stats = try? await LearningStatsStore.shared.current()
+    }
+}
+
+extension Notification.Name {
+    static let learningStatsDidChange = Notification.Name("satori.learningStatsDidChange")
 }

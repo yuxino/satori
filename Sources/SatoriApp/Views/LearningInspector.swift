@@ -405,6 +405,9 @@ struct LearningInspector: View {
                 runOutput = result
                 isRunning = false
             }
+            // Running code counts as studying — feeds the 动手达人 badge.
+            try? await LearningStatsStore.shared.recordCodeRun(documentID: documentID)
+            NotificationCenter.default.post(name: .learningStatsDidChange, object: nil)
         }
     }
 
@@ -1211,6 +1214,11 @@ struct LearningInspector: View {
         draftAttachmentCount = 0
         response = nil
         persistTurns()
+        // A completed Q&A counts as studying — feeds the 勤学好问 badge.
+        Task {
+            try? await LearningStatsStore.shared.recordQuestion(documentID: documentID)
+            NotificationCenter.default.post(name: .learningStatsDidChange, object: nil)
+        }
     }
 
     private func deleteTurn(_ turnID: UUID) {
