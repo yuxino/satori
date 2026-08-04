@@ -179,10 +179,6 @@ private struct DocumentWorkspace: View {
                     onComposeSelection: { text in
                         showsInspector = true
                         selectionCommand = SelectionCommand(text: text, action: .compose)
-                    },
-                    onRunSelection: { text in
-                        showsInspector = true
-                        selectionCommand = SelectionCommand(text: text, action: .run)
                     }
                 )
             }
@@ -345,7 +341,7 @@ private struct DocumentWorkspace: View {
 /// panel. The unique id makes repeated commands over the same text distinct,
 /// so `onChange` still fires when the reader picks the same passage twice.
 struct SelectionCommand: Equatable {
-    enum Action { case explain, compose, run }
+    enum Action { case explain, compose }
 
     let id = UUID()
     let text: String

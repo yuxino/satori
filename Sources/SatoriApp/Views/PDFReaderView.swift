@@ -13,7 +13,6 @@ struct PDFReaderView: NSViewRepresentable {
     /// selection (which the click itself can clear).
     var onExplainSelection: ((String) -> Void)?
     var onComposeSelection: ((String) -> Void)?
-    var onRunSelection: ((String) -> Void)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -21,8 +20,7 @@ struct PDFReaderView: NSViewRepresentable {
             onPositionChanged: onPositionChanged,
             onSelectionChanged: onSelectionChanged,
             onExplainSelection: onExplainSelection,
-            onComposeSelection: onComposeSelection,
-            onRunSelection: onRunSelection
+            onComposeSelection: onComposeSelection
         )
     }
 
@@ -43,7 +41,6 @@ struct PDFReaderView: NSViewRepresentable {
         context.coordinator.onSelectionChanged = onSelectionChanged
         context.coordinator.onExplainSelection = onExplainSelection
         context.coordinator.onComposeSelection = onComposeSelection
-        context.coordinator.onRunSelection = onRunSelection
         guard let document = view.document, document.pageCount > 0 else { return }
         let targetIndex = min(max(currentPageIndex, 0), document.pageCount - 1)
         let visibleIndex = view.currentPage.map(document.index(for:))
@@ -63,7 +60,6 @@ struct PDFReaderView: NSViewRepresentable {
         var onSelectionChanged: ((String) -> Void)?
         var onExplainSelection: ((String) -> Void)?
         var onComposeSelection: ((String) -> Void)?
-        var onRunSelection: ((String) -> Void)?
 
         private var toolbar: SelectionToolbarView?
         /// The text selected when the toolbar was last shown. Actions use this
@@ -76,15 +72,13 @@ struct PDFReaderView: NSViewRepresentable {
             onPositionChanged: @escaping (Int, Double) -> Void,
             onSelectionChanged: ((String) -> Void)?,
             onExplainSelection: ((String) -> Void)?,
-            onComposeSelection: ((String) -> Void)?,
-            onRunSelection: ((String) -> Void)?
+            onComposeSelection: ((String) -> Void)?
         ) {
             self.currentPageIndex = currentPageIndex
             self.onPositionChanged = onPositionChanged
             self.onSelectionChanged = onSelectionChanged
             self.onExplainSelection = onExplainSelection
             self.onComposeSelection = onComposeSelection
-            self.onRunSelection = onRunSelection
         }
 
         func observe(_ view: PDFView) {
@@ -117,22 +111,8 @@ struct PDFReaderView: NSViewRepresentable {
                 hideToolbar()
             } else {
                 pinnedSelection = text
-                toolbar?.setRunnable(Self.selectionLooksLikeCode(text))
                 showToolbar(for: selection, in: view)
             }
-        }
-
-        /// A rough heuristic: the selection is probably runnable code when it
-        /// spans multiple lines or contains language markers (`int main`, `#include`,
-        /// `def `, `{`/`}`, `->`, `=`, `print(`...). A single short line of plain
-        /// prose is not treated as code.
-        private static func selectionLooksLikeCode(_ text: String) -> Bool {
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard trimmed.count >= 3 else { return false }
-            let lines = trimmed.split(separator: "\n")
-            let markers = ["int main", "#include", "def ", "class ", "import ", "print(", "{", "}", "->", "==", "return ", "for ", "while ", "using namespace", "public static", "fn "]
-            let looksCode = lines.count >= 2 || markers.contains { trimmed.contains($0) }
-            return looksCode
         }
 
         @MainActor private func showToolbar(for selection: PDFSelection?, in view: PDFView) {
@@ -190,14 +170,6 @@ struct PDFReaderView: NSViewRepresentable {
                 self.clearSelection()
                 guard !text.isEmpty else { return }
                 self.onComposeSelection?(text)
-            }
-            bar.onRun = { [weak self] in
-                guard let self else { return }
-                let text = self.pinnedSelection
-                self.hideToolbar()
-                self.clearSelection()
-                guard !text.isEmpty else { return }
-                self.onRunSelection?(text)
             }
             toolbar = bar
             return bar

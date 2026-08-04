@@ -149,12 +149,6 @@ struct LearningInspector: View {
             .controlSize(.small)
             .tint(showsNotes ? SatoriTheme.accent : .secondary)
 
-            Button("截图提问", systemImage: "camera") { captureScreenshot() }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(SatoriTheme.accent)
-                .help("截取屏幕画面来提问")
-
             Button("关闭", systemImage: "xmark", action: onClose)
                 .labelStyle(.iconOnly)
                 .buttonStyle(.plain)
@@ -1000,6 +994,19 @@ struct LearningInspector: View {
                 .controlSize(.small)
                 .help("允许这次提问使用 Qwen 网页搜索")
 
+                Button {
+                    withAnimation(SatoriTheme.Motion.quick) {
+                        isShowingRun = true
+                        showsNotes = false
+                    }
+                } label: {
+                    Label("运行代码", systemImage: "play.rectangle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(SatoriTheme.accent)
+                .help("打开代码运行台")
+
                 Spacer()
                 Button {
                     isThinking ? stopAssistant() : askAssistant()
@@ -1199,10 +1206,6 @@ struct LearningInspector: View {
             showsNotes = false
             isShowingRun = false
             isQuestionFocused = true
-        case .run:
-            showsNotes = false
-            runCode = text
-            isShowingRun = true
         }
     }
 
@@ -1287,38 +1290,6 @@ struct LearningInspector: View {
 
     private func revealAnswer() {
         withAnimation(SatoriTheme.Motion.quick) { isAnswerRevealed = true }
-    }
-
-    /// Captures the current screen and attaches it as an image for the next
-    /// question — a fast path for asking about something you see (a chart, a
-    /// diagram, a scan) without typing.
-    private func captureScreenshot() {
-        guard let screenshot = captureScreenImage() else {
-            attachmentStatus = "截图失败，请重试。"
-            return
-        }
-        guard let attachment = LearningImageAttachmentLoader.normalizeImage(screenshot, name: "屏幕截图") else {
-            attachmentStatus = "截图无法作为图片使用。"
-            return
-        }
-        let remaining = max(0, 4 - attachments.count)
-        guard remaining > 0 else {
-            attachmentStatus = "每次最多附加 4 张图片。"
-            return
-        }
-        attachments.append(attachment)
-        showsNotes = false
-        isShowingRun = false
-        isQuestionFocused = true
-    }
-
-    /// Grabs the whole screen via `CGDisplayCreateImage`. A full-window picker
-    /// would be nicer but needs Screen Recording permission; the system picker
-    /// (Cmd+Shift+5) is the trusted route, and pasting with ⌘V works too.
-    private func captureScreenImage() -> NSImage? {
-        let display = CGMainDisplayID()
-        guard let image = CGDisplayCreateImage(display) else { return nil }
-        return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
     }
 
     private func scopeExtractionFailureMessage(_ scope: ContextScope, pageIndex: Int) -> String {
