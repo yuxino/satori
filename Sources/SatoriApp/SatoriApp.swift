@@ -10,6 +10,7 @@ struct SatoriApp: App {
             ContentView()
                 .environmentObject(store)
                 .frame(minWidth: 1120, minHeight: 720)
+                .tint(SatoriTheme.accent)
         }
         .windowStyle(.automatic)
 

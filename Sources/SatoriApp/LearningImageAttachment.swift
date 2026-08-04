@@ -20,7 +20,23 @@ enum LearningImageAttachmentLoader {
         guard let source = NSImage(contentsOf: url), source.size.width > 0, source.size.height > 0 else {
             throw AttachmentError.unreadable
         }
+        return try normalize(source, name: url.lastPathComponent)
+    }
 
+    /// Reads image attachments off the pasteboard (Cmd+V). Returns an empty
+    /// array when the pasteboard holds no image, so callers can fall back to
+    /// text paste.
+    static func load(from pasteboard: NSPasteboard) -> [LearningImageAttachment] {
+        guard let items = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage] else {
+            return []
+        }
+        return items.enumerated().compactMap { index, image in
+            guard image.size.width > 0, image.size.height > 0 else { return nil }
+            return try? normalize(image, name: "粘贴图片 \(index + 1)")
+        }
+    }
+
+    private static func normalize(_ source: NSImage, name: String) throws -> LearningImageAttachment {
         let scale = min(1, maximumDimension / max(source.size.width, source.size.height))
         let targetSize = NSSize(
             width: max(1, (source.size.width * scale).rounded()),
@@ -44,7 +60,7 @@ enum LearningImageAttachmentLoader {
             throw AttachmentError.unreadable
         }
 
-        return LearningImageAttachment(name: url.lastPathComponent, jpegData: jpeg, preview: preview)
+        return LearningImageAttachment(name: name, jpegData: jpeg, preview: preview)
     }
 }
 

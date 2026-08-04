@@ -1,6 +1,14 @@
 import Foundation
 
 public actor LearningSessionStore {
+    /// Process-wide store for the default on-disk archive.
+    ///
+    /// Every reading pane must share this instance. Creating a fresh
+    /// `LearningSessionStore` per view gives each one its own `cachedArchive`,
+    /// so a late async write from one book can overwrite the archive with a
+    /// stale snapshot and wipe another book's turns.
+    public static let shared = LearningSessionStore()
+
     private let fileURL: URL
     private var cachedArchive: LearningSessionArchive?
 

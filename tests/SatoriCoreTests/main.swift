@@ -49,6 +49,29 @@ struct SatoriCoreTests {
         let clearedSecondTurns = try await restoredSessionStore.turns(for: secondDocumentID)
         precondition(clearedSecondTurns.isEmpty, "Expected clearing one document session")
 
+        // Regression: switching books used to wipe records. A single store must
+        // keep every book's turns intact when writes for different documents
+        // interleave, even reusing the file after a fresh load.
+        let interleaveFile = root.appending(path: "interleave-sessions.json")
+        let bookA = UUID()
+        let bookB = UUID()
+        let interleaveStore = LearningSessionStore(fileURL: interleaveFile)
+        try await interleaveStore.save([
+            LearningTurn(question: "A1", answer: "答案 A1", pageIndex: 0, sourceKind: .currentPDF)
+        ], for: bookA)
+        try await interleaveStore.save([
+            LearningTurn(question: "B1", answer: "答案 B1", pageIndex: 0, sourceKind: .currentPDF)
+        ], for: bookB)
+        // A late write for book A (as if its stream finished after the switch).
+        try await interleaveStore.save([
+            LearningTurn(question: "A1", answer: "答案 A1", pageIndex: 0, sourceKind: .currentPDF),
+            LearningTurn(question: "A2", answer: "答案 A2", pageIndex: 1, sourceKind: .currentPDF)
+        ], for: bookA)
+        let survivingA = try await interleaveStore.turns(for: bookA)
+        let survivingB = try await interleaveStore.turns(for: bookB)
+        precondition(survivingA.count == 2, "Expected book A turns to persist after a late write")
+        precondition(survivingB.count == 1, "Expected book B turns to survive a sibling's write")
+
         let markdown = """
         **原文依据**
 
@@ -71,9 +94,32 @@ struct SatoriCoreTests {
         let markdownBlocks = LearningMarkdownParser.parse(markdown)
         precondition(markdownBlocks.first == .heading(level: 3, text: "原文依据"), "Expected bold section label to become a heading")
         precondition(markdownBlocks.contains(.unorderedList(["第一条", "第二条"])), "Expected unordered list parsing")
-        precondition(markdownBlocks.contains(.orderedList(["第一步", "第二步"])), "Expected ordered list parsing")
+        precondition(
+            markdownBlocks.contains(.orderedList([
+                LearningOrderedItem(number: 1, text: "第一步"),
+                LearningOrderedItem(number: 2, text: "第二步")
+            ])),
+            "Expected ordered list parsing"
+        )
         precondition(markdownBlocks.contains(.quote("重要联系")), "Expected quote parsing")
         precondition(markdownBlocks.contains(.code(language: "c", content: "for (i = 2; i <= 10; i++) {\n    t *= i;\n}")), "Expected fenced code parsing")
+
+        // Regression: an ordered list broken up by explanatory paragraphs used
+        // to render every item as "1" because each fragment was its own list
+        // renumbered from the array index. Numbers must follow the source text.
+        let interruptedList = """
+        1. 第一点
+        例如：具体说明一。
+        2. 第二点
+        例如：具体说明二。
+        3. 第三点
+        """
+        let interruptedBlocks = LearningMarkdownParser.parse(interruptedList)
+        let orderedNumbers = interruptedBlocks.compactMap { block -> [Int]? in
+            if case let .orderedList(items) = block { return items.map(\.number) }
+            return nil
+        }
+        precondition(orderedNumbers == [[1], [2], [3]], "Expected ordered numbers to follow the source even when interrupted by paragraphs")
 
         let response = await UnconfiguredLearningAssistant().explain(request: "解释", pageIndex: 7)
         precondition(response.sourceKind == .inference, "Expected explicit source label")
@@ -132,6 +178,30 @@ struct SatoriCoreTests {
         precondition(streamUpdates.first?.text == "fixture ", "Expected first streaming text delta")
         precondition(streamUpdates.last?.text == "fixture explanation", "Expected assembled streaming response")
         precondition(streamUpdates.last?.citations.first?.url.absoluteString == "https://example.com/source", "Expected final streaming citations")
+
+        // Glyph-positioned PDFs hand back CJK text with a space wedged between
+        // every character ("返 回 正 整 数"). Those spaces are always artifacts
+        // and must be dropped before the text becomes preview or model input.
+        precondition(
+            ExtractedTextNormalizer.normalize("返 回 正 整 数 n u m 的 位 数") == "返回正整数 n u m 的位数",
+            "Expected inter-CJK spaces to collapse while Latin runs stay intact"
+        )
+        precondition(
+            ExtractedTextNormalizer.normalize("定 义 函 数 isHuiWenShu") == "定义函数 isHuiWenShu",
+            "Expected a CJK-to-Latin boundary space to survive"
+        )
+        precondition(
+            ExtractedTextNormalizer.normalize("length=10; /*设 定 num 的 位 数*/") == "length=10; /*设定 num 的位数*/",
+            "Expected code spacing to survive while CJK runs collapse"
+        )
+        precondition(
+            ExtractedTextNormalizer.normalize("第 一 步。 第 二 步") == "第一步。第二步",
+            "Expected CJK punctuation to bridge a collapse"
+        )
+        precondition(
+            ExtractedTextNormalizer.normalize("  正常中文句子，不该被改。  ") == "正常中文句子，不该被改。",
+            "Expected clean CJK text to only be trimmed"
+        )
         print("Satori core checks passed")
     }
 }

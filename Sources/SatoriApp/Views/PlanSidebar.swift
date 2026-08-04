@@ -55,10 +55,11 @@ private struct CourseRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 9) {
+        VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
+            HStack(spacing: SatoriTheme.Spacing.sm + 1) {
                 Image(systemName: currentDocument == nil ? "book.closed" : "book.pages")
-                    .foregroundStyle(currentDocument == nil ? .secondary : SatoriTheme.lavender)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(course.title)
@@ -69,14 +70,20 @@ private struct CourseRow: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                Spacer(minLength: 0)
+                if currentDocument != nil {
+                    Text("\(Int(progress * 100))%")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
             }
             if currentDocument != nil {
                 ProgressView(value: progress)
-                    .tint(SatoriTheme.lavender)
+                    .tint(SatoriTheme.accent)
                     .controlSize(.mini)
             }
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, SatoriTheme.Spacing.xs + 2)
         .contentShape(Rectangle())
     }
 

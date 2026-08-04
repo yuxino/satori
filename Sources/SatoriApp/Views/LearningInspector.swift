@@ -11,8 +11,32 @@ struct LearningInspector: View {
         var id: Self { self }
     }
 
+    enum ContextScope: Equatable {
+        case selection
+        case page
+        case wholeDocument
+
+        var pickerTitle: String {
+            switch self {
+            case .selection: "选中内容"
+            case .page: "当前页"
+            case .wholeDocument: "整本书"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .selection: "text.cursor"
+            case .page: "doc.text"
+            case .wholeDocument: "books.vertical"
+            }
+        }
+    }
+
     let documentID: UUID
     let pageIndex: Int
+    let selectedText: String
+    let selectionCommand: SelectionCommand?
     let directory: [LearningDirectoryItem]
     let documentURL: URL
     let onNavigateToPage: (Int) -> Void
@@ -37,10 +61,15 @@ struct LearningInspector: View {
     @State private var attachments: [LearningImageAttachment] = []
     @State private var isImportingImage = false
     @State private var attachmentStatus = ""
+    @State private var contextScope: ContextScope = .page
+    /// Selection text pinned from a PDF toolbar command. Used when the live PDF
+    /// selection has already been cleared by the button click.
+    @State private var pinnedSelectionText = ""
+    @FocusState private var isQuestionFocused: Bool
     @State private var requestTask: Task<Void, Never>?
     @State private var showsClearConfirmation = false
 
-    private let sessionStore = LearningSessionStore()
+    private let sessionStore = LearningSessionStore.shared
     private let responseBottomID = "learning-response-bottom"
     private let quickPrompts = [
         "这一页主要在讲什么？",
@@ -67,6 +96,9 @@ struct LearningInspector: View {
         .onReceive(NotificationCenter.default.publisher(for: .qwenConfigurationDidChange)) { _ in
             refreshConfigurationState()
         }
+        .onChange(of: selectionCommand) { _, command in
+            handleSelectionCommand(command)
+        }
         .fileImporter(
             isPresented: $isImportingImage,
             allowedContentTypes: [.image],
@@ -83,28 +115,35 @@ struct LearningInspector: View {
     }
 
     private var inspectorHeader: some View {
-        VStack(spacing: 11) {
-            HStack {
-                Label("学习记录", systemImage: "sparkles")
+        VStack(spacing: SatoriTheme.Spacing.md) {
+            HStack(spacing: SatoriTheme.Spacing.sm) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(SatoriTheme.accent)
+                    .frame(width: 26, height: 26)
+                    .background(SatoriTheme.accentWash, in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+                Text("学习记录")
                     .font(.headline)
                 if !turns.isEmpty {
                     Text("\(turns.count)")
                         .font(.caption.monospacedDigit().weight(.semibold))
-                        .foregroundStyle(SatoriTheme.lavender)
+                        .foregroundStyle(SatoriTheme.accent)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 2)
-                        .background(SatoriTheme.lavenderSoft, in: Capsule())
+                        .background(SatoriTheme.accentWash, in: Capsule())
                 }
                 Spacer()
                 if mode == .understand, !turns.isEmpty {
                     Button("清空记录", systemImage: "trash") { showsClearConfirmation = true }
                         .labelStyle(.iconOnly)
                         .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
                         .help("清空这本书的学习记录")
                 }
                 Button("关闭", systemImage: "xmark", action: onClose)
                     .labelStyle(.iconOnly)
                     .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
                     .help("关闭学习面板")
             }
             Picker("面板内容", selection: $mode) {
@@ -115,8 +154,8 @@ struct LearningInspector: View {
             .pickerStyle(.segmented)
             .labelsHidden()
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 13)
+        .padding(.horizontal, SatoriTheme.Spacing.lg)
+        .padding(.vertical, SatoriTheme.Spacing.md)
         .background(.bar)
     }
 
@@ -175,66 +214,101 @@ struct LearningInspector: View {
         }
     }
 
+    /// The passage "选中内容" asks about: the live PDF highlight when there is
+    /// one, otherwise the text pinned from a selection-toolbar command.
+    private var activeSelection: String {
+        let live = ExtractedTextNormalizer.normalize(selectedText)
+        return live.isEmpty ? pinnedSelectionText : live
+    }
+
+    private var hasSelection: Bool {
+        !activeSelection.isEmpty
+    }
+
+    private var availableScopes: [ContextScope] {
+        hasSelection ? [.selection, .page, .wholeDocument] : [.page, .wholeDocument]
+    }
+
     private var contextCard: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "text.viewfinder")
-                .foregroundStyle(SatoriTheme.insight)
-                .frame(width: 30, height: 30)
-                .background(SatoriTheme.insightSoft, in: RoundedRectangle(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 1) {
-                Text("当前阅读")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text("PDF 第 \(pageIndex + 1) 页")
-                    .font(.callout.weight(.medium))
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 10) {
+                Image(systemName: "text.viewfinder")
+                    .foregroundStyle(SatoriTheme.iconChrome)
+                    .frame(width: 30, height: 30)
+                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("提问依据")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(scopeSummary)
+                        .font(.callout.weight(.medium))
+                        .lineLimit(1)
+                }
+                Spacer()
             }
-            Spacer()
-            Text("提问会自动引用此页")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+
+            Picker("提问依据", selection: $contextScope) {
+                ForEach(availableScopes, id: \.self) { scope in
+                    Label(scope.pickerTitle, systemImage: scope.systemImage).tag(scope)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            if contextScope == .selection, hasSelection {
+                Text(activeSelection)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .padding(9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+            }
         }
         .padding(11)
         .background(.background.opacity(0.78), in: RoundedRectangle(cornerRadius: 11))
         .overlay(RoundedRectangle(cornerRadius: 11).stroke(.quaternary))
+        .onChange(of: hasSelection) { _, selecting in
+            if selecting {
+                contextScope = .selection
+            } else if contextScope == .selection {
+                contextScope = .page
+            }
+        }
+    }
+
+    private var scopeSummary: String {
+        switch contextScope {
+        case .selection: "在 PDF 中选中的文字"
+        case .page: "PDF 第 \(pageIndex + 1) 页"
+        case .wholeDocument: "整本书的文字"
+        }
     }
 
     private var promptStarter: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: SatoriTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: SatoriTheme.Spacing.xs + 1) {
                 Text("从不懂的地方开始")
-                    .font(.headline)
+                    .font(.title3.weight(.semibold))
                 Text("不用整理笔记。先问清一个概念，再沿着答案继续追问。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            ForEach(quickPrompts, id: \.self) { prompt in
-                Button {
-                    askAssistant(prompt)
-                } label: {
-                    HStack {
-                        Text(prompt)
-                        Spacer()
-                        Image(systemName: "arrow.up.right")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .contentShape(Rectangle())
+            VStack(spacing: SatoriTheme.Spacing.sm) {
+                ForEach(quickPrompts, id: \.self) { prompt in
+                    QuickPromptButton(prompt: prompt) { askAssistant(prompt) }
                 }
-                .buttonStyle(.plain)
-                .padding(10)
-                .background(.background, in: RoundedRectangle(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).stroke(.quaternary))
             }
 
             if !hasQwenConfiguration {
                 Button("连接 Qwen", systemImage: "key") { openSettings() }
                     .buttonStyle(.bordered)
-                    .tint(SatoriTheme.lavender)
+                    .tint(SatoriTheme.accent)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, SatoriTheme.Spacing.xs)
     }
 
     private func learningTurnCard(_ turn: LearningTurn) -> some View {
@@ -261,9 +335,8 @@ struct LearningInspector: View {
                 turnActions(turn)
             }
         }
-        .padding(14)
-        .background(.background, in: RoundedRectangle(cornerRadius: 13))
-        .overlay(RoundedRectangle(cornerRadius: 13).stroke(.quaternary))
+        .satoriCard(radius: SatoriTheme.Radius.md, padding: SatoriTheme.Spacing.lg)
+        .animation(SatoriTheme.Motion.standard, value: isExpanded)
     }
 
     private func draftTurnCard(_ draftResponse: LearningResponse) -> some View {
@@ -284,13 +357,13 @@ struct LearningInspector: View {
                 completion: .completed
             )
             if draftResponse.text.isEmpty {
-                HStack(spacing: 9) {
+                HStack(spacing: SatoriTheme.Spacing.sm) {
                     ProgressView().controlSize(.small)
                     Text(allowsWebSearch ? "正在理解原文并检索资料…" : "正在理解当前页…")
                         .foregroundStyle(.secondary)
                 }
                 .font(.callout)
-                .padding(.vertical, 6)
+                .padding(.vertical, SatoriTheme.Spacing.xs + 2)
             } else {
                 LearningMarkdownView(markdown: draftResponse.text)
             }
@@ -309,9 +382,7 @@ struct LearningInspector: View {
                 }
             }
         }
-        .padding(14)
-        .background(.background, in: RoundedRectangle(cornerRadius: 13))
-        .overlay(RoundedRectangle(cornerRadius: 13).stroke(SatoriTheme.lavender.opacity(isThinking ? 0.45 : 0.18)))
+        .satoriCard(radius: SatoriTheme.Radius.md, padding: SatoriTheme.Spacing.lg, emphasized: isThinking)
     }
 
     private func turnQuestionHeader(
@@ -322,18 +393,19 @@ struct LearningInspector: View {
         isExpanded: Bool?,
         onToggle: (() -> Void)?
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
             HStack {
                 Text("我的问题")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(SatoriTheme.lavender)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 if let isExpanded, let onToggle {
                     Button(isExpanded ? "收起回答" : "展开回答", systemImage: isExpanded ? "chevron.up" : "chevron.down") {
-                        onToggle()
+                        withAnimation(SatoriTheme.Motion.standard) { onToggle() }
                     }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
                     .help(isExpanded ? "收起回答" : "展开回答")
                 }
                 Text(createdAt, style: .time)
@@ -344,7 +416,7 @@ struct LearningInspector: View {
                 .font(.callout.weight(.semibold))
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
+            HStack(spacing: SatoriTheme.Spacing.sm) {
                 Button("第 \(pageIndex + 1) 页", systemImage: "doc.text.magnifyingglass") {
                     onNavigateToPage(pageIndex)
                 }
@@ -357,8 +429,8 @@ struct LearningInspector: View {
                 }
             }
         }
-        .padding(11)
-        .background(SatoriTheme.lavenderSoft.opacity(0.72), in: RoundedRectangle(cornerRadius: 10))
+        .padding(SatoriTheme.Spacing.md)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
     }
 
     private func answerHeader(
@@ -373,7 +445,7 @@ struct LearningInspector: View {
                 systemImage: isStreaming ? "sparkles" : "checkmark.seal"
             )
             .font(.caption.weight(.semibold))
-            .foregroundStyle(SatoriTheme.lavender)
+            .foregroundStyle(SatoriTheme.accent)
             if completion == .stopped {
                 Text("已停止")
                     .font(.caption2.weight(.medium))
@@ -433,30 +505,39 @@ struct LearningInspector: View {
     }
 
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
             if !attachments.isEmpty { attachmentStrip }
 
             ZStack(alignment: .topLeading) {
                 if question.isEmpty {
                     Text(turns.isEmpty ? "问这一页，也可以附上图片…" : "继续追问这里为什么、再举个例子…")
                         .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 12)
+                        .padding(.horizontal, SatoriTheme.Spacing.md + 1)
+                        .padding(.vertical, SatoriTheme.Spacing.md)
                         .allowsHitTesting(false)
                 }
                 TextEditor(text: $question)
                     .font(.body)
                     .scrollContentBackground(.hidden)
-                    .padding(8)
+                    .padding(SatoriTheme.Spacing.sm)
                     .frame(minHeight: 68, maxHeight: 104)
+                    .focused($isQuestionFocused)
                     .onKeyPress(.return, phases: .down) { keyPress in
                         if keyPress.modifiers.contains(.shift) { return .ignored }
                         if canSend { askAssistant() }
                         return .handled
                     }
+                    .onKeyPress(keys: ["v"], phases: .down) { keyPress in
+                        guard keyPress.modifiers.contains(.command) else { return .ignored }
+                        return pasteFromPasteboard() ? .handled : .ignored
+                    }
             }
-            .background(.background, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(SatoriTheme.lavender.opacity(0.28)))
+            .background(.background, in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous)
+                    .strokeBorder(SatoriTheme.accent.opacity(isQuestionFocused ? 0.6 : 0.24), lineWidth: isQuestionFocused ? 1.5 : 1)
+            )
+            .animation(SatoriTheme.Motion.quick, value: isQuestionFocused)
 
             if !attachmentStatus.isEmpty {
                 Text(attachmentStatus)
@@ -469,6 +550,12 @@ struct LearningInspector: View {
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
                     .help("添加图片（最多 4 张）")
+                    .disabled(attachments.count >= 4 || isThinking)
+
+                Button("粘贴图片", systemImage: "doc.on.clipboard") { _ = pasteFromPasteboard() }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .help("粘贴剪贴板里的图片（⌘V）")
                     .disabled(attachments.count >= 4 || isThinking)
 
                 Toggle(isOn: $allowsWebSearch) {
@@ -485,7 +572,7 @@ struct LearningInspector: View {
                     Label(isThinking ? "停止" : "发送", systemImage: isThinking ? "stop.fill" : "arrow.up")
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(SatoriTheme.lavender)
+                .tint(SatoriTheme.accent)
                 .disabled(!isThinking && !canSend)
             }
             Text(composerHint)
@@ -493,7 +580,7 @@ struct LearningInspector: View {
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(13)
+        .padding(SatoriTheme.Spacing.md)
         .background(.bar)
     }
 
@@ -535,9 +622,9 @@ struct LearningInspector: View {
                     HStack(alignment: .top, spacing: 11) {
                         Text("\(index + 1)")
                             .font(.caption.monospacedDigit().weight(.semibold))
-                            .foregroundStyle(item.isComplete ? .secondary : SatoriTheme.lavender)
+                            .foregroundStyle(item.isComplete ? .secondary : SatoriTheme.accent)
                             .frame(width: 22, height: 22)
-                            .background(SatoriTheme.lavenderSoft, in: Circle())
+                            .background(SatoriTheme.accentWash, in: Circle())
                         VStack(alignment: .leading, spacing: 3) {
                             Text(item.title)
                                 .font(.callout)
@@ -568,8 +655,14 @@ struct LearningInspector: View {
     }
 
     private var composerHint: String {
-        let context = allowsWebSearch ? "发送当前页、最近对话、附件并联网" : "发送当前页、最近对话和附件"
-        return "Enter 发送 · Shift+Enter 换行 · \(context)"
+        let scope: String
+        switch contextScope {
+        case .selection: scope = "选中内容"
+        case .page: scope = "当前页"
+        case .wholeDocument: scope = "整本书"
+        }
+        let web = allowsWebSearch ? "、联网" : ""
+        return "Enter 发送 · Shift+Enter 换行 · ⌘V 贴图 · 依据\(scope)、最近对话、附件\(web)"
     }
 
     @MainActor
@@ -589,17 +682,39 @@ struct LearningInspector: View {
     private func askAssistant(
         _ suppliedQuestion: String? = nil,
         pageOverride: Int? = nil,
+        selectionOverride: String? = nil,
         excludingTurnID: UUID? = nil
     ) {
         let request = (suppliedQuestion ?? question).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty, !isThinking else { return }
 
         let targetPageIndex = pageOverride ?? pageIndex
-        guard let pageContent = PDFPageContextExtractor.extract(from: documentURL, pageIndex: targetPageIndex) else {
+        // Retries carry a page override and always re-ask against that page;
+        // a selection override comes from the PDF toolbar's "解释这段"; fresh
+        // questions otherwise follow whatever scope the reader picked.
+        let effectiveScope: ContextScope
+        if selectionOverride != nil {
+            effectiveScope = .selection
+        } else if pageOverride != nil {
+            effectiveScope = .page
+        } else {
+            effectiveScope = contextScope
+        }
+        let extractionScope: PDFPageContextExtractor.Scope
+        switch effectiveScope {
+        case .selection:
+            extractionScope = .selection(selectionOverride ?? activeSelection)
+        case .page:
+            extractionScope = .page(targetPageIndex)
+        case .wholeDocument:
+            extractionScope = .wholeDocument
+        }
+
+        guard let pageContent = PDFPageContextExtractor.extract(from: documentURL, scope: extractionScope) else {
             draftQuestion = request
             draftPageIndex = targetPageIndex
             response = LearningResponse(
-                text: "暂时无法读取第 \(targetPageIndex + 1) 页。请确认 PDF 文件仍然可以打开。",
+                text: scopeExtractionFailureMessage(effectiveScope, pageIndex: targetPageIndex),
                 sourceKind: .inference,
                 pageIndex: targetPageIndex
             )
@@ -661,6 +776,35 @@ struct LearningInspector: View {
             } else {
                 completeDraft(with: latestResponse, completion: .completed)
             }
+        }
+    }
+
+    /// Reacts to a Cursor-style command from the PDF selection toolbar.
+    /// "解释这段" asks immediately; "就这段提问" pins the passage and lets the
+    /// reader type. Both switch to the understanding tab first, since the
+    /// command is meaningless on the directory tab.
+    private func handleSelectionCommand(_ command: SelectionCommand?) {
+        guard let command else { return }
+        let text = ExtractedTextNormalizer.normalize(command.text)
+        guard !text.isEmpty else { return }
+
+        mode = .understand
+        pinnedSelectionText = text
+        contextScope = .selection
+
+        switch command.action {
+        case .explain:
+            askAssistant("解释我选中的这段内容", selectionOverride: text)
+        case .compose:
+            isQuestionFocused = true
+        }
+    }
+
+    private func scopeExtractionFailureMessage(_ scope: ContextScope, pageIndex: Int) -> String {
+        switch scope {
+        case .selection: "没有读到选中的文字。请在 PDF 里重新划选一段再提问。"
+        case .page: "暂时无法读取第 \(pageIndex + 1) 页。请确认 PDF 文件仍然可以打开。"
+        case .wholeDocument: "这本书里没有可提取的文字（可能是扫描版）。可以改用“当前页”，Satori 会把该页作为图片交给 AI。"
         }
     }
 
@@ -728,6 +872,23 @@ struct LearningInspector: View {
         }
     }
 
+    /// Handles Cmd+V. Pulls any images off the pasteboard into attachments and
+    /// returns whether it consumed the event; when there is no image we let the
+    /// text editor paste text as usual.
+    private func pasteFromPasteboard() -> Bool {
+        let pasted = LearningImageAttachmentLoader.load(from: .general)
+        guard !pasted.isEmpty else { return false }
+
+        let remaining = max(0, 4 - attachments.count)
+        guard remaining > 0 else {
+            attachmentStatus = "每次最多附加 4 张图片，粘贴的图片没有加入。"
+            return true
+        }
+        attachments.append(contentsOf: pasted.prefix(remaining))
+        attachmentStatus = pasted.count > remaining ? "每次最多附加 4 张图片，其余图片没有加入。" : ""
+        return true
+    }
+
     private func importImages(_ result: Result<[URL], Error>) {
         do {
             let urls = try result.get()
@@ -768,5 +929,40 @@ struct LearningInspector: View {
     private func copyToPasteboard(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+/// A starter-prompt row with hover and press feedback, so the empty state
+/// feels tactile instead of like static list items.
+private struct QuickPromptButton: View {
+    let prompt: String
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                Text(prompt)
+                    .foregroundStyle(.primary)
+                Spacer()
+                Image(systemName: "arrow.up.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(isHovering ? SatoriTheme.accent : Color.secondary.opacity(0.6))
+            }
+            .contentShape(Rectangle())
+            .padding(SatoriTheme.Spacing.md)
+            .background(
+                isHovering ? SatoriTheme.accentWash : Color(nsColor: .controlBackgroundColor).opacity(0.6),
+                in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous)
+                    .strokeBorder(isHovering ? SatoriTheme.accent.opacity(0.35) : Color.primary.opacity(0.07), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(SatoriTheme.Motion.quick) { isHovering = hovering }
+        }
     }
 }

@@ -54,11 +54,11 @@ struct CourseOverview: View {
         VStack(spacing: 22) {
             ZStack {
                 RoundedRectangle(cornerRadius: 24)
-                    .fill(SatoriTheme.lavenderSoft)
+                    .fill(SatoriTheme.accentWash)
                     .frame(width: 96, height: 96)
                 Image(systemName: "book.pages.fill")
                     .font(.system(size: 40, weight: .medium))
-                    .foregroundStyle(SatoriTheme.lavender)
+                    .foregroundStyle(SatoriTheme.accent)
             }
             VStack(spacing: 8) {
                 Text("从一本教材开始")
@@ -72,7 +72,7 @@ struct CourseOverview: View {
             Button("选择 PDF", systemImage: "plus") { choosePDF() }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .tint(SatoriTheme.lavender)
+                .tint(SatoriTheme.accent)
             Text("支持文字版、扫描版与混合 PDF · 文件保留在本机")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
@@ -89,7 +89,7 @@ struct CourseOverview: View {
         } actions: {
             Button("重新选择 PDF") { choosePDF(replacing: document) }
                 .buttonStyle(.borderedProminent)
-                .tint(SatoriTheme.lavender)
+                .tint(SatoriTheme.accent)
             Button("移除引用", role: .destructive) { showsRemoveConfirmation = true }
         }
     }
@@ -128,6 +128,8 @@ private struct DocumentWorkspace: View {
     @State private var currentPageIndex: Int
     @State private var pageInput = ""
     @State private var showsInspector = true
+    @State private var selectedText = ""
+    @State private var selectionCommand: SelectionCommand?
 
     init(
         course: CourseWorkspace,
@@ -158,15 +160,25 @@ private struct DocumentWorkspace: View {
                 PDFReaderView(
                     url: url,
                     initialPosition: document.readingPosition,
-                    currentPageIndex: $currentPageIndex
-                ) { pageIndex, offset in
-                    store.updateReadingPosition(
-                        courseID: course.id,
-                        documentID: document.id,
-                        pageIndex: pageIndex,
-                        normalizedOffset: offset
-                    )
-                }
+                    currentPageIndex: $currentPageIndex,
+                    onPositionChanged: { pageIndex, offset in
+                        store.updateReadingPosition(
+                            courseID: course.id,
+                            documentID: document.id,
+                            pageIndex: pageIndex,
+                            normalizedOffset: offset
+                        )
+                    },
+                    onSelectionChanged: { selectedText = $0 },
+                    onExplainSelection: { text in
+                        showsInspector = true
+                        selectionCommand = SelectionCommand(text: text, action: .explain)
+                    },
+                    onComposeSelection: { text in
+                        showsInspector = true
+                        selectionCommand = SelectionCommand(text: text, action: .compose)
+                    }
+                )
             }
             .frame(minWidth: 620)
 
@@ -174,6 +186,8 @@ private struct DocumentWorkspace: View {
                 LearningInspector(
                     documentID: document.id,
                     pageIndex: currentPageIndex,
+                    selectedText: selectedText,
+                    selectionCommand: selectionCommand,
                     directory: course.learningDirectory,
                     documentURL: url,
                     onNavigateToPage: { targetPage in
@@ -231,7 +245,7 @@ private struct DocumentWorkspace: View {
                 Label(showsInspector ? "隐藏理解" : "打开理解", systemImage: "sparkles.rectangle.stack")
             }
             .help(showsInspector ? "隐藏理解面板" : "打开理解面板")
-            .tint(SatoriTheme.lavender)
+            .tint(SatoriTheme.accent)
         }
         .padding(.horizontal, 14)
         .frame(height: 58)
@@ -260,7 +274,7 @@ private struct DocumentWorkspace: View {
         } label: {
             HStack(spacing: 9) {
                 Image(systemName: "doc.richtext")
-                    .foregroundStyle(SatoriTheme.lavender)
+                    .foregroundStyle(SatoriTheme.accent)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(document.displayName)
                         .font(.callout.weight(.medium))
@@ -275,7 +289,7 @@ private struct DocumentWorkspace: View {
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
-            .background(SatoriTheme.lavenderSoft, in: RoundedRectangle(cornerRadius: 9))
+            .background(SatoriTheme.accentWash, in: RoundedRectangle(cornerRadius: 9))
         }
         .menuStyle(.borderlessButton)
         .frame(maxWidth: 210, alignment: .leading)
@@ -287,4 +301,15 @@ private struct DocumentWorkspace: View {
         currentPageIndex = min(max(requestedPage - 1, 0), pageCount - 1)
         pageInput = ""
     }
+}
+
+/// A one-shot instruction from the PDF's selection toolbar to the learning
+/// panel. The unique id makes repeated commands over the same text distinct,
+/// so `onChange` still fires when the reader picks the same passage twice.
+struct SelectionCommand: Equatable {
+    enum Action { case explain, compose }
+
+    let id = UUID()
+    let text: String
+    let action: Action
 }

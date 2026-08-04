@@ -36,7 +36,7 @@ struct LearningMarkdownView: View {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                     HStack(alignment: .firstTextBaseline, spacing: 9) {
                         Circle()
-                            .fill(SatoriTheme.lavender.opacity(0.78))
+                            .fill(SatoriTheme.accent.opacity(0.78))
                             .frame(width: 5, height: 5)
                         Text(inlineMarkdown(item))
                             .font(.body)
@@ -47,14 +47,14 @@ struct LearningMarkdownView: View {
             }
         case let .orderedList(items):
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                     HStack(alignment: .firstTextBaseline, spacing: 9) {
-                        Text("\(index + 1)")
+                        Text("\(item.number)")
                             .font(.caption.monospacedDigit().weight(.semibold))
-                            .foregroundStyle(SatoriTheme.lavender)
+                            .foregroundStyle(SatoriTheme.accent)
                             .frame(width: 20, height: 20)
-                            .background(SatoriTheme.lavenderSoft, in: Circle())
-                        Text(inlineMarkdown(item))
+                            .background(SatoriTheme.accentWash, in: Circle())
+                        Text(inlineMarkdown(item.text))
                             .font(.body)
                             .lineSpacing(3)
                             .fixedSize(horizontal: false, vertical: true)
@@ -64,7 +64,7 @@ struct LearningMarkdownView: View {
         case let .quote(text):
             HStack(alignment: .top, spacing: 11) {
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(SatoriTheme.insight.opacity(0.75))
+                    .fill(Color.secondary.opacity(0.4))
                     .frame(width: 3)
                 Text(inlineMarkdown(text))
                     .font(.callout)

@@ -1,10 +1,20 @@
 import Foundation
 
+public struct LearningOrderedItem: Equatable, Sendable {
+    public let number: Int
+    public let text: String
+
+    public init(number: Int, text: String) {
+        self.number = number
+        self.text = text
+    }
+}
+
 public enum LearningMarkdownBlock: Equatable, Sendable {
     case heading(level: Int, text: String)
     case paragraph(String)
     case unorderedList([String])
-    case orderedList([String])
+    case orderedList([LearningOrderedItem])
     case quote(String)
     case code(language: String?, content: String)
     case divider
@@ -133,12 +143,12 @@ public enum LearningMarkdownParser {
         return nil
     }
 
-    private static func orderedItem(from line: String) -> String? {
+    private static func orderedItem(from line: String) -> LearningOrderedItem? {
         guard let separator = line.firstIndex(of: ".") else { return nil }
-        let number = line[..<separator]
-        guard !number.isEmpty, number.allSatisfy(\.isNumber) else { return nil }
+        let digits = line[..<separator]
+        guard !digits.isEmpty, digits.allSatisfy(\.isNumber), let number = Int(digits) else { return nil }
         let remainder = line[line.index(after: separator)...]
         guard remainder.hasPrefix(" ") else { return nil }
-        return remainder.trimmingCharacters(in: .whitespaces)
+        return LearningOrderedItem(number: number, text: remainder.trimmingCharacters(in: .whitespaces))
     }
 }
