@@ -1,11 +1,20 @@
 import AppKit
 
 /// A small floating bar shown above a PDF text selection — the Cursor-style
-/// "select and ask" entry point. It lives as a direct subview of the PDFView
+/// "select and act" entry point. It lives as a direct subview of the PDFView
 /// so it can be positioned in the view's coordinate space.
+///
+/// Which buttons appear depends on the selection:
+///   • 运行这段 — the selection reads like runnable code (primary action)
+///   • 解释这段 — ask the assistant to explain the passage
+///   • 就这段提问 — pin the passage and let the reader type a question
 final class SelectionToolbarView: NSView {
+    var onRun: (() -> Void)?
     var onExplain: (() -> Void)?
     var onCompose: (() -> Void)?
+
+    private var runButton: NSButton?
+    private var runSeparator: NSView?
 
     init() {
         super.init(frame: .zero)
@@ -20,9 +29,12 @@ final class SelectionToolbarView: NSView {
         layer?.shadowRadius = 16
         layer?.shadowOffset = CGSize(width: 0, height: -4)
 
-        let explain = makeButton(title: "解释这段", symbol: "sparkles", action: #selector(explainTapped), prominent: true)
+        let run = makeButton(title: "运行这段", symbol: "play.fill", action: #selector(runTapped), prominent: true)
+        let explain = makeButton(title: "解释这段", symbol: "sparkles", action: #selector(explainTapped), prominent: false)
         let compose = makeButton(title: "就这段提问", symbol: "bubble.and.pencil", action: #selector(composeTapped), prominent: false)
-        let stack = NSStackView(views: [explain, compose])
+        runButton = run
+
+        let stack = NSStackView(views: [run, explain, compose])
         stack.orientation = .horizontal
         stack.spacing = 4
         stack.edgeInsets = NSEdgeInsets(top: 5, left: 7, bottom: 5, right: 7)
@@ -39,6 +51,12 @@ final class SelectionToolbarView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// Whether the selection can be run as code. When true, "运行这段" is the
+    /// prominent primary button; when false it's hidden and 解释 becomes primary.
+    func setRunnable(_ isRunnable: Bool) {
+        runButton?.isHidden = !isRunnable
+    }
+
     private func makeButton(title: String, symbol: String, action: Selector, prominent: Bool) -> NSButton {
         let button = NSButton(title: " " + title, target: self, action: action)
         button.controlSize = .small
@@ -46,12 +64,10 @@ final class SelectionToolbarView: NSView {
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
         button.imagePosition = .imageLeading
         if prominent {
-            // Primary action: solid ink-violet fill, white glyph + label.
             button.bezelStyle = .rounded
             button.bezelColor = NSColor(srgbRed: 0.42, green: 0.35, blue: 0.74, alpha: 1)
             button.contentTintColor = .white
         } else {
-            // Secondary action: white fill, hairline border, dark label.
             button.bezelStyle = .rounded
             button.bezelColor = .white
             button.contentTintColor = .labelColor
@@ -79,6 +95,7 @@ final class SelectionToolbarView: NSView {
         layer.add(group, forKey: "appear")
     }
 
+    @objc private func runTapped() { onRun?() }
     @objc private func explainTapped() { onExplain?() }
     @objc private func composeTapped() { onCompose?() }
 }

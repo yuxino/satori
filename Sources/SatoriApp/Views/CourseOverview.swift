@@ -130,6 +130,8 @@ private struct DocumentWorkspace: View {
     @State private var showsInspector = true
     @State private var selectedText = ""
     @State private var selectionCommand: SelectionCommand?
+    @State private var panelWidth: CGFloat = 430
+    @State private var isDraggingDivider = false
 
     init(
         course: CourseWorkspace,
@@ -153,7 +155,7 @@ private struct DocumentWorkspace: View {
     private var pageCount: Int { max(document.pageCount, 1) }
 
     var body: some View {
-        HSplitView {
+        HStack(spacing: 0) {
             VStack(spacing: 0) {
                 readingBar
                 Divider()
@@ -177,12 +179,18 @@ private struct DocumentWorkspace: View {
                     onComposeSelection: { text in
                         showsInspector = true
                         selectionCommand = SelectionCommand(text: text, action: .compose)
+                    },
+                    onRunSelection: { text in
+                        showsInspector = true
+                        selectionCommand = SelectionCommand(text: text, action: .run)
                     }
                 )
             }
             .frame(minWidth: 620)
+            .frame(maxWidth: .infinity)
 
             if showsInspector {
+                divider
                 LearningInspector(
                     documentID: document.id,
                     pageIndex: currentPageIndex,
@@ -194,9 +202,40 @@ private struct DocumentWorkspace: View {
                     },
                     onClose: { showsInspector = false }
                 )
-                .frame(minWidth: 360, idealWidth: 430, maxWidth: 620)
+                .frame(minWidth: 360, maxWidth: 620)
+                .frame(width: panelWidth)
             }
         }
+    }
+
+    /// A wide, grabbable divider between the PDF and the panel. The system
+    /// HSplitView handle is thin and fiddly; this one is ~7pt, highlights on
+    /// hover, and drags the panel width with a live cursor.
+    private var divider: some View {
+        Rectangle()
+            .fill(isDraggingDivider ? SatoriTheme.accent.opacity(0.35) : Color.primary.opacity(0.08))
+            .frame(width: isDraggingDivider ? 7 : 5)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering {
+                    NSCursor.resizeLeftRight.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        isDraggingDivider = true
+                        // PDF side takes the left region; grow/shrink the panel
+                        // from its right edge. The drag location is in the
+                        // divider's own coordinate space.
+                        panelWidth = min(max(panelWidth - value.translation.width, 360), 720)
+                    }
+                    .onEnded { _ in
+                        isDraggingDivider = false
+                    }
+            )
     }
 
     private var readingBar: some View {
@@ -306,7 +345,7 @@ private struct DocumentWorkspace: View {
 /// panel. The unique id makes repeated commands over the same text distinct,
 /// so `onChange` still fires when the reader picks the same passage twice.
 struct SelectionCommand: Equatable {
-    enum Action { case explain, compose }
+    enum Action { case explain, compose, run }
 
     let id = UUID()
     let text: String

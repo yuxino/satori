@@ -10,16 +10,16 @@ struct LearningInspector: View {
     /// like a wall of unrelated cards.
     enum PanelSection: String, CaseIterable, Identifiable {
         case ask = "问"
+        case run = "运行"
         case notes = "笔记"
-        case review = "复习"
 
         var id: Self { self }
 
         var icon: String {
             switch self {
             case .ask: "bubble.left.and.bubble.right"
+            case .run: "play.rectangle"
             case .notes: "book.pages"
-            case .review: "arrow.counterclockwise"
             }
         }
     }
@@ -81,6 +81,13 @@ struct LearningInspector: View {
     @State private var requestTask: Task<Void, Never>?
     @State private var showsClearConfirmation = false
 
+    // MARK: Run space (quick code execution)
+
+    @State private var runCode = ""
+    @State private var runLanguage: CodeRunner.Language = .python
+    @State private var runOutput: CodeRunResult?
+    @State private var isRunning = false
+
     private let sessionStore = LearningSessionStore.shared
     private let reviewStore = ReviewStore.shared
     private let responseBottomID = "learning-response-bottom"
@@ -106,8 +113,8 @@ struct LearningInspector: View {
 
             switch section {
             case .ask: askView
+            case .run: runView
             case .notes: notesView
-            case .review: reviewView
             }
         }
         .background(SatoriTheme.paper)
@@ -301,6 +308,129 @@ struct LearningInspector: View {
             .padding(SatoriTheme.Spacing.lg)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// 运行 — a quick scratchpad to execute code locally. Paste from the PDF
+    /// selection (or anywhere), pick a language, hit run, see output.
+    private var runView: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: SatoriTheme.Spacing.md) {
+                    HStack(spacing: SatoriTheme.Spacing.sm) {
+                        Picker("语言", selection: $runLanguage) {
+                            ForEach(CodeRunner.Language.allCases, id: \.self) { lang in
+                                Text(lang.rawValue).tag(lang)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(width: 140)
+
+                        Spacer()
+
+                        if isRunning {
+                            HStack(spacing: SatoriTheme.Spacing.xs) {
+                                ProgressView().controlSize(.mini)
+                                Text("运行中…")
+                                    .font(.caption)
+                            }
+                            .foregroundStyle(.secondary)
+                        }
+
+                        Button {
+                            if isRunning {
+                                stopRunning()
+                            } else {
+                                runSnippet()
+                            }
+                        } label: {
+                            Label(isRunning ? "停止" : "运行", systemImage: isRunning ? "stop.fill" : "play.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(SatoriTheme.accent)
+                        .disabled(runCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isRunning)
+                    }
+
+                    ZStack(alignment: .topLeading) {
+                        if runCode.isEmpty {
+                            Text("把书里的代码粘贴到这里，或直接在 PDF 里选中一段代码点「运行这段」…")
+                                .font(.body)
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, SatoriTheme.Spacing.md + 1)
+                                .padding(.vertical, SatoriTheme.Spacing.md)
+                                .allowsHitTesting(false)
+                        }
+                        TextEditor(text: $runCode)
+                            .font(.system(.body, design: .monospaced))
+                            .scrollContentBackground(.hidden)
+                            .padding(SatoriTheme.Spacing.sm)
+                            .frame(minHeight: 180, maxHeight: 360)
+                    }
+                    .background(SatoriTheme.paperRaised, in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous).strokeBorder(SatoriTheme.hairline))
+
+                    if let runOutput {
+                        runOutputView(runOutput)
+                    }
+                }
+                .padding(SatoriTheme.Spacing.lg)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func runOutputView(_ result: CodeRunResult) -> some View {
+        VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
+            HStack(spacing: SatoriTheme.Spacing.sm) {
+                Image(systemName: result.exitCode == 0 ? "checkmark.circle" : "xmark.octagon")
+                    .foregroundStyle(result.exitCode == 0 ? Color.green : Color.red)
+                Text(result.timedOut ? "运行超时，已停止" : (result.exitCode == 0 ? "运行完成" : "运行出错"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                if result.exitCode != 0 && !result.timedOut {
+                    Text("退出码 \(result.exitCode)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                Button("复制输出", systemImage: "doc.on.doc") {
+                    copyToPasteboard(result.stdout)
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .help("复制输出")
+            }
+
+            let body = (result.stdout.isEmpty ? "" : result.stdout) + (result.stderr.isEmpty ? "" : (result.stdout.isEmpty ? result.stderr : "\n" + result.stderr))
+            Text(body.isEmpty ? "（无输出）" : body)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(result.stderr.isEmpty ? Color.primary : Color.red)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(SatoriTheme.Spacing.md)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+        }
+    }
+
+    private func runSnippet() {
+        let code = runCode
+        guard !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isRunning else { return }
+        isRunning = true
+        runOutput = nil
+        let language = runLanguage
+        Task {
+            let result = await CodeRunner.run(code: code, language: language)
+            await MainActor.run {
+                runOutput = result
+                isRunning = false
+            }
+        }
+    }
+
+    private func stopRunning() {
+        // A running snippet has no cancellable handle exposed; the timeout is
+        // the backstop. Flip the flag so the next run is allowed immediately.
+        isRunning = false
     }
 
     /// The review space's empty state — explains what this tab is for and
@@ -1069,6 +1199,9 @@ struct LearningInspector: View {
             askAssistant("解释我选中的这段内容", selectionOverride: text)
         case .compose:
             isQuestionFocused = true
+        case .run:
+            runCode = text
+            section = .run
         }
     }
 
