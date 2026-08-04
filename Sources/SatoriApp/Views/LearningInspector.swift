@@ -97,6 +97,8 @@ struct LearningInspector: View {
     @State private var allowsWebSearch = false
     @State private var completedElsewherePage: Int?
     @State private var attachments: [LearningImageAttachment] = []
+    /// 发送中的这一轮贴的图（用于对话里即时展示缩略图；归档后历史只记张数）。
+    @State private var activeAttachmentPreviews: [NSImage] = []
     @State private var isImportingImage = false
     @State private var attachmentStatus = ""
     @FocusState private var isQuestionFocused: Bool
@@ -674,7 +676,8 @@ struct LearningInspector: View {
                 question: turn.question,
                 pageIndex: turn.pageIndex,
                 attachmentCount: turn.attachmentCount,
-                createdAt: turn.createdAt
+                createdAt: turn.createdAt,
+                previews: isActive ? activeAttachmentPreviews : []
             )
             answerCard(turn: turn, isActive: isActive)
         }
@@ -685,7 +688,8 @@ struct LearningInspector: View {
         question: String,
         pageIndex: Int,
         attachmentCount: Int,
-        createdAt: Date
+        createdAt: Date,
+        previews: [NSImage]
     ) -> some View {
         HStack {
             Spacer(minLength: 48)
@@ -694,6 +698,22 @@ struct LearningInspector: View {
                     .font(.body)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
+                if !previews.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(Array(previews.enumerated()), id: \.offset) { _, image in
+                            Image(nsImage: image)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 56, height: 44)
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .strokeBorder(.white.opacity(0.35), lineWidth: 1)
+                                )
+                        }
+                    }
+                    .padding(.top, 2)
+                }
                 HStack(spacing: 10) {
                     if attachmentCount > 0 {
                         Text("\(attachmentCount) 张附图")
@@ -1060,6 +1080,7 @@ struct LearningInspector: View {
         let effectiveScope: ContextScope = scope
 
         let submittedAttachments = attachments
+        activeAttachmentPreviews = submittedAttachments.map(\.preview)
         let context = turns
             .filter { $0.id != excludingTurnID }
             .suffix(6)
@@ -1081,11 +1102,12 @@ struct LearningInspector: View {
             // 配置读取很快（钥匙串结果有进程内缓存），放在前面，
             // 扫描页 OCR 需要配置；没配置就直接提示，不必白跑提取。
             let configuration = await Task.detached(priority: .userInitiated) {
-                QwenConfigurationStore.read()
+                (config: QwenConfigurationStore.read(), prompt: QwenConfigurationStore.readCustomPrompt())
             }.value
             if Task.isCancelled { return }
-            guard let configuration else {
+            guard let config = configuration.config else {
                 hasQwenConfiguration = false
+                restoreSubmittedAttachments(submittedAttachments)
                 isThinking = false
                 requestTask = nil
                 response = LearningResponse(
@@ -1110,11 +1132,12 @@ struct LearningInspector: View {
                 await PDFPageContextExtractor.extract(
                     from: documentURL,
                     scope: extractionScope,
-                    qwenConfiguration: configuration
+                    qwenConfiguration: config
                 )
             }.value
             if Task.isCancelled { return }
             guard let pageContent else {
+                restoreSubmittedAttachments(submittedAttachments)
                 isThinking = false
                 requestTask = nil
                 response = LearningResponse(
@@ -1125,12 +1148,13 @@ struct LearningInspector: View {
                 return
             }
             let assistant = QwenLearningAssistant(
-                apiKey: configuration.apiKey,
-                modelID: configuration.modelID,
+                apiKey: config.apiKey,
+                modelID: config.modelID,
                 pageContent: pageContent,
                 additionalImagesJPEG: submittedAttachments.map(\.jpegData),
                 conversationContext: context,
-                allowsWebSearch: allowsWebSearch
+                allowsWebSearch: allowsWebSearch,
+                instructions: configuration.prompt
             )
             var latestResponse: LearningResponse?
             for await update in assistant.streamExplain(request: request, pageIndex: targetPageIndex) {
@@ -1141,13 +1165,29 @@ struct LearningInspector: View {
             if Task.isCancelled { return }
             isThinking = false
             requestTask = nil
-            guard let latestResponse else { return }
+            guard let latestResponse else {
+                restoreSubmittedAttachments(submittedAttachments)
+                return
+            }
             if latestResponse.sourceKind == .inference {
+                restoreSubmittedAttachments(submittedAttachments)
                 response = latestResponse
             } else {
                 completeDraft(with: latestResponse, completion: .completed)
             }
         }
+    }
+
+    /// 发送失败（未配置 / 页提取失败 / 回答报错）时把贴的图还回输入框，
+    /// 避免图片悄悄丢失、重试时找不到图。
+    private func restoreSubmittedAttachments(_ submitted: [LearningImageAttachment]) {
+        guard !submitted.isEmpty else {
+            activeAttachmentPreviews = []
+            return
+        }
+        attachments = submitted
+        activeAttachmentPreviews = []
+        attachmentStatus = "图片已保留在输入框，修改问题后可以直接重新发送。"
     }
 
     private func scopeExtractionFailureMessage(_ scope: ContextScope, pageIndex: Int) -> String {
@@ -1167,6 +1207,7 @@ struct LearningInspector: View {
             // 不给时间线留一个「已停止」空壳卡。
             draftQuestion = ""
             draftAttachmentCount = 0
+            activeAttachmentPreviews = []
             self.response = nil
             return
         }
@@ -1187,6 +1228,7 @@ struct LearningInspector: View {
         turns.append(turn)
         draftQuestion = ""
         draftAttachmentCount = 0
+        activeAttachmentPreviews = []
         response = nil
         persistTurns()
         // A completed Q&A counts as studying — feeds the 勤学好问 badge.
@@ -1212,6 +1254,9 @@ struct LearningInspector: View {
         turns = []
         draftQuestion = ""
         response = nil
+        activeAttachmentPreviews = []
+        attachments = []
+        attachmentStatus = ""
         completedElsewherePage = nil
         pendingSelectionPage = nil
         Task {

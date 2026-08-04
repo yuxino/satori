@@ -11,6 +11,9 @@ struct QwenSettingsView: View {
     @State private var isTestingConnection = false
     @State private var hasSavedConfig = false
     @State private var isConfirmingRemoval = false
+    @State private var customPrompt = ""
+    @State private var promptStatusMessage = ""
+    @State private var promptStatusIsFailure = false
 
     /// 能力来自核心层 `QwenLearningAssistant.capabilities(for:)`，设置页与
     /// 请求前的能力校验共用同一来源，避免标注与实际支持不一致。
@@ -93,6 +96,59 @@ struct QwenSettingsView: View {
                         .textSelection(.enabled)
                 }
             }
+
+            Section("回答助手 · 提示词") {
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $customPrompt)
+                        .font(.body)
+                        .scrollContentBackground(.hidden)
+                        .padding(6)
+                        .frame(minHeight: 120, maxHeight: 200)
+                    if customPrompt.isEmpty {
+                        Text("留空 = 使用内置默认提示词")
+                            .font(.body)
+                            .foregroundStyle(.tertiary)
+                            .padding(12)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .background(SatoriTheme.paperRaised, in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous)
+                        .strokeBorder(SatoriTheme.hairline)
+                )
+
+                DisclosureGroup("查看默认提示词") {
+                    Text(QwenLearningAssistant.defaultLearningInstructions)
+                        .font(.callout)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 4)
+                }
+                .font(.caption)
+
+                Text("这段提示词会作为系统指令随每次提问发送给 Qwen，控制回答的组织方式。留空时使用内置默认：先原文依据、再解释、必要时才补充推断。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 12) {
+                    Button("保存提示词") { saveCustomPrompt() }
+                    Button("恢复默认", role: .destructive) {
+                        customPrompt = ""
+                        QwenConfigurationStore.removeCustomPrompt()
+                        promptStatusMessage = "已恢复默认提示词"
+                        promptStatusIsFailure = false
+                    }
+                    if !promptStatusMessage.isEmpty {
+                        Label(
+                            promptStatusMessage,
+                            systemImage: promptStatusIsFailure ? "xmark.circle.fill" : "checkmark.circle.fill"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(promptStatusIsFailure ? Color.red : Color.green)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .padding()
@@ -110,9 +166,17 @@ struct QwenSettingsView: View {
             guard !Task.isCancelled else { return }
             key = configuration?.apiKey ?? ""
             modelID = configuration?.modelID ?? QwenConfigurationStore.readModelID()
+            customPrompt = QwenConfigurationStore.readCustomPrompt() ?? ""
             hasSavedConfig = configuration != nil
             isLoadingKey = false
         }
+    }
+
+    private func saveCustomPrompt() {
+        QwenConfigurationStore.saveCustomPrompt(customPrompt)
+        let isEmpty = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        promptStatusMessage = isEmpty ? "已恢复默认提示词" : "提示词已保存，下一次提问生效"
+        promptStatusIsFailure = false
     }
 
     private func capabilityMenuTitle(for option: QwenModelOption) -> String {

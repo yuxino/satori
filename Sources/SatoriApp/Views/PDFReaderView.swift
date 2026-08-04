@@ -47,17 +47,20 @@ struct PDFReaderView: NSViewRepresentable {
         view.document = PDFDocument(url: url)
         if let document = view.document, document.pageCount > 0 {
             let pageIndex = min(max(initialPosition.pageIndex, 0), document.pageCount - 1)
-            if initialPosition.normalizedPageOffset > 0,
-               let page = document.page(at: pageIndex) {
-                context.coordinator.jump(to: ReadingPosition(
+            if initialPosition.normalizedPageOffset > 0 {
+                // 创建时 PDFView 还没完成布局（frame 为零、缩放比例未定），
+                // 立刻 go(to:) 会按错误的缩放放置目的地，恢复位置因此有偏差。
+                // 等布局完成后再跳（见 restoreInitialPosition）。
+                context.coordinator.pendingInitialRestore = ReadingPosition(
                     pageIndex: pageIndex,
                     normalizedPageOffset: initialPosition.normalizedPageOffset
-                ), in: view)
+                )
             } else if let page = document.page(at: pageIndex) {
                 view.go(to: page)
             }
         }
         context.coordinator.observe(view)
+        context.coordinator.restoreInitialPosition(in: view)
         return view
     }
 
@@ -68,6 +71,9 @@ struct PDFReaderView: NSViewRepresentable {
         let targetIndex = min(max(currentPageIndex, 0), document.pageCount - 1)
         let visibleIndex = view.currentPage.map(document.index(for:))
         guard visibleIndex != targetIndex else { return }
+        // 初始恢复还没落地（等布局完成），这里绑定驱动的跳转会覆盖掉偏移，
+        // 先跳过，统一由 restoreInitialPosition 处理。
+        if context.coordinator.pendingInitialRestore != nil { return }
         if let jump = context.coordinator.consumePendingJump(), jump.pageIndex == targetIndex {
             context.coordinator.jump(to: jump, in: view)
         } else if let page = document.page(at: targetIndex) {
@@ -94,6 +100,9 @@ struct PDFReaderView: NSViewRepresentable {
         /// A jump requested through the notification channel but not yet
         /// applied by a binding-driven page change.
         private var pendingJump: ReadingPosition?
+        /// 打开文档时待恢复的阅读位置：等 PDFView 完成首次布局后再落地，
+        /// 避免按错误的缩放比例放置目的地。
+        var pendingInitialRestore: ReadingPosition?
         /// Scrolling reports offsets continuously; only the settle matters.
         private var offsetDebounce: Timer?
         private var jumpObserverToken: NSObjectProtocol?
@@ -249,6 +258,24 @@ struct PDFReaderView: NSViewRepresentable {
             } else {
                 view.go(to: page)
             }
+        }
+
+        /// 打开文档时恢复上次阅读位置。PDFView 首次创建时 frame 还是零、
+        /// autoScales 的缩放比例未定，立刻跳转会按错误的缩放放置目的地；
+        /// 这里等到视图进入窗口、完成布局后再落地。
+        @MainActor func restoreInitialPosition(in view: PDFView) {
+            guard let position = pendingInitialRestore else { return }
+            guard view.window != nil, view.bounds.width > 0, view.bounds.height > 0 else {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, let observed = self.observedView else { return }
+                    Task { @MainActor in
+                        self.restoreInitialPosition(in: observed)
+                    }
+                }
+                return
+            }
+            pendingInitialRestore = nil
+            jump(to: position, in: view)
         }
 
         // MARK: Selection toolbar

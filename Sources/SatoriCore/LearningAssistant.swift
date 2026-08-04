@@ -166,6 +166,16 @@ public enum AssistantError: LocalizedError, Sendable, Equatable {
 public struct QwenLearningAssistant: LearningAssistant {
     public static let defaultModelID = "qwen3.8-max"
     public static let defaultAPIHost = URL(string: "https://dashscope.aliyuncs.com/compatible-mode/v1")!
+    /// 回答问题的默认系统提示词。用户可在设置里用自定义 prompt 覆盖。
+    public static let defaultLearningInstructions = """
+    你是 Satori 的学习理解助手。默认使用简体中文，直接回答问题。
+    优先依据用户提供的当前 PDF 页面；不要假装看到了未提供的页面。
+    可以参考前面的本地学习问答理解“这里”“刚才”等追问，但本轮页面证据优先。
+    历史对话中提到的图片当前不可见，若需图片细节请用户重新附图。
+    回答依次包含“原文依据”“解释”；只有确实超出原文时才增加“补充推断”，并明确标注。
+    原文依据要短，不要大段复述。解释应帮助用户建立概念联系，可以给一个具体例子。
+    如果页面信息不足，直接说明缺少什么。不要要求用户做笔记或背诵。
+    """
 
     /// 模型能力矩阵。未知模型按最保守的 [.text] 处理：宁可请求前给出
     /// 可读错误，也不要带图静默失败。
@@ -187,6 +197,7 @@ public struct QwenLearningAssistant: LearningAssistant {
     private let additionalImagesJPEG: [Data]
     private let conversationContext: [LearningConversationContext]
     private let allowsWebSearch: Bool
+    private let instructions: String?
     private let transport: any AssistantTransport
 
     public init(
@@ -197,6 +208,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         additionalImagesJPEG: [Data] = [],
         conversationContext: [LearningConversationContext] = [],
         allowsWebSearch: Bool = false,
+        instructions: String? = nil,
         transport: (any AssistantTransport)? = nil
     ) {
         self.apiKey = apiKey
@@ -207,6 +219,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         self.additionalImagesJPEG = additionalImagesJPEG
         self.conversationContext = conversationContext
         self.allowsWebSearch = allowsWebSearch
+        self.instructions = instructions
         self.transport = transport ?? URLSessionAssistantTransport()
     }
 
@@ -431,15 +444,7 @@ public struct QwenLearningAssistant: LearningAssistant {
 
         return ResponsesRequest(
             model: modelID,
-            instructions: """
-            你是 Satori 的学习理解助手。默认使用简体中文，直接回答问题。
-            优先依据用户提供的当前 PDF 页面；不要假装看到了未提供的页面。
-            可以参考前面的本地学习问答理解“这里”“刚才”等追问，但本轮页面证据优先。
-            历史对话中提到的图片当前不可见，若需图片细节请用户重新附图。
-            回答依次包含“原文依据”“解释”；只有确实超出原文时才增加“补充推断”，并明确标注。
-            原文依据要短，不要大段复述。解释应帮助用户建立概念联系，可以给一个具体例子。
-            如果页面信息不足，直接说明缺少什么。不要要求用户做笔记或背诵。
-            """,
+            instructions: instructions ?? Self.defaultLearningInstructions,
             input: input,
             tools: allowsWebSearch ? [.init(type: "web_search")] : nil,
             store: false,

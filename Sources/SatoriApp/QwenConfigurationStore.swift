@@ -45,6 +45,7 @@ enum QwenConfigurationStore {
     private static let legacyAPIHostDefaultsKey = "qwen-api-host"
     private static let modelDefaultsKey = "qwen-model-id"
     private static let configuredDefaultsKey = "qwen-is-configured"
+    private static let customPromptDefaultsKey = "qwen-custom-prompt"
     private static let storageDirectoryName = "satori"
     private static let keyFilename = "qwen-api-key"
 
@@ -111,6 +112,27 @@ enum QwenConfigurationStore {
         let saved = UserDefaults.standard.string(forKey: modelDefaultsKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return saved.isEmpty ? QwenLearningAssistant.defaultModelID : saved
+    }
+
+    /// 用户自定义的回答提示词；未设置（用内置默认）时返回 nil。
+    static func readCustomPrompt() -> String? {
+        let saved = UserDefaults.standard.string(forKey: customPromptDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return saved.isEmpty ? nil : saved
+    }
+
+    /// 保存自定义提示词；内容为空等同于恢复默认（移除自定义）。
+    static func saveCustomPrompt(_ prompt: String) {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            UserDefaults.standard.removeObject(forKey: customPromptDefaultsKey)
+        } else {
+            UserDefaults.standard.set(trimmed, forKey: customPromptDefaultsKey)
+        }
+    }
+
+    static func removeCustomPrompt() {
+        UserDefaults.standard.removeObject(forKey: customPromptDefaultsKey)
     }
 
     static func save(apiKey: String, modelID: String) throws {
