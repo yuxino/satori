@@ -11,6 +11,10 @@ enum PDFPageContextExtractor {
         case page(Int)
         /// The whole book, as concatenated page text.
         case wholeDocument
+        /// A highlighted passage together with the pages around it, so the AI
+        /// can answer with the surrounding context (the way Marginalia pulls
+        /// the few paragraphs before and after a selection).
+        case selectionWithContext(String, pageIndex: Int)
     }
 
     static func extract(from url: URL, scope: Scope) -> LearningPageContent? {
@@ -19,11 +23,42 @@ enum PDFPageContextExtractor {
             let cleaned = ExtractedTextNormalizer.normalize(text)
             guard !cleaned.isEmpty else { return nil }
             return .text(String(cleaned.prefix(24_000)))
+        case let .selectionWithContext(text, pageIndex):
+            return extractSelectionWithContext(from: url, selected: text, pageIndex: pageIndex)
         case let .page(pageIndex):
             return extractPage(from: url, pageIndex: pageIndex)
         case .wholeDocument:
             return extractWholeDocument(from: url)
         }
+    }
+
+    /// Highlights the selected passage but keeps the page it came from and the
+    /// neighboring pages so the model isn't answering in a vacuum.
+    private static func extractSelectionWithContext(from url: URL, selected: String, pageIndex: Int) -> LearningPageContent? {
+        let cleanedSelection = ExtractedTextNormalizer.normalize(selected)
+        guard !cleanedSelection.isEmpty else { return nil }
+
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess { url.stopAccessingSecurityScopedResource() }
+        }
+        guard let document = PDFDocument(url: url) else {
+            return .text(String(cleanedSelection.prefix(24_000)))
+        }
+
+        var context = ""
+        // Page before, the selection's page, page after.
+        for index in [pageIndex - 1, pageIndex, pageIndex + 1] {
+            guard index >= 0, index < document.pageCount,
+                  let page = document.page(at: index) else { continue }
+            let text = ExtractedTextNormalizer.normalize(page.string ?? "")
+            guard !text.isEmpty else { continue }
+            context += "【第 \(index + 1) 页】\n\(text)\n\n"
+        }
+
+        let header = "用户选中了下面这段文字，并附上了它所在页及前后页作为上下文：\n\n【选中的内容】\n\(cleanedSelection)\n\n【上下文】\n"
+        let combined = header + context
+        return .text(String(combined.prefix(24_000)))
     }
 
     static func extract(from url: URL, pageIndex: Int) -> LearningPageContent? {

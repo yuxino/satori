@@ -1068,9 +1068,15 @@ struct LearningInspector: View {
         // selection override comes from the PDF toolbar's "解释这段". Otherwise:
         // use the live selection if there is one, else the current page.
         let usesSelection = selectionOverride != nil || (pageOverride == nil && hasSelection)
-        let extractionScope: PDFPageContextExtractor.Scope = usesSelection
-            ? .selection(selectionOverride ?? activeSelection)
-            : .page(targetPageIndex)
+        let extractionScope: PDFPageContextExtractor.Scope
+        if usesSelection {
+            let selectionText = selectionOverride ?? activeSelection
+            // Selection answers carry the surrounding pages as context, so the
+            // model isn't answering a single line in a vacuum.
+            extractionScope = .selectionWithContext(selectionText, pageIndex: targetPageIndex)
+        } else {
+            extractionScope = .page(targetPageIndex)
+        }
         let effectiveScope: ContextScope = usesSelection ? .selection : .page
 
         guard let pageContent = PDFPageContextExtractor.extract(from: documentURL, scope: extractionScope) else {
