@@ -188,7 +188,6 @@ private struct DocumentWorkspace: View {
                     pageIndex: currentPageIndex,
                     selectedText: selectedText,
                     selectionCommand: selectionCommand,
-                    directory: course.learningDirectory,
                     documentURL: url,
                     onNavigateToPage: { targetPage in
                         currentPageIndex = min(max(targetPage, 0), pageCount - 1)

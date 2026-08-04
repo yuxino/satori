@@ -4,13 +4,6 @@ import SatoriCore
 import UniformTypeIdentifiers
 
 struct LearningInspector: View {
-    enum Mode: String, CaseIterable, Identifiable {
-        case understand = "理解"
-        case directory = "目录"
-
-        var id: Self { self }
-    }
-
     enum ContextScope: Equatable {
         case selection
         case page
@@ -37,14 +30,12 @@ struct LearningInspector: View {
     let pageIndex: Int
     let selectedText: String
     let selectionCommand: SelectionCommand?
-    let directory: [LearningDirectoryItem]
     let documentURL: URL
     let onNavigateToPage: (Int) -> Void
     let onClose: () -> Void
 
     @Environment(\.openSettings) private var openSettings
     @Environment(\.scenePhase) private var scenePhase
-    @State private var mode: Mode = .understand
     @State private var question = ""
     @State private var turns: [LearningTurn] = []
     @State private var expandedTurnIDs: Set<UUID> = []
@@ -82,12 +73,9 @@ struct LearningInspector: View {
             inspectorHeader
             Divider()
 
-            switch mode {
-            case .understand: understandingView
-            case .directory: directoryView
-            }
+            understandingView
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(SatoriTheme.paper)
         .task(id: documentID) { await loadHistory() }
         .onAppear { refreshConfigurationState() }
         .onChange(of: scenePhase) { _, phase in
@@ -119,21 +107,18 @@ struct LearningInspector: View {
             HStack(spacing: SatoriTheme.Spacing.sm) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(SatoriTheme.accent)
+                    .foregroundStyle(SatoriTheme.gold)
                     .frame(width: 26, height: 26)
-                    .background(SatoriTheme.accentWash, in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
-                Text("学习记录")
-                    .font(.headline)
-                if !turns.isEmpty {
-                    Text("\(turns.count)")
-                        .font(.caption.monospacedDigit().weight(.semibold))
-                        .foregroundStyle(SatoriTheme.accent)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(SatoriTheme.accentWash, in: Capsule())
+                    .background(SatoriTheme.goldWash, in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("理解")
+                        .font(.headline)
+                    Text("边读边问，理解你的下一页")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if mode == .understand, !turns.isEmpty {
+                if !turns.isEmpty {
                     Button("清空记录", systemImage: "trash") { showsClearConfirmation = true }
                         .labelStyle(.iconOnly)
                         .buttonStyle(.plain)
@@ -146,24 +131,18 @@ struct LearningInspector: View {
                     .foregroundStyle(.secondary)
                     .help("关闭学习面板")
             }
-            Picker("面板内容", selection: $mode) {
-                ForEach(Mode.allCases) { item in
-                    Text(item.rawValue).tag(item)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
         }
         .padding(.horizontal, SatoriTheme.Spacing.lg)
         .padding(.vertical, SatoriTheme.Spacing.md)
-        .background(.bar)
+        .background(SatoriTheme.paperRaised.opacity(0.6))
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     private var understandingView: some View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
+                    LazyVStack(alignment: .leading, spacing: SatoriTheme.Spacing.lg) {
                         contextCard
 
                         if isLoadingHistory {
@@ -176,11 +155,17 @@ struct LearningInspector: View {
                             .padding(.vertical, 18)
                         } else if turns.isEmpty, draftQuestion.isEmpty {
                             promptStarter
-                        }
-
-                        ForEach(turns) { turn in
-                            learningTurnCard(turn)
-                                .id(turn.id)
+                        } else {
+                            // Notes are grouped by the page they belong to, so
+                            // the AI visibly works on the book — each question
+                            // lives under "第 N 页" instead of in a disconnected
+                            // chat log.
+                            if !currentPageHasNotes {
+                                currentPageInvitation
+                            }
+                            ForEach(pageSections) { section in
+                                pageSectionView(section)
+                            }
                         }
 
                         if !draftQuestion.isEmpty, let response {
@@ -198,7 +183,7 @@ struct LearningInspector: View {
                             .frame(height: 1)
                             .id(responseBottomID)
                     }
-                    .padding(14)
+                    .padding(SatoriTheme.Spacing.lg)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .onChange(of: response?.text) { _, _ in
@@ -223,6 +208,28 @@ struct LearningInspector: View {
 
     private var hasSelection: Bool {
         !activeSelection.isEmpty
+    }
+
+    /// Turns grouped by the page they belong to, so the panel reads as
+    /// per-page margin notes on the book rather than a disconnected chat log.
+    private struct PageSection: Identifiable {
+        let pageIndex: Int
+        let turns: [LearningTurn]
+        var id: Int { pageIndex }
+    }
+
+    private var pageSections: [PageSection] {
+        let grouped = Dictionary(grouping: turns, by: \.pageIndex)
+        return grouped.keys.sorted().map { PageSection(pageIndex: $0, turns: grouped[$0] ?? []) }
+    }
+
+    /// Whether the page currently on screen already has notes — when it does,
+    /// the "invitation to ask" belongs to that page instead of floating on top.
+    /// A streaming draft counts too, so the invitation doesn't contradict an
+    /// answer that is already being written for this page.
+    private var currentPageHasNotes: Bool {
+        turns.contains { $0.pageIndex == pageIndex }
+            || (response != nil && draftPageIndex == pageIndex)
     }
 
     private var availableScopes: [ContextScope] {
@@ -265,9 +272,9 @@ struct LearningInspector: View {
                     .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
             }
         }
-        .padding(11)
-        .background(.background.opacity(0.78), in: RoundedRectangle(cornerRadius: 11))
-        .overlay(RoundedRectangle(cornerRadius: 11).stroke(.quaternary))
+        .padding(SatoriTheme.Spacing.md)
+        .background(SatoriTheme.paperRaised.opacity(0.8), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous).strokeBorder(SatoriTheme.hairline))
         .onChange(of: hasSelection) { _, selecting in
             if selecting {
                 contextScope = .selection
@@ -313,7 +320,7 @@ struct LearningInspector: View {
 
     private func learningTurnCard(_ turn: LearningTurn) -> some View {
         let isExpanded = expandedTurnIDs.contains(turn.id)
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
             turnQuestionHeader(
                 question: turn.question,
                 pageIndex: turn.pageIndex,
@@ -335,8 +342,83 @@ struct LearningInspector: View {
                 turnActions(turn)
             }
         }
-        .satoriCard(radius: SatoriTheme.Radius.md, padding: SatoriTheme.Spacing.lg)
+        .satoriPaper(radius: SatoriTheme.Radius.md, padding: SatoriTheme.Spacing.lg)
         .animation(SatoriTheme.Motion.standard, value: isExpanded)
+    }
+
+    /// A page in the margin notes: "第 N 页" header followed by that page's turns.
+    private func pageSectionView(_ section: PageSection) -> some View {
+        VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
+            Button {
+                onNavigateToPage(section.pageIndex)
+            } label: {
+                HStack(spacing: SatoriTheme.Spacing.sm) {
+                    Text("第 \(section.pageIndex + 1) 页")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    if section.pageIndex == pageIndex {
+                        Text("当前页")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1)
+                            .background(SatoriTheme.accentWash, in: Capsule())
+                    }
+                    Spacer()
+                    Text("\(section.turns.count) 条")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .buttonStyle(.plain)
+            .help("跳到第 \(section.pageIndex + 1) 页")
+
+            ForEach(section.turns) { turn in
+                learningTurnCard(turn)
+                    .id(turn.id)
+            }
+        }
+    }
+
+    /// Shown at the top when the page you're reading has no notes yet — a
+    /// clear invitation to make the AI work on this page.
+    private var currentPageInvitation: some View {
+        VStack(alignment: .leading, spacing: SatoriTheme.Spacing.md) {
+            HStack(spacing: SatoriTheme.Spacing.sm) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(SatoriTheme.gold)
+                    .frame(width: 26, height: 26)
+                    .background(SatoriTheme.goldWash, in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("这一页还没有笔记")
+                        .font(.callout.weight(.medium))
+                    Text("第 \(pageIndex + 1) 页 · 让 AI 陪你读这一页")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+
+            HStack(spacing: SatoriTheme.Spacing.sm) {
+                ForEach(quickPrompts, id: \.self) { prompt in
+                    Button {
+                        askAssistant(prompt)
+                    } label: {
+                        Text(prompt)
+                            .font(.callout)
+                            .padding(.horizontal, SatoriTheme.Spacing.md)
+                            .padding(.vertical, SatoriTheme.Spacing.sm)
+                            .background(SatoriTheme.paperRaised, in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous).strokeBorder(SatoriTheme.hairline))
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+            }
+        }
+        .padding(SatoriTheme.Spacing.lg)
+        .background(SatoriTheme.goldWash.opacity(0.5), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous))
     }
 
     private func draftTurnCard(_ draftResponse: LearningResponse) -> some View {
@@ -382,7 +464,7 @@ struct LearningInspector: View {
                 }
             }
         }
-        .satoriCard(radius: SatoriTheme.Radius.md, padding: SatoriTheme.Spacing.lg, emphasized: isThinking)
+        .satoriPaper(radius: SatoriTheme.Radius.md, padding: SatoriTheme.Spacing.lg, emphasized: isThinking)
     }
 
     private func turnQuestionHeader(
@@ -395,9 +477,10 @@ struct LearningInspector: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
             HStack {
-                Text("我的问题")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                Text(question)
+                    .font(.body.weight(.semibold))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer()
                 if let isExpanded, let onToggle {
                     Button(isExpanded ? "收起回答" : "展开回答", systemImage: isExpanded ? "chevron.up" : "chevron.down") {
@@ -408,29 +491,24 @@ struct LearningInspector: View {
                     .foregroundStyle(.secondary)
                     .help(isExpanded ? "收起回答" : "展开回答")
                 }
-                Text(createdAt, style: .time)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
             }
-            Text(question)
-                .font(.callout.weight(.semibold))
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: SatoriTheme.Spacing.sm) {
-                Button("第 \(pageIndex + 1) 页", systemImage: "doc.text.magnifyingglass") {
-                    onNavigateToPage(pageIndex)
-                }
-                .buttonStyle(.borderless)
-                .font(.caption)
+                Button("第 \(pageIndex + 1) 页") { onNavigateToPage(pageIndex) }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .help("回到这一页")
                 if attachmentCount > 0 {
                     Label("\(attachmentCount) 张附图", systemImage: "photo.on.rectangle.angled")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Spacer()
+                Text(createdAt, style: .time)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
-        .padding(SatoriTheme.Spacing.md)
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
     }
 
     private func answerHeader(
@@ -532,7 +610,7 @@ struct LearningInspector: View {
                         return pasteFromPasteboard() ? .handled : .ignored
                     }
             }
-            .background(.background, in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+            .background(SatoriTheme.paperRaised, in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous)
                     .strokeBorder(SatoriTheme.accent.opacity(isQuestionFocused ? 0.6 : 0.24), lineWidth: isQuestionFocused ? 1.5 : 1)
@@ -613,41 +691,6 @@ struct LearningInspector: View {
             }
         }
         .frame(height: 62)
-    }
-
-    private var directoryView: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(directory.enumerated()), id: \.element.id) { index, item in
-                    HStack(alignment: .top, spacing: 11) {
-                        Text("\(index + 1)")
-                            .font(.caption.monospacedDigit().weight(.semibold))
-                            .foregroundStyle(item.isComplete ? .secondary : SatoriTheme.accent)
-                            .frame(width: 22, height: 22)
-                            .background(SatoriTheme.accentWash, in: Circle())
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(item.title)
-                                .font(.callout)
-                                .foregroundStyle(item.isComplete ? .secondary : .primary)
-                            if let itemPageIndex = item.pageIndex {
-                                Button("第 \(itemPageIndex + 1) 页") { onNavigateToPage(itemPageIndex) }
-                                    .buttonStyle(.borderless)
-                                    .font(.caption)
-                            }
-                        }
-                        Spacer()
-                        if item.isComplete {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(.background.opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
-                }
-            }
-            .padding(14)
-        }
     }
 
     private var canSend: Bool {
@@ -781,14 +824,12 @@ struct LearningInspector: View {
 
     /// Reacts to a Cursor-style command from the PDF selection toolbar.
     /// "解释这段" asks immediately; "就这段提问" pins the passage and lets the
-    /// reader type. Both switch to the understanding tab first, since the
-    /// command is meaningless on the directory tab.
+    /// reader type.
     private func handleSelectionCommand(_ command: SelectionCommand?) {
         guard let command else { return }
         let text = ExtractedTextNormalizer.normalize(command.text)
         guard !text.isEmpty else { return }
 
-        mode = .understand
         pinnedSelectionText = text
         contextScope = .selection
 

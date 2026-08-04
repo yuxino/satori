@@ -10,15 +10,15 @@ final class SelectionToolbarView: NSView {
     init() {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 11
+        layer?.cornerRadius = 12
         layer?.cornerCurve = .continuous
-        layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.98).cgColor
+        layer?.backgroundColor = NSColor.white.cgColor
         layer?.borderWidth = 1
-        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.6).cgColor
+        layer?.borderColor = NSColor.black.withAlphaComponent(0.12).cgColor
         layer?.shadowColor = NSColor.black.cgColor
-        layer?.shadowOpacity = 0.22
-        layer?.shadowRadius = 12
-        layer?.shadowOffset = CGSize(width: 0, height: -3)
+        layer?.shadowOpacity = 0.28
+        layer?.shadowRadius = 16
+        layer?.shadowOffset = CGSize(width: 0, height: -4)
 
         let explain = makeButton(title: "解释这段", symbol: "sparkles", action: #selector(explainTapped), prominent: true)
         let compose = makeButton(title: "就这段提问", symbol: "bubble.and.pencil", action: #selector(composeTapped), prominent: false)
@@ -46,12 +46,17 @@ final class SelectionToolbarView: NSView {
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
         button.imagePosition = .imageLeading
         if prominent {
+            // Primary action: solid ink-violet fill, white glyph + label.
             button.bezelStyle = .rounded
-            button.bezelColor = NSColor(red: 0.42, green: 0.38, blue: 0.78, alpha: 1)
+            button.bezelColor = NSColor(srgbRed: 0.42, green: 0.35, blue: 0.74, alpha: 1)
             button.contentTintColor = .white
         } else {
-            button.bezelStyle = .accessoryBarAction
+            // Secondary action: white fill, hairline border, dark label.
+            button.bezelStyle = .rounded
+            button.bezelColor = .white
             button.contentTintColor = .labelColor
+            button.layer?.borderWidth = 1
+            button.layer?.borderColor = NSColor.black.withAlphaComponent(0.18).cgColor
         }
         return button
     }

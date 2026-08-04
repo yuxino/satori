@@ -29,7 +29,7 @@ struct LearningMarkdownView: View {
         case let .paragraph(text):
             Text(inlineMarkdown(text))
                 .font(.body)
-                .lineSpacing(4)
+                .lineSpacing(5)
                 .fixedSize(horizontal: false, vertical: true)
         case let .unorderedList(items):
             VStack(alignment: .leading, spacing: 8) {
@@ -40,7 +40,7 @@ struct LearningMarkdownView: View {
                             .frame(width: 5, height: 5)
                         Text(inlineMarkdown(item))
                             .font(.body)
-                            .lineSpacing(3)
+                            .lineSpacing(4)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -56,7 +56,7 @@ struct LearningMarkdownView: View {
                             .background(SatoriTheme.accentWash, in: Circle())
                         Text(inlineMarkdown(item.text))
                             .font(.body)
-                            .lineSpacing(3)
+                            .lineSpacing(4)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -64,11 +64,11 @@ struct LearningMarkdownView: View {
         case let .quote(text):
             HStack(alignment: .top, spacing: 11) {
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.secondary.opacity(0.4))
+                    .fill(SatoriTheme.gold.opacity(0.6))
                     .frame(width: 3)
                 Text(inlineMarkdown(text))
-                    .font(.callout)
-                    .lineSpacing(3)
+                    .font(.callout.italic())
+                    .lineSpacing(4)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -106,8 +106,8 @@ struct LearningMarkdownView: View {
             }
         }
         .background(Color(nsColor: .textBackgroundColor).opacity(0.7))
-        .clipShape(RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(.quaternary))
+        .clipShape(RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous).stroke(.quaternary))
     }
 
     private func headingFont(_ level: Int) -> Font {
