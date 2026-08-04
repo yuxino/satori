@@ -18,6 +18,16 @@ cp "$project_root/Resources/satori.icns" "$contents_dir/Resources/satori.icns"
 chmod 755 "$contents_dir/MacOS/satori"
 
 plutil -lint "$contents_dir/Info.plist" >/dev/null
-codesign --force --deep --timestamp=none --sign - "$app_dir"
+signing_identity=${SATORI_CODESIGN_IDENTITY:-}
+if [ -z "$signing_identity" ]; then
+    available_identities=$(security find-identity -v -p codesigning 2>/dev/null || true)
+    case "$available_identities" in
+        *'"mimi Local Development"'*) signing_identity="mimi Local Development" ;;
+    esac
+fi
+if [ -z "$signing_identity" ]; then
+    signing_identity="-"
+fi
+codesign --force --deep --timestamp=none --sign "$signing_identity" "$app_dir"
 codesign --verify --deep --strict "$app_dir"
 printf '%s\n' "$app_dir"

@@ -15,14 +15,14 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 
 ## Completed in the first build
 
-- Native Satori.app package and ad-hoc local signing script
+- Native Satori.app package with stable local signing when a local identity is available
 - Three course workspaces and seeded learning directories
 - Local JSON persistence in Application Support
 - PDF import, text/scanned/mixed classification, and PDFKit reader
 - Persisted page-based reading position
 - Always-visible current/total page indicator with previous, next, and direct page jump controls
 - Per-course PDF menu for switching, replacing, or removing an incorrect import without deleting the original file
-- User-only local Model Studio API-key settings with the supported China (Beijing) shared endpoint built in; no repository key path or Host field
+- Keychain-only Model Studio API-key settings with verified migration from the transitional local file; the supported China (Beijing) shared endpoint is built in
 - A visible AI assistant boundary that labels its current response source
 - Current-page text and scanned-page images are connected to the Model Studio compatible Responses API with `store: false`
 - The saved model preference defaults to `qwen3.8-max`, with `qwen3.7-plus` and `qwen3.7-flash` available as balanced and efficient choices

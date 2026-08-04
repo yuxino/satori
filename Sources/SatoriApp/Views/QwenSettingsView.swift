@@ -27,7 +27,7 @@ struct QwenSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Text("粘贴华北 2（北京）地域的完整 API Key。Satori 已内置百炼连接地址，密钥只保存在这台 Mac 的私有配置目录中。")
+                Text("粘贴华北 2（北京）地域的完整 API Key。Satori 已内置百炼连接地址，密钥只保存在这台 Mac 的钥匙串中。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -66,12 +66,12 @@ struct QwenSettingsView: View {
         .padding()
         .frame(width: 560)
         .task {
-            modelID = QwenConfigurationStore.readModelID()
-            let storedKey = await Task.detached(priority: .utility) {
-                QwenConfigurationStore.readAPIKey() ?? ""
+            let configuration = await Task.detached(priority: .utility) {
+                QwenConfigurationStore.read()
             }.value
             guard !Task.isCancelled else { return }
-            key = storedKey
+            key = configuration?.apiKey ?? ""
+            modelID = configuration?.modelID ?? QwenConfigurationStore.readModelID()
             isLoadingKey = false
         }
     }

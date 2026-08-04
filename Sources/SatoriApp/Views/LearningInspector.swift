@@ -631,7 +631,7 @@ struct LearningInspector: View {
                 isThinking = false
                 requestTask = nil
                 response = LearningResponse(
-                    text: "请先在设置中连接 Qwen。百炼 API Key 只会保存在这台 Mac 的私有配置目录中。",
+                    text: "请先在设置中连接 Qwen。百炼 API Key 只会保存在这台 Mac 的钥匙串中。",
                     sourceKind: .inference,
                     pageIndex: targetPageIndex
                 )
