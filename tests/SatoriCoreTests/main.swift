@@ -202,6 +202,49 @@ struct SatoriCoreTests {
             ExtractedTextNormalizer.normalize("  正常中文句子，不该被改。  ") == "正常中文句子，不该被改。",
             "Expected clean CJK text to only be trimmed"
         )
+
+        // Code runner: an answer's example snippet can be executed locally.
+        let pythonRun = await CodeRunner.run(
+            code: "print('hello from satori')",
+            language: .python
+        )
+        precondition(pythonRun.exitCode == 0, "Expected python run to succeed")
+        precondition(pythonRun.stdout.contains("hello from satori"), "Expected python stdout to be captured")
+        precondition(pythonRun.timedOut == false, "Expected quick python run to not time out")
+
+        let cCode = """
+        #include <stdio.h>
+        int main(void) { printf("%d\\n", 6 * 7); return 0; }
+        """
+        let cRun = await CodeRunner.run(code: cCode, language: .c)
+        // Write diagnostics to a file: a failed `precondition` aborts before
+        // stdout flushes, so print() alone loses the details.
+        let probeFile = FileManager.default.temporaryDirectory.appending(path: "satori-c-probe-\(UUID().uuidString).txt")
+        try? """
+        C exit: \(cRun.exitCode)
+        C stdout: [\(cRun.stdout)]
+        C stderr: [\(cRun.stderr)]
+        C timedOut: \(cRun.timedOut)
+        C source first line: [\(cCode.components(separatedBy: "\n").first ?? "?")]
+        C source byte count: \(cCode.utf8.count)
+        """.write(to: probeFile, atomically: true, encoding: .utf8)
+        precondition(cRun.exitCode == 0, "Expected C compile+run to succeed")
+        precondition(cRun.stdout.contains("42"), "Expected C program output to be captured")
+
+        let timeoutRun = await CodeRunner.run(
+            code: "import time\nwhile True:\n    time.sleep(1)",
+            language: .python,
+            configuration: .init(timeout: 1, outputLimit: 16_000)
+        )
+        precondition(timeoutRun.timedOut, "Expected runaway loop to be killed by the timeout")
+
+        let outputLimitRun = await CodeRunner.run(
+            code: "for i in range(10000):\n    print(i)",
+            language: .python,
+            configuration: .init(timeout: 8, outputLimit: 1_000)
+        )
+        precondition(outputLimitRun.stdout.count <= 1_100, "Expected stdout to be capped")
+
         print("Satori core checks passed")
     }
 }

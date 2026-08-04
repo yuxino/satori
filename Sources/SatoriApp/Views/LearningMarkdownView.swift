@@ -81,13 +81,73 @@ struct LearningMarkdownView: View {
     }
 
     private func codeBlock(language: String?, content: String) -> some View {
+        CodeBlockView(language: language, content: content)
+    }
+
+    private func headingFont(_ level: Int) -> Font {
+        switch level {
+        case 1: .title3.weight(.semibold)
+        case 2: .headline
+        default: .subheadline.weight(.semibold)
+        }
+    }
+
+    private func inlineMarkdown(_ text: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(text)
+    }
+
+    private func copyToPasteboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+/// A fenced code block with copy and, when the language is runnable, a "运行"
+/// button that executes the snippet locally and expands its output below.
+private struct CodeBlockView: View {
+    let language: String?
+    let content: String
+
+    @State private var runState: RunState = .idle
+
+    private enum RunState {
+        case idle
+        case running
+        case finished(CodeRunResult)
+    }
+
+    private var runnable: CodeRunner.Language? {
+        CodeRunner.Language.recognized(language)
+    }
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(language?.uppercased() ?? "代码")
                     .font(.caption2.monospaced().weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("复制代码", systemImage: "doc.on.doc") {
+                if runnable != nil, !isRunning {
+                    Button("运行", systemImage: "play.fill") { run() }
+                        .font(.caption2.weight(.semibold))
+                        .labelStyle(.titleAndIcon)
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .tint(SatoriTheme.accent)
+                        .help("在本机运行这段代码")
+                }
+                if isRunning {
+                    HStack(spacing: 4) {
+                        ProgressView().controlSize(.mini)
+                        Text("运行中")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                Button("复制", systemImage: "doc.on.doc") {
                     copyToPasteboard(content)
                 }
                 .labelStyle(.iconOnly)
@@ -104,25 +164,70 @@ struct LearningMarkdownView: View {
                     .textSelection(.enabled)
                     .padding(11)
             }
+
+            if let result = finishedResult {
+                Divider()
+                runOutputView(result)
+            }
         }
         .background(Color(nsColor: .textBackgroundColor).opacity(0.7))
         .clipShape(RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous).stroke(.quaternary))
     }
 
-    private func headingFont(_ level: Int) -> Font {
-        switch level {
-        case 1: .title3.weight(.semibold)
-        case 2: .headline
-        default: .subheadline.weight(.semibold)
+    private var isRunning: Bool {
+        if case .running = runState { return true }
+        return false
+    }
+
+    private var finishedResult: CodeRunResult? {
+        if case let .finished(result) = runState { return result }
+        return nil
+    }
+
+    private func run() {
+        guard let runnable else { return }
+        runState = .running
+        let code = content
+        Task {
+            let result = await CodeRunner.run(code: code, language: runnable)
+            runState = .finished(result)
         }
     }
 
-    private func inlineMarkdown(_ text: String) -> AttributedString {
-        (try? AttributedString(
-            markdown: text,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        )) ?? AttributedString(text)
+    private func runOutputView(_ result: CodeRunResult) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: result.exitCode == 0 ? "checkmark.circle" : "xmark.octagon")
+                    .foregroundStyle(result.exitCode == 0 ? .green : .red)
+                Text(result.timedOut ? "运行超时，已停止" : (result.exitCode == 0 ? "运行完成" : "运行出错"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                if result.exitCode != 0 && !result.timedOut {
+                    Text("退出码 \(result.exitCode)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+            }
+            if !result.stdout.isEmpty {
+                Text(result.stdout)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(Color.black.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+            }
+            if !result.stderr.isEmpty {
+                Text(result.stderr)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(Color.red.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+            }
+        }
+        .padding(10)
     }
 
     private func copyToPasteboard(_ text: String) {
