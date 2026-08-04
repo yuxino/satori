@@ -32,26 +32,36 @@ public actor ReviewStore {
     public func rate(for documentID: UUID, question: ReviewQuestion, rating: ReviewRating, now: Date = .now) throws {
         var questions = try self.questions(for: documentID)
         guard let index = questions.firstIndex(where: { $0.id == question.id }) else { return }
-        questions[index].reviewCount += 1
-        questions[index].lastRating = rating
-        questions[index].dueAt = Self.nextDue(after: now, rating: rating, reviewCount: questions[index].reviewCount)
+        var updated = questions[index]
+        updated.reviewCount += 1
+        updated.lastRating = rating
+        switch rating {
+        case .good:
+            updated.consecutiveGoodCount += 1
+        case .hard:
+            break // stability (consecutive good streak) is preserved
+        case .again:
+            updated.consecutiveGoodCount = 0
+        }
+        updated.lastIntervalDays = Self.intervalDays(after: rating, consecutiveGoodCount: updated.consecutiveGoodCount)
+        updated.dueAt = now.addingTimeInterval(updated.lastIntervalDays * 86_400)
+        questions[index] = updated
         try save(questions, for: documentID)
     }
 
-    /// The spacing schedule, in the spirit of spaced repetition:
-    /// again → ~10 minutes; hard → ~1 day; good → grows 2 / 4 / 8 / … days.
-    static func nextDue(after now: Date, rating: ReviewRating, reviewCount: Int) -> Date {
-        let seconds: TimeInterval
+    /// SM-2-style spacing schedule:
+    /// - good (记住了): consecutive good streak drives 1, 2, 4, 8… days.
+    /// - hard (还行): one step behind good — grows with stability but smaller.
+    /// - again (生疏): resets the streak and the interval to 1 day.
+    static func intervalDays(after rating: ReviewRating, consecutiveGoodCount: Int) -> Double {
         switch rating {
-        case .again:
-            seconds = 10 * 60
-        case .hard:
-            seconds = 24 * 60 * 60
         case .good:
-            let days = max(1, min(1 << (reviewCount - 1), 30))
-            seconds = Double(days) * 24 * 60 * 60
+            return pow(2, Double(max(consecutiveGoodCount - 1, 0)))
+        case .hard:
+            return pow(2, Double(max(consecutiveGoodCount - 1, -1)))
+        case .again:
+            return 1
         }
-        return now.addingTimeInterval(seconds)
     }
 
     public static func defaultFileURL() -> URL {
@@ -66,14 +76,23 @@ public actor ReviewStore {
             cachedArchive = empty
             return empty
         }
-        let data = try Data(contentsOf: fileURL)
-        let archive = try JSONDecoder.review.decode(ReviewArchive.self, from: data)
-        cachedArchive = archive
-        return archive
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let archive = try StoreArchive.decode(ReviewArchive.self, from: data)
+            cachedArchive = archive
+            return archive
+        } catch {
+            // Undecodable archive: keep the bad file aside and recover empty,
+            // so the next save starts fresh instead of overwriting the only copy.
+            try? StoreArchive.backupCorruptFile(at: fileURL)
+            let empty = ReviewArchive()
+            cachedArchive = empty
+            return empty
+        }
     }
 
     private func persist(_ archive: ReviewArchive) throws {
-        let data = try JSONEncoder.review.encode(archive)
+        let data = try StoreArchive.encode(archive)
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: fileURL, options: .atomic)
         cachedArchive = archive
@@ -87,21 +106,4 @@ private struct ReviewArchive: Codable {
 private struct DocumentReviewEntry: Codable {
     let documentID: UUID
     var questions: [ReviewQuestion]
-}
-
-private extension JSONEncoder {
-    static var review: JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        return encoder
-    }
-}
-
-private extension JSONDecoder {
-    static var review: JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }
 }

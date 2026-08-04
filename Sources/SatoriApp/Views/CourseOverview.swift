@@ -1,4 +1,5 @@
 import AppKit
+import PDFKit
 import SwiftUI
 import SatoriCore
 
@@ -96,7 +97,7 @@ struct CourseOverview: View {
 
     private func selectDocument(_ documentID: UUID) {
         selectedDocumentID = documentID
-        store.selectedDocumentID = documentID
+        store.rememberOpenedDocument(courseID: course.id, documentID: documentID)
     }
 
     private func choosePDF(replacing document: StudyDocument? = nil) {
@@ -106,18 +107,21 @@ struct CourseOverview: View {
         panel.canChooseDirectories = false
         panel.message = document == nil ? "选择要加入 \(course.title) 的 PDF" : "选择用来替换 \(document?.displayName ?? "当前教材") 的 PDF"
         if panel.runModal() == .OK, let url = panel.url {
-            if let document {
-                store.replacePDF(url, in: course.id, documentID: document.id)
-            } else {
-                store.importPDF(url, into: course.id)
+            Task { @MainActor in
+                if let document {
+                    await store.replacePDF(url, in: course.id, documentID: document.id)
+                } else {
+                    await store.importPDF(url, into: course.id)
+                }
+                selectedDocumentID = nil
             }
-            selectedDocumentID = nil
         }
     }
 }
 
 private struct DocumentWorkspace: View {
     @EnvironmentObject private var store: AppModel
+    @EnvironmentObject private var router: ReaderSelectionRouter
     let course: CourseWorkspace
     let document: StudyDocument
     let url: URL
@@ -128,8 +132,14 @@ private struct DocumentWorkspace: View {
     @State private var currentPageIndex: Int
     @State private var pageInput = ""
     @State private var showsInspector = true
-    @State private var panelWidth: CGFloat = 430
+    /// 最近一次上报的页内偏移（0…1），随 onPositionChanged 更新；布局切换
+    /// 重建 PDFReaderView 时用它恢复位置，避免回落到持久化里的旧页码。
+    @State private var currentOffset: Double
+    /// 宽窗口下面板宽度、窄窗口下面板高度；分隔条可拖调整，互不遮挡。
+    @State private var panelWidth: CGFloat
+    @State private var panelHeight: CGFloat
     @State private var isDraggingDivider = false
+    @State private var isDraggingHeightDivider = false
 
     init(
         course: CourseWorkspace,
@@ -148,41 +158,99 @@ private struct DocumentWorkspace: View {
         self.onReplace = onReplace
         self.onRemove = onRemove
         _currentPageIndex = State(initialValue: document.readingPosition.pageIndex)
+        _currentOffset = State(initialValue: document.readingPosition.normalizedPageOffset)
+        _showsInspector = State(initialValue: Self.storedInspectorVisible)
+        _panelWidth = State(initialValue: Self.storedPanelWidth(for: document.id))
+        _panelHeight = State(initialValue: Self.storedPanelHeight(for: document.id))
     }
 
     private var pageCount: Int { max(document.pageCount, 1) }
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                readingBar
-                Divider()
-                PDFReaderView(
-                    url: url,
-                    initialPosition: document.readingPosition,
-                    currentPageIndex: $currentPageIndex,
-                    onPositionChanged: { pageIndex, offset in
-                        store.updateReadingPosition(
-                            courseID: course.id,
-                            documentID: document.id,
-                            pageIndex: pageIndex,
-                            normalizedOffset: offset
-                        )
-                        // Feed the progress bar: record this page as read.
-                        Task {
-                            try? await LearningStatsStore.shared.recordPageRead(
-                                documentID: document.id,
-                                pageIndex: pageIndex,
-                                pageCount: document.pageCount
-                            )
-                            NotificationCenter.default.post(name: .learningStatsDidChange, object: nil)
-                        }
-                    }
-                )
+        Group {
+            // 自然分栏，永不遮挡：宽窗口左右（PDF | 面板），窄窗口上下（PDF 上 / 面板下）。
+            if router.inspectorFloats {
+                verticalWorkspace
+            } else {
+                horizontalWorkspace
             }
-            .frame(minWidth: 620)
-            .frame(maxWidth: .infinity)
+        }
+        .task(id: document.id) {
+            // 打开 PDF 时把课程目录项关联到书内 outline 的真实页码。
+            await linkDirectoryPages()
+        }
+        .task(id: document.id) {
+            // 这本书一被打开就记住「课程 + 书」，重启后回到同一本；
+            // 不依赖用户点书单菜单（只读书不切书时也要能记住）。
+            store.rememberOpenedDocument(courseID: course.id, documentID: document.id)
+        }
+        .onChange(of: showsInspector) { _, visible in
+            UserDefaults.standard.set(visible, forKey: Self.inspectorVisibleKey)
+        }
+    }
 
+    // MARK: 面板几何与开关的记忆
+
+    private static let inspectorVisibleKey = "satori.workspace.inspectorVisible"
+    private static let storedInspectorVisible = UserDefaults.standard.object(forKey: inspectorVisibleKey) as? Bool ?? true
+
+    /// 每本书单独记住分隔条拖出来的面板宽/高；取不到时用默认值。
+    private static func storedPanelWidth(for documentID: UUID) -> CGFloat {
+        storedPanelSize(for: "satori.workspace.panelWidth.\(documentID.uuidString)", default: 430)
+    }
+
+    private static func storedPanelHeight(for documentID: UUID) -> CGFloat {
+        storedPanelSize(for: "satori.workspace.panelHeight.\(documentID.uuidString)", default: 320)
+    }
+
+    private static func storedPanelSize(for key: String, default fallback: CGFloat) -> CGFloat {
+        guard let stored = UserDefaults.standard.object(forKey: key) as? Double else { return fallback }
+        return CGFloat(stored)
+    }
+
+    private func persistPanelSize() {
+        UserDefaults.standard.set(Double(panelWidth), forKey: "satori.workspace.panelWidth.\(document.id.uuidString)")
+        UserDefaults.standard.set(Double(panelHeight), forKey: "satori.workspace.panelHeight.\(document.id.uuidString)")
+    }
+
+    /// 用当前 PDF 的 outline 补齐课程目录项缺失的页码并持久化。
+    /// 全部已关联（此前已持久化）或 PDF 没有 outline 时直接跳过，保持现状。
+    private func linkDirectoryPages() async {
+        let directory = course.learningDirectory
+        guard !directory.isEmpty,
+              directory.contains(where: { $0.pageIndex == nil }),
+              let resolvedURL = DocumentBookmarkStore.resolveURL(for: document) else { return }
+        let titles = directory.map(\.title)
+        let linked = await Task.detached(priority: .utility) {
+            OutlinePageMatcher.linkedPageIndices(titles: titles, url: resolvedURL)
+        }.value
+        guard !linked.allSatisfy({ $0 == nil }), !Task.isCancelled else { return }
+
+        var updated = store.plan
+        guard let courseIndex = updated.courses.firstIndex(where: { $0.id == course.id }) else { return }
+        let currentDirectory = updated.courses[courseIndex].learningDirectory
+        guard currentDirectory.count == linked.count else { return }
+        var changed = false
+        let newDirectory = zip(currentDirectory, linked).map { item, pageIndex -> LearningDirectoryItem in
+            guard let pageIndex, pageIndex != item.pageIndex else { return item }
+            changed = true
+            return item.withPageIndex(pageIndex)
+        }
+        guard changed else { return }
+        updated.courses[courseIndex].learningDirectory = newDirectory
+        do {
+            try await LearningPlanStore().save(updated)
+            await store.load()
+            store.save()
+        } catch {
+            // 持久化失败只影响下次启动的恢复，不阻塞当前阅读。
+        }
+    }
+
+    /// 宽窗口：PDF 在左，面板在右，中间分隔条可拖调宽度。
+    private var horizontalWorkspace: some View {
+        HStack(spacing: 0) {
+            readerColumn
             if showsInspector {
                 divider
                 LearningInspector(
@@ -198,6 +266,95 @@ private struct DocumentWorkspace: View {
                 .frame(width: panelWidth)
             }
         }
+    }
+
+    /// 窄窗口：PDF 在上，面板在下，横向分隔条可拖调高度；互不遮挡。
+    private var verticalWorkspace: some View {
+        VStack(spacing: 0) {
+            readerColumn
+            if showsInspector {
+                panelHeightDivider
+                LearningInspector(
+                    documentID: document.id,
+                    pageIndex: currentPageIndex,
+                    documentURL: url,
+                    onNavigateToPage: { targetPage in
+                        currentPageIndex = min(max(targetPage, 0), pageCount - 1)
+                    },
+                    onClose: { showsInspector = false }
+                )
+                .frame(height: panelHeight)
+            }
+        }
+    }
+
+    /// 阅读栏 + PDF，上下两种布局共用同一份阅读区。
+    private var readerColumn: some View {
+        VStack(spacing: 0) {
+            readingBar
+            Divider()
+            PDFReaderView(
+                url: url,
+                // 用实时位置而非持久化快照：窄/宽布局切换会重建 PDFReaderView，
+                // 此时持久化值可能落后于用户当前页，回退到旧页会丢进度。
+                initialPosition: ReadingPosition(
+                    pageIndex: currentPageIndex,
+                    normalizedPageOffset: currentOffset
+                ),
+                currentPageIndex: $currentPageIndex,
+                onPositionChanged: { pageIndex, offset in
+                    currentOffset = offset
+                    store.updateReadingPosition(
+                        courseID: course.id,
+                        documentID: document.id,
+                        pageIndex: pageIndex,
+                        normalizedOffset: offset
+                    )
+                    // Feed the progress bar: record this page as read.
+                    Task {
+                        do {
+                            try await LearningStatsStore.shared.recordPageRead(
+                                documentID: document.id,
+                                pageIndex: pageIndex,
+                                pageCount: document.pageCount
+                            )
+                            NotificationCenter.default.post(name: .learningStatsDidChange, object: nil)
+                        } catch {
+                            print("recordPageRead failed: \(error)")
+                        }
+                    }
+                }
+            )
+        }
+        .frame(minWidth: 620)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// 窄窗口面板高度分隔条：横向可拖，实时调整下面板高度（200-520pt）。
+    private var panelHeightDivider: some View {
+        Rectangle()
+            .fill(isDraggingHeightDivider ? SatoriTheme.accent.opacity(0.35) : Color.primary.opacity(0.08))
+            .frame(height: isDraggingHeightDivider ? 7 : 5)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering {
+                    NSCursor.resizeUpDown.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        isDraggingHeightDivider = true
+                        let proposed = panelHeight - value.translation.height
+                        panelHeight = min(max(proposed, 200), 520)
+                    }
+                    .onEnded { _ in
+                        isDraggingHeightDivider = false
+                        persistPanelSize()
+                    }
+            )
     }
 
     /// A wide, grabbable divider between the PDF and the panel. The system
@@ -226,6 +383,7 @@ private struct DocumentWorkspace: View {
                     }
                     .onEnded { _ in
                         isDraggingDivider = false
+                        persistPanelSize()
                     }
             )
     }
@@ -330,5 +488,120 @@ private struct DocumentWorkspace: View {
         guard let requestedPage = Int(pageInput) else { return }
         currentPageIndex = min(max(requestedPage - 1, 0), pageCount - 1)
         pageInput = ""
+    }
+}
+
+/// 从 PDF outline 提取「章节标题 → 页码」，把课程目录项关联到真实页码。
+/// 标题按模糊包含匹配（去空白、忽略「第X章」等前缀）；匹配不到时按
+/// outline 的书本顺序顺延到下一个节点。PDF 没有 outline 时返回全 nil。
+private enum OutlinePageMatcher {
+    /// 返回与输入目录标题一一对应的页索引；无匹配且无剩余 outline 节点时为 nil。
+    static func linkedPageIndices(titles: [String], url: URL) -> [Int?] {
+        let entries = extractOutlineEntries(url: url)
+        guard !entries.isEmpty else { return Array(repeating: nil, count: titles.count) }
+        let normalized = entries.map { (normalize($0.title), $0.pageIndex) }
+        var cursor = 0
+        var result: [Int?] = []
+        result.reserveCapacity(titles.count)
+        for title in titles {
+            let target = normalize(title)
+            guard !target.isEmpty else {
+                result.append(nil)
+                continue
+            }
+            if let index = bestMatchIndex(for: target, in: normalized, from: cursor) {
+                result.append(normalized[index].1)
+                cursor = index + 1
+            } else if cursor < normalized.count {
+                // 退而求其次：按 outline 在书中的顺序映射到下一个节点。
+                result.append(normalized[cursor].1)
+                cursor += 1
+            } else {
+                result.append(nil)
+            }
+        }
+        return result
+    }
+
+    private static func extractOutlineEntries(url: URL) -> [(title: String, pageIndex: Int)] {
+        guard let pdf = PDFDocument(url: url), let root = pdf.outlineRoot else { return [] }
+        var entries: [(title: String, pageIndex: Int)] = []
+        collectOutline(root, in: pdf, into: &entries)
+        return entries.sorted { $0.pageIndex < $1.pageIndex }
+    }
+
+    private static func collectOutline(_ node: PDFOutline, in pdf: PDFDocument, into entries: inout [(title: String, pageIndex: Int)]) {
+        let page = node.destination?.page ?? firstPage(of: node)
+        if let page {
+            entries.append((node.label ?? "", pdf.index(for: page)))
+        }
+        for index in 0..<node.numberOfChildren {
+            if let child = node.child(at: index) {
+                collectOutline(child, in: pdf, into: &entries)
+            }
+        }
+    }
+
+    /// 没有 destination 的父节点取第一个带页码的后代页，保证「第X章」等父标题可匹配。
+    private static func firstPage(of node: PDFOutline) -> PDFPage? {
+        if let page = node.destination?.page { return page }
+        for index in 0..<node.numberOfChildren {
+            if let child = node.child(at: index), let page = firstPage(of: child) {
+                return page
+            }
+        }
+        return nil
+    }
+
+    /// 精确相等最优先，其次模糊包含；取标题最短的候选取代最贴合，保证书序单调。
+    private static func bestMatchIndex(for target: String, in entries: [(title: String, pageIndex: Int)], from start: Int) -> Int? {
+        var bestIndex: Int?
+        var bestTitleLength = Int.max
+        for index in start..<entries.count {
+            let candidate = entries[index].title
+            guard !candidate.isEmpty else { continue }
+            if candidate == target {
+                return index
+            }
+            let shorterSide = min(candidate.count, target.count)
+            guard shorterSide >= 2,
+                  candidate.contains(target) || target.contains(candidate),
+                  candidate.count < bestTitleLength else { continue }
+            bestIndex = index
+            bestTitleLength = candidate.count
+        }
+        return bestIndex
+    }
+
+    /// 去空白、忽略「第X章/节/部分」等前缀，用于模糊标题匹配。
+    private static func normalize(_ title: String) -> String {
+        var result = title.lowercased().filter { !$0.isWhitespace }
+        if result.hasPrefix("第") {
+            var rest = result.dropFirst()
+            while let first = rest.first, Self.isChapterNumber(first) {
+                rest = rest.dropFirst()
+            }
+            if let first = rest.first, Self.isChapterUnit(first) {
+                result = String(rest.dropFirst())
+            }
+        } else {
+            for prefix in ["chapter", "chap", "unit", "part", "lesson", "ch"] {
+                guard result.hasPrefix(prefix) else { continue }
+                let rest = result.dropFirst(prefix.count)
+                if let first = rest.first, Self.isChapterNumber(first) {
+                    result = String(rest.drop(while: Self.isChapterNumber))
+                    break
+                }
+            }
+        }
+        return result
+    }
+
+    private static func isChapterNumber(_ character: Character) -> Bool {
+        character.isNumber || "一二三四五六七八九十百千万零〇两".contains(character)
+    }
+
+    private static func isChapterUnit(_ character: Character) -> Bool {
+        "章节部分讲篇课".contains(character)
     }
 }

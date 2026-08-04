@@ -4,10 +4,43 @@ import SatoriCore
 import UniformTypeIdentifiers
 
 struct LearningInspector: View {
-    /// The learning panel has no parallel tabs. It flows: default is the ask
-    /// space; selecting code flips it to run; the notes button overlays the
-    /// book's notes on demand. One space at a time, driven by the reader's
-    /// action — not by a tab they have to remember to switch.
+    /// The learning panel has three mutually exclusive spaces (⌘1-3): 问 is the
+    /// default ask space; 笔记 browses the book's saved Q&A by page; 运行 is the
+    /// code scratchpad. Switching modes clears the previous mode's transient
+    /// state so nothing leaks.
+    enum InspectorMode: String, CaseIterable, Identifiable {
+        case ask
+        case notes
+        case run
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .ask: "问"
+            case .notes: "笔记"
+            case .run: "运行"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .ask: "bubble.left.and.text.bubble.right"
+            case .notes: "book.pages"
+            case .run: "play.rectangle"
+            }
+        }
+
+        var shortcut: KeyEquivalent {
+            switch self {
+            case .ask: "1"
+            case .notes: "2"
+            case .run: "3"
+            }
+        }
+    }
+
+
     enum ContextScope: Equatable {
         case selection
         case page
@@ -38,11 +71,12 @@ struct LearningInspector: View {
 
     @Environment(\.openSettings) private var openSettings
     @Environment(\.scenePhase) private var scenePhase
-    @State private var showsNotes = false
-    @State private var isShowingRun = false
+    @State private var mode: InspectorMode = .ask
     @State private var question = ""
+    /// 上次「问 AI」选中的页码：文本已填入输入框等用户编辑/追问，
+    /// 发送时用它锚定上下文；用户翻页或自行改写后失效。
+    @State private var pendingSelectionPage: Int?
     @State private var turns: [LearningTurn] = []
-    @State private var expandedTurnIDs: Set<UUID> = []
     @State private var draftQuestion = ""
     @State private var draftPageIndex = 0
     @State private var draftAttachmentCount = 0
@@ -50,9 +84,18 @@ struct LearningInspector: View {
     @State private var isThinking = false
     @State private var isLoadingHistory = true
     @State private var historyStatus = ""
+    /// 流式回答期间是否跟随最新（用户上滑看历史时停止跟随）。
+    @State private var followStream = true
+    /// 有新回答/历史加载完成时，等待列表尾部真正出现后再滚到底部，
+    /// 避免 LazyVStack 还没排好布局时 scrollTo 静默失效。
+    @State private var pendingScrollToLatest = false
+    /// 列表底部是否在视野内；滚上去看历史时变 false，用来显示
+    /// 「回到底部」浮动按钮。
+    @State private var isAtBottom = true
     @State private var hasQwenConfiguration = false
     @State private var isCheckingConfiguration = false
     @State private var allowsWebSearch = false
+    @State private var completedElsewherePage: Int?
     @State private var attachments: [LearningImageAttachment] = []
     @State private var isImportingImage = false
     @State private var attachmentStatus = ""
@@ -68,7 +111,6 @@ struct LearningInspector: View {
     @State private var isRunning = false
 
     private let sessionStore = LearningSessionStore.shared
-    private let reviewStore = ReviewStore.shared
     private let responseBottomID = "learning-response-bottom"
     private let quickPrompts = [
         "这一页主要在讲什么？",
@@ -76,37 +118,57 @@ struct LearningInspector: View {
         "给我一个具体例子"
     ]
 
-    // MARK: Review (spaced retrieval)
-
-    @State private var reviewQuestions: [ReviewQuestion] = []
-    @State private var isGeneratingReview = false
-    @State private var isReviewing = false
-    @State private var reviewIndex = 0
-    @State private var isAnswerRevealed = false
-    @State private var reviewTask: Task<Void, Never>?
-
     var body: some View {
         VStack(spacing: 0) {
             inspectorHeader
             Divider()
 
-            if showsNotes {
-                notesView
-            } else if isShowingRun {
-                runView
-            } else {
+            switch mode {
+            case .ask:
                 askView
+            case .notes:
+                notesView
+            case .run:
+                runView
             }
         }
         .background(SatoriTheme.paper)
         .task(id: documentID) { await loadHistory() }
-        .task(id: documentID) { await loadDueReviews() }
         .onAppear { refreshConfigurationState() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { refreshConfigurationState() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .qwenConfigurationDidChange)) { _ in
             refreshConfigurationState()
+        }
+
+        // 划选即问 / 划选即运行（PDFReaderView 浮动工具条 → NotificationCenter →
+        // 本面板）。URL 匹配当前文档才响应，避免其他书页的划选误触发。
+        // 「问 AI」像 Cursor 一样把选中文字放进输入框，不自动发送：
+        // 用户可以补充、改写、追问后再自己发送。
+        .onReceive(NotificationCenter.default.publisher(for: .satoriAskSelectionRequested)) { note in
+            guard let text = note.userInfo?["text"] as? String,
+                  let selectionPage = note.userInfo?["pageIndex"] as? Int else { return }
+            let sourceURL = note.userInfo?["url"] as? URL
+            guard sourceURL == nil || sourceURL == documentURL else { return }
+            selectMode(.ask)
+            pendingSelectionPage = selectionPage
+            if question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                question = text
+            } else {
+                question += "\n" + text
+            }
+            // 下一帧聚焦输入框：用户选中后直接接着打字追问，不用再点一下。
+            DispatchQueue.main.async {
+                isQuestionFocused = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .satoriRunSelectionRequested)) { note in
+            guard let text = note.userInfo?["text"] as? String else { return }
+            let sourceURL = note.userInfo?["url"] as? URL
+            guard sourceURL == nil || sourceURL == documentURL else { return }
+            selectMode(.run)
+            runCode = text
         }
         .fileImporter(
             isPresented: $isImportingImage,
@@ -121,30 +183,26 @@ struct LearningInspector: View {
             Text("只会删除本机保存的 AI 问答，不会影响 PDF、阅读位置或百炼账户。")
         }
         .onDisappear { requestTask?.cancel() }
+        .onChange(of: pageIndex) { _, _ in
+            // 用户翻页后，之前选中的上下文不再指向当前阅读位置。
+            pendingSelectionPage = nil
+        }
     }
 
     private var inspectorHeader: some View {
-        HStack(spacing: SatoriTheme.Spacing.sm) {
-            Text("这本书")
-                .font(.headline)
-            Spacer()
-
-            // 笔记 is a temporary overlay, not a parallel space: a click shows
-            // the book's notes and a click (or any ask/run action) returns.
-            Button {
-                withAnimation(SatoriTheme.Motion.quick) { showsNotes.toggle() }
-            } label: {
-                Label("笔记", systemImage: "book.pages")
+        VStack(spacing: SatoriTheme.Spacing.md) {
+            HStack(spacing: SatoriTheme.Spacing.sm) {
+                Text("这本书")
+                    .font(.headline)
+                Spacer()
+                Button("关闭", systemImage: "xmark", action: onClose)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("关闭学习面板")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .tint(showsNotes ? SatoriTheme.accent : .secondary)
 
-            Button("关闭", systemImage: "xmark", action: onClose)
-                .labelStyle(.iconOnly)
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("关闭学习面板")
+            modePicker
         }
         .padding(.horizontal, SatoriTheme.Spacing.lg)
         .padding(.vertical, SatoriTheme.Spacing.md)
@@ -152,13 +210,87 @@ struct LearningInspector: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
-    /// 问 — the page you're reading, its Q&A, and the composer. Nothing else.
+    /// 问 / 笔记 / 运行 — one active space, ⌘1-3.
+    private var modePicker: some View {
+        HStack(spacing: 2) {
+            ForEach(InspectorMode.allCases) { item in
+                modeButton(item)
+            }
+        }
+        .padding(3)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
+    private func modeButton(_ item: InspectorMode) -> some View {
+        let isActive = mode == item
+        return Button {
+            selectMode(item)
+        } label: {
+            Label(item.title, systemImage: item.systemImage)
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+                .overlay(alignment: .topTrailing) {
+                    if item == .notes, turns.count > 0 {
+                        Text("\(turns.count)")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(SatoriTheme.accent, in: Capsule())
+                            .offset(x: 8, y: -4)
+                    }
+                }
+                .background(
+                    isActive ? SatoriTheme.paperRaised : .clear,
+                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                )
+                .foregroundStyle(isActive ? SatoriTheme.accent : .secondary)
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(item.shortcut, modifiers: .command)
+        .help("\(item.title)（⌘\(item.shortcut.character)）")
+    }
+
+    /// Modes are mutually exclusive; leaving a mode clears its transient
+    /// state (stale run output) so the next mode starts clean.
+    private func selectMode(_ newMode: InspectorMode) {
+        guard newMode != mode else { return }
+        if mode == .run {
+            stopRunning()
+            runOutput = nil
+        }
+        withAnimation(SatoriTheme.Motion.quick) { mode = newMode }
+    }
+
+    /// 正在进行中的这一轮对话：发送提问的瞬间就出现（回答为空、流式填充），
+    /// 完成后由 `completeDraft` 归档进 `turns`，界面不跳变。
+    private var activeTurn: LearningTurn? {
+        guard !draftQuestion.isEmpty else { return nil }
+        return LearningTurn(
+            question: draftQuestion,
+            answer: response?.text ?? "",
+            pageIndex: draftPageIndex,
+            sourceKind: response?.sourceKind ?? .inference,
+            citations: response?.citations ?? [],
+            attachmentCount: draftAttachmentCount
+        )
+    }
+
+    private var isStreamingAnswer: Bool {
+        isThinking && !draftQuestion.isEmpty
+    }
+
+    /// 问 — 这本书的对话流 + 输入框。所有问答连成一条对话，翻页不消失。
     private var askView: some View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: SatoriTheme.Spacing.lg) {
-                        askScopeHeader
+                    VStack(alignment: .leading, spacing: SatoriTheme.Spacing.lg) {
+                        if let completedPage = completedElsewherePage {
+                            savedElsewhereBanner(pageIndex: completedPage)
+                        }
 
                         if isLoadingHistory {
                             HStack(spacing: 8) {
@@ -168,18 +300,30 @@ struct LearningInspector: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .padding(.vertical, 18)
-                        } else if turns.isEmpty, draftQuestion.isEmpty {
+                        } else if turns.isEmpty, activeTurn == nil {
                             promptStarter
                         } else {
-                            if !currentPageHasNotes {
-                                currentPageInvitation
+                            // 一条连续的对话流：历史问答 + 正在进行的这一轮。
+                            // 提问消息一发送就出现在列表里，回答紧跟其下流式输出。
+                            ForEach(turns) { turn in
+                                conversationTurnCard(turn)
+                                    .id(turn.id)
                             }
-                            currentPageTurns
-                        }
-
-                        if !draftQuestion.isEmpty, let response {
-                            draftTurnCard(response)
-                                .id("streaming-draft")
+                            if let activeTurn {
+                                conversationTurnCard(activeTurn, isActive: true)
+                                    .id("streaming-draft")
+                                    .onAppear {
+                                        // 进行中的对话在视野里 = 用户在看底部，恢复跟随。
+                                        followStream = true
+                                        pendingScrollToLatest = false
+                                        scrollToLatest(proxy)
+                                    }
+                                    .onDisappear {
+                                        // 滚出视野 = 用户在翻历史，不再自动跟随。
+                                        followStream = false
+                                        pendingScrollToLatest = false
+                                    }
+                            }
                         }
 
                         if !historyStatus.isEmpty {
@@ -191,15 +335,53 @@ struct LearningInspector: View {
                         Color.clear
                             .frame(height: 1)
                             .id(responseBottomID)
+                            .onAppear {
+                                isAtBottom = true
+                                followStream = true
+                                // 列表尾部真正出现时才执行挂起的「滚到底部」。
+                                if pendingScrollToLatest {
+                                    pendingScrollToLatest = false
+                                    scrollToLatest(proxy)
+                                }
+                            }
+                            .onDisappear {
+                                isAtBottom = false
+                            }
                     }
                     .padding(SatoriTheme.Spacing.lg)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .onChange(of: response?.text) { _, _ in
-                    proxy.scrollTo(responseBottomID, anchor: .bottom)
+                    // 流式期间跟随最新回答；用户上滑看历史时不再拉回。
+                    guard followStream else { return }
+                    scrollToLatest(proxy)
                 }
                 .onChange(of: turns.count) { _, _ in
-                    proxy.scrollTo(responseBottomID, anchor: .bottom)
+                    // 回答完成/删除：用户在底部就跟过去；在看历史就不抢滚动，
+                    // 只留「回到底部」按钮让用户自己决定。
+                    if followStream {
+                        pendingScrollToLatest = true
+                        scrollToLatest(proxy)
+                    }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if !isAtBottom {
+                        Button {
+                            followStream = true
+                            pendingScrollToLatest = true
+                            scrollToLatest(proxy)
+                        } label: {
+                            Label("回到底部", systemImage: "arrow.down")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(SatoriTheme.accent)
+                        .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
+                        .padding(.trailing, SatoriTheme.Spacing.lg)
+                        .padding(.bottom, SatoriTheme.Spacing.sm)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .animation(SatoriTheme.Motion.quick, value: isAtBottom)
+                    }
                 }
             }
 
@@ -208,19 +390,54 @@ struct LearningInspector: View {
         }
     }
 
-    /// The turn cards for the page currently on screen.
-    private var currentPageTurns: some View {
-        let current = turns.filter { $0.pageIndex == pageIndex }
-        return VStack(alignment: .leading, spacing: SatoriTheme.Spacing.lg) {
-            ForEach(current) { turn in
-                learningTurnCard(turn)
-                    .id(turn.id)
-            }
+    /// 滚到底部。延迟到下一帧执行：LazyVStack 在状态变化的同一轮里还没
+    /// 排好新内容，立刻 scrollTo 会按旧布局滚动，出现滚过头、底部空白的
+    /// 错位。流式期间不带动画，避免每个 delta 都做滚动动画的拖影。
+    private func scrollToLatest(_ proxy: ScrollViewProxy) {
+        DispatchQueue.main.async {
+            proxy.scrollTo(responseBottomID, anchor: .bottom)
         }
     }
 
-    /// 笔记 — every page's Q&A, organized by page. Read-only browse of what
-    /// was learned; no composer, no scope picker, no distractions.
+    /// 回答完成时用户已经翻页：提示它存进了哪一页，不再"答完就消失"。
+    private func savedElsewhereBanner(pageIndex: Int) -> some View {
+        HStack(spacing: SatoriTheme.Spacing.sm) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 15))
+                .foregroundStyle(SatoriTheme.accent)
+            Text("回答已存入第 \(pageIndex + 1) 页笔记")
+                .font(.callout.weight(.medium))
+            Spacer()
+            Button("去看看") {
+                onNavigateToPage(pageIndex)
+                completedElsewherePage = nil
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .tint(SatoriTheme.accent)
+            Button {
+                completedElsewherePage = nil
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("关闭提示")
+        }
+        .padding(SatoriTheme.Spacing.md)
+        .background(
+            SatoriTheme.accentWash.opacity(0.7),
+            in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous)
+                .strokeBorder(SatoriTheme.accent.opacity(0.3), lineWidth: 1)
+        )
+    }
+
+
+
     private var notesView: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: SatoriTheme.Spacing.xl) {
@@ -232,6 +449,20 @@ struct LearningInspector: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 18)
+                } else if !historyStatus.isEmpty {
+                    VStack(spacing: SatoriTheme.Spacing.sm) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 32))
+                            .foregroundStyle(SatoriTheme.gold)
+                        Text("学习记录加载失败")
+                            .font(.callout.weight(.medium))
+                        Text(historyStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, SatoriTheme.Spacing.xxl)
                 } else if turns.isEmpty {
                     VStack(spacing: SatoriTheme.Spacing.sm) {
                         Image(systemName: "book.pages")
@@ -257,32 +488,6 @@ struct LearningInspector: View {
         }
     }
 
-    /// 复习 — self-testing with spaced retrieval. Own the whole space so due
-    /// questions and the active session don't collide with reading.
-    private var reviewView: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: SatoriTheme.Spacing.lg) {
-                if isReviewing {
-                    reviewSessionView
-                } else if isGeneratingReview {
-                    HStack(spacing: SatoriTheme.Spacing.sm) {
-                        ProgressView().controlSize(.small)
-                        Text("正在根据这一页生成自测题…")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, SatoriTheme.Spacing.sm)
-                } else if !reviewQuestions.isEmpty {
-                    reviewPromptView
-                } else {
-                    reviewEmptyView
-                }
-            }
-            .padding(SatoriTheme.Spacing.lg)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
     /// 运行 — a quick scratchpad to execute code locally. Paste from the PDF
     /// selection (or anywhere), pick a language, hit run, see output.
     private var runView: some View {
@@ -291,7 +496,7 @@ struct LearningInspector: View {
                 VStack(alignment: .leading, spacing: SatoriTheme.Spacing.md) {
                     HStack(spacing: SatoriTheme.Spacing.sm) {
                         Button {
-                            withAnimation(SatoriTheme.Motion.quick) { isShowingRun = false }
+                            selectMode(.ask)
                         } label: {
                             Label("回到对话", systemImage: "chevron.left")
                         }
@@ -417,30 +622,6 @@ struct LearningInspector: View {
         isRunning = false
     }
 
-    /// The review space's empty state — explains what this tab is for and
-    /// offers to generate a first batch from the current page.
-    private var reviewEmptyView: some View {
-        VStack(spacing: SatoriTheme.Spacing.lg) {
-            Image(systemName: "arrow.counterclockwise")
-                .font(.system(size: 32))
-                .foregroundStyle(SatoriTheme.gold)
-            VStack(spacing: SatoriTheme.Spacing.xs + 1) {
-                Text("把读过的东西记住")
-                    .font(.title3.weight(.semibold))
-                Text("Satori 会根据第 \(pageIndex + 1) 页和你的问答出几道题，\n先回想、再对答案。忘记的很快回来，记住的越隔越久。")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            Button("考考我这一页", systemImage: "questionmark.circle") { startReview() }
-                .buttonStyle(.borderedProminent)
-                .tint(SatoriTheme.accent)
-                .disabled(isGeneratingReview)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, SatoriTheme.Spacing.xxl)
-    }
-
     /// Turns grouped by the page they belong to, so the panel reads as
     /// per-page margin notes on the book rather than a disconnected chat log.
     private struct PageSection: Identifiable {
@@ -451,33 +632,12 @@ struct LearningInspector: View {
 
     private var pageSections: [PageSection] {
         let grouped = Dictionary(grouping: turns, by: \.pageIndex)
-        return grouped.keys.sorted().map { PageSection(pageIndex: $0, turns: grouped[$0] ?? []) }
-    }
-
-    /// Whether the page currently on screen already has notes — when it does,
-    /// the "invitation to ask" belongs to that page instead of floating on top.
-    /// A streaming draft counts too, so the invitation doesn't contradict an
-    /// answer that is already being written for this page.
-    private var currentPageHasNotes: Bool {
-        turns.contains { $0.pageIndex == pageIndex }
-            || (response != nil && draftPageIndex == pageIndex)
-    }
-
-    /// A quiet status header for the ask space: every question is grounded in
-    /// the page you're reading. Nothing to choose.
-    private var askScopeHeader: some View {
-        HStack(spacing: SatoriTheme.Spacing.sm) {
-            Image(systemName: "doc.text")
-                .font(.caption)
-                .foregroundStyle(SatoriTheme.iconChrome)
-            Text("将基于第 \(pageIndex + 1) 页提问")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding(SatoriTheme.Spacing.md)
-        .background(SatoriTheme.paperRaised.opacity(0.8), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous).strokeBorder(SatoriTheme.hairline))
+        // 最近有问答的页排前面：像成长记录，而不是按页码归档的档案。
+        return grouped.keys.sorted { lhs, rhs in
+            let lastA = grouped[lhs]?.last?.createdAt ?? .distantPast
+            let lastB = grouped[rhs]?.last?.createdAt ?? .distantPast
+            return lastA > lastB
+        }.map { PageSection(pageIndex: $0, turns: grouped[$0] ?? []) }
     }
 
     private var promptStarter: some View {
@@ -506,32 +666,107 @@ struct LearningInspector: View {
         .padding(.vertical, SatoriTheme.Spacing.xs)
     }
 
-    private func learningTurnCard(_ turn: LearningTurn) -> some View {
-        let isExpanded = expandedTurnIDs.contains(turn.id)
-        return VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
-            turnQuestionHeader(
+    /// 一轮对话：右侧你的问题气泡 + 左侧 AI 回答卡片。历史与进行中的
+    /// 这一轮共用同一组件，发送/归档时界面不跳变。
+    private func conversationTurnCard(_ turn: LearningTurn, isActive: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
+            userMessageBubble(
                 question: turn.question,
                 pageIndex: turn.pageIndex,
                 attachmentCount: turn.attachmentCount,
-                createdAt: turn.createdAt,
-                isExpanded: isExpanded,
-                onToggle: { toggleTurn(turn.id) }
+                createdAt: turn.createdAt
             )
-            if isExpanded {
-                Divider()
-                answerHeader(
-                    sourceKind: turn.sourceKind,
-                    pageIndex: turn.pageIndex,
-                    isStreaming: false,
-                    completion: turn.completion
-                )
+            answerCard(turn: turn, isActive: isActive)
+        }
+    }
+
+    /// 你的消息：右对齐气泡，页码可点回原文。
+    private func userMessageBubble(
+        question: String,
+        pageIndex: Int,
+        attachmentCount: Int,
+        createdAt: Date
+    ) -> some View {
+        HStack {
+            Spacer(minLength: 48)
+            VStack(alignment: .trailing, spacing: 5) {
+                Text(question)
+                    .font(.body)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 10) {
+                    if attachmentCount > 0 {
+                        Text("\(attachmentCount) 张附图")
+                    }
+                    Button("第 \(pageIndex + 1) 页") { onNavigateToPage(pageIndex) }
+                        .buttonStyle(.plain)
+                    Text(createdAt, style: .time)
+                }
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.85))
+            }
+            .padding(.horizontal, SatoriTheme.Spacing.md)
+            .padding(.vertical, 10)
+            .background(
+                SatoriTheme.accentButton,
+                in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous)
+            )
+            .foregroundStyle(.white)
+        }
+    }
+
+    /// AI 回答：左对齐卡片。进行中时金色描边 + 流式输出。
+    private func answerCard(turn: LearningTurn, isActive: Bool) -> some View {
+        let isStreaming = isActive && isStreamingAnswer
+        return VStack(alignment: .leading, spacing: 12) {
+            answerHeader(
+                sourceKind: turn.sourceKind,
+                pageIndex: turn.pageIndex,
+                isStreaming: isStreaming,
+                completion: turn.completion
+            )
+            if isStreaming, turn.answer.isEmpty {
+                HStack(spacing: SatoriTheme.Spacing.sm) {
+                    ProgressView().controlSize(.small)
+                    Text(allowsWebSearch ? "正在理解原文并检索资料…" : "正在理解当前页…")
+                        .foregroundStyle(.secondary)
+                }
+                .font(.callout)
+                .padding(.vertical, SatoriTheme.Spacing.xs + 2)
+            } else {
                 LearningMarkdownView(markdown: turn.answer)
+                if isActive ? (response?.isTruncated ?? false) : looksTruncated(turn.answer) {
+                    truncatedAnswerNotice
+                }
+                if isStreaming, turn.citations.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "link")
+                        Text("正在整理来源…")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                }
                 citationsView(turn.citations)
+            }
+            if isActive, !isStreaming, turn.sourceKind == .inference {
+                HStack {
+                    if !hasQwenConfiguration {
+                        Button("连接 Qwen", systemImage: "key") { openSettings() }
+                            .buttonStyle(.borderless)
+                    }
+                    Spacer()
+                    Button("重试", systemImage: "arrow.clockwise") {
+                        askAssistant(turn.question, pageOverride: turn.pageIndex)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            if !isActive {
                 turnActions(turn)
             }
         }
-        .satoriPaper(radius: SatoriTheme.Radius.md, padding: SatoriTheme.Spacing.lg)
-        .animation(SatoriTheme.Motion.standard, value: isExpanded)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .satoriPaper(radius: SatoriTheme.Radius.md, padding: SatoriTheme.Spacing.lg, emphasized: isStreaming)
     }
 
     /// A page in the margin notes: "第 N 页" header followed by that page's turns.
@@ -562,237 +797,8 @@ struct LearningInspector: View {
             .help("跳到第 \(section.pageIndex + 1) 页")
 
             ForEach(section.turns) { turn in
-                learningTurnCard(turn)
+                conversationTurnCard(turn)
                     .id(turn.id)
-            }
-        }
-    }
-
-    /// Shown at the top when the page you're reading has no notes yet — a
-    /// clear invitation to make the AI work on this page.
-    private var currentPageInvitation: some View {
-        VStack(alignment: .leading, spacing: SatoriTheme.Spacing.md) {
-            HStack(spacing: SatoriTheme.Spacing.sm) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(SatoriTheme.gold)
-                    .frame(width: 26, height: 26)
-                    .background(SatoriTheme.goldWash, in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("这一页还没有笔记")
-                        .font(.callout.weight(.medium))
-                    Text("第 \(pageIndex + 1) 页 · 让 AI 陪你读这一页")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-
-            HStack(spacing: SatoriTheme.Spacing.sm) {
-                ForEach(quickPrompts, id: \.self) { prompt in
-                    Button {
-                        askAssistant(prompt)
-                    } label: {
-                        Text(prompt)
-                            .font(.callout)
-                            .padding(.horizontal, SatoriTheme.Spacing.md)
-                            .padding(.vertical, SatoriTheme.Spacing.sm)
-                            .background(SatoriTheme.paperRaised, in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous).strokeBorder(SatoriTheme.hairline))
-                    }
-                    .buttonStyle(.plain)
-                }
-                Spacer()
-            }
-        }
-        .padding(SatoriTheme.Spacing.lg)
-        .background(SatoriTheme.goldWash.opacity(0.5), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous))
-    }
-
-    /// A review question is due — invite the reader to self-test before it
-    /// disappears from memory.
-    private var reviewPromptView: some View {
-        HStack(spacing: SatoriTheme.Spacing.md) {
-            Image(systemName: "arrow.counterclockwise.circle.fill")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(SatoriTheme.gold)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("该复习了")
-                    .font(.callout.weight(.semibold))
-                Text("有 \(reviewQuestions.count) 道题到期，先回想再对答案")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("开始复习") { isReviewing = true; reviewIndex = 0 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .tint(SatoriTheme.accent)
-        }
-        .padding(SatoriTheme.Spacing.md)
-        .background(SatoriTheme.goldWash.opacity(0.5), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous))
-    }
-
-    /// The active self-test: one question at a time, reveal the answer, then
-    /// rate how well it was recalled.
-    private var reviewSessionView: some View {
-        let question = reviewQuestions[reviewIndex]
-        let isLast = reviewIndex == reviewQuestions.count - 1
-        return VStack(alignment: .leading, spacing: SatoriTheme.Spacing.md) {
-            HStack {
-                Text("自测 · 第 \(pageIndex + 1) 页")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("\(reviewIndex + 1) / \(reviewQuestions.count)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-            }
-
-            Text(question.question)
-                .font(.title3.weight(.semibold))
-                .fixedSize(horizontal: false, vertical: true)
-
-            Divider()
-
-            if reviewIndex < reviewQuestions.count, isAnswerRevealed {
-                VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
-                    Text("答案")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(question.answer)
-                        .font(.callout)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                }
-                .padding(SatoriTheme.Spacing.md)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(SatoriTheme.accentWash.opacity(0.5), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
-            }
-
-            if isAnswerRevealed {
-                VStack(spacing: SatoriTheme.Spacing.sm) {
-                    Text("你回想得怎么样？")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: SatoriTheme.Spacing.sm) {
-                        ForEach(ReviewRating.allCases, id: \.self) { rating in
-                            Button(rating.localizedTitle) {
-                                rateCurrentReview(rating)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                        Spacer()
-                    }
-                }
-            } else {
-                HStack {
-                    Button("先回想，再对答案") { revealAnswer() }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        .tint(SatoriTheme.accent)
-                    Spacer()
-                    Button("放弃这次复习") { stopReview() }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .padding(SatoriTheme.Spacing.lg)
-        .satoriPaper(radius: SatoriTheme.Radius.md, padding: SatoriTheme.Spacing.lg)
-        .id(question.id)
-        .transition(.opacity.combined(with: .move(edge: .trailing)))
-        .animation(SatoriTheme.Motion.standard, value: reviewIndex)
-        .onAppear { isAnswerRevealed = false }
-    }
-
-    private func draftTurnCard(_ draftResponse: LearningResponse) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            turnQuestionHeader(
-                question: draftQuestion,
-                pageIndex: draftPageIndex,
-                attachmentCount: draftAttachmentCount,
-                createdAt: .now,
-                isExpanded: nil,
-                onToggle: nil
-            )
-            Divider()
-            answerHeader(
-                sourceKind: draftResponse.sourceKind,
-                pageIndex: draftPageIndex,
-                isStreaming: isThinking,
-                completion: .completed
-            )
-            if draftResponse.text.isEmpty {
-                HStack(spacing: SatoriTheme.Spacing.sm) {
-                    ProgressView().controlSize(.small)
-                    Text(allowsWebSearch ? "正在理解原文并检索资料…" : "正在理解当前页…")
-                        .foregroundStyle(.secondary)
-                }
-                .font(.callout)
-                .padding(.vertical, SatoriTheme.Spacing.xs + 2)
-            } else {
-                LearningMarkdownView(markdown: draftResponse.text)
-            }
-            citationsView(draftResponse.citations)
-            if !isThinking, draftResponse.sourceKind == .inference {
-                HStack {
-                    if !hasQwenConfiguration {
-                        Button("连接 Qwen", systemImage: "key") { openSettings() }
-                            .buttonStyle(.borderless)
-                    }
-                    Spacer()
-                    Button("重试", systemImage: "arrow.clockwise") {
-                        askAssistant(draftQuestion, pageOverride: draftPageIndex)
-                    }
-                    .buttonStyle(.borderless)
-                }
-            }
-        }
-        .satoriPaper(radius: SatoriTheme.Radius.md, padding: SatoriTheme.Spacing.lg, emphasized: isThinking)
-    }
-
-    private func turnQuestionHeader(
-        question: String,
-        pageIndex: Int,
-        attachmentCount: Int,
-        createdAt: Date,
-        isExpanded: Bool?,
-        onToggle: (() -> Void)?
-    ) -> some View {
-        VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
-            HStack {
-                Text(question)
-                    .font(.body.weight(.semibold))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer()
-                if let isExpanded, let onToggle {
-                    Button(isExpanded ? "收起回答" : "展开回答", systemImage: isExpanded ? "chevron.up" : "chevron.down") {
-                        withAnimation(SatoriTheme.Motion.standard) { onToggle() }
-                    }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help(isExpanded ? "收起回答" : "展开回答")
-                }
-            }
-            HStack(spacing: SatoriTheme.Spacing.sm) {
-                Button("第 \(pageIndex + 1) 页") { onNavigateToPage(pageIndex) }
-                    .buttonStyle(.plain)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .help("回到这一页")
-                if attachmentCount > 0 {
-                    Label("\(attachmentCount) 张附图", systemImage: "photo.on.rectangle.angled")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text(createdAt, style: .time)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
             }
         }
     }
@@ -842,6 +848,26 @@ struct LearningInspector: View {
                 }
             }
         }
+    }
+
+    private var truncatedAnswerNotice: some View {
+        Label("回答因长度限制不完整", systemImage: "text.line.last.and.arrowtriangle.forward")
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, SatoriTheme.Spacing.sm)
+            .padding(.vertical, 6)
+            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+    }
+
+    /// 流式回答会标记真实的 `response.isTruncated`（SSE response.incomplete）；
+    /// 历史 turn 未存该字段，用"足够长且结尾缺少终止标点"近似兜底，避免被截断
+    /// 的长回答毫无提示。
+    private func looksTruncated(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 400 else { return false }
+        if trimmed.hasSuffix("```") { return false }
+        guard let last = trimmed.last else { return false }
+        return !"。！？!?…~”」』）)]}*_`".contains(last)
     }
 
     private func turnActions(_ turn: LearningTurn) -> some View {
@@ -930,10 +956,7 @@ struct LearningInspector: View {
                 .help("允许这次提问使用 Qwen 网页搜索")
 
                 Button {
-                    withAnimation(SatoriTheme.Motion.quick) {
-                        isShowingRun = true
-                        showsNotes = false
-                    }
+                    selectMode(.run)
                 } label: {
                     Label("运行代码", systemImage: "play.rectangle")
                 }
@@ -1007,7 +1030,6 @@ struct LearningInspector: View {
         historyStatus = ""
         do {
             turns = try await sessionStore.turns(for: documentID)
-            expandedTurnIDs = Set(turns.last.map { [$0.id] } ?? [])
         } catch {
             turns = []
             historyStatus = "学习记录暂时无法读取；不影响继续阅读和提问。"
@@ -1018,25 +1040,24 @@ struct LearningInspector: View {
     private func askAssistant(
         _ suppliedQuestion: String? = nil,
         pageOverride: Int? = nil,
-        excludingTurnID: UUID? = nil
+        excludingTurnID: UUID? = nil,
+        scope: ContextScope = .page
     ) {
         let request = (suppliedQuestion ?? question).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty, !isThinking else { return }
 
-        let targetPageIndex = pageOverride ?? pageIndex
-        let extractionScope: PDFPageContextExtractor.Scope = .page(targetPageIndex)
-        let effectiveScope: ContextScope = .page
-
-        guard let pageContent = PDFPageContextExtractor.extract(from: documentURL, scope: extractionScope) else {
-            draftQuestion = request
-            draftPageIndex = targetPageIndex
-            response = LearningResponse(
-                text: scopeExtractionFailureMessage(effectiveScope, pageIndex: targetPageIndex),
-                sourceKind: .inference,
-                pageIndex: targetPageIndex
-            )
-            return
+        // 输入框发送（suppliedQuestion == nil）优先沿用「问 AI」选中的页码；
+        // 快捷提问、时间线重问各自带自己的上下文。
+        let targetPageIndex: Int
+        if let pageOverride {
+            targetPageIndex = pageOverride
+        } else if suppliedQuestion == nil {
+            targetPageIndex = pendingSelectionPage ?? pageIndex
+            pendingSelectionPage = nil
+        } else {
+            targetPageIndex = pageIndex
         }
+        let effectiveScope: ContextScope = scope
 
         let submittedAttachments = attachments
         let context = turns
@@ -1047,13 +1068,18 @@ struct LearningInspector: View {
         draftQuestion = request
         draftPageIndex = targetPageIndex
         draftAttachmentCount = submittedAttachments.count
+        followStream = true
+        pendingScrollToLatest = true
         question = ""
         attachments = []
         attachmentStatus = ""
         response = LearningResponse(text: "", sourceKind: .currentPDF, pageIndex: targetPageIndex)
         isThinking = true
+        completedElsewherePage = nil
 
         requestTask = Task {
+            // 配置读取很快（钥匙串结果有进程内缓存），放在前面，
+            // 扫描页 OCR 需要配置；没配置就直接提示，不必白跑提取。
             let configuration = await Task.detached(priority: .userInitiated) {
                 QwenConfigurationStore.read()
             }.value
@@ -1070,6 +1096,34 @@ struct LearningInspector: View {
                 return
             }
             hasQwenConfiguration = true
+
+            // PDF 提取（含扫描页渲染 + Qwen OCR）放到后台任务，完成后回主线程，
+            // 提问瞬间不再冻结 UI。
+            let extractionScope: PDFPageContextExtractor.Scope = {
+                switch effectiveScope {
+                case .selection: .selection(request)
+                case .page: .page(targetPageIndex)
+                case .wholeDocument: .wholeDocument
+                }
+            }()
+            let pageContent = await Task.detached(priority: .userInitiated) {
+                await PDFPageContextExtractor.extract(
+                    from: documentURL,
+                    scope: extractionScope,
+                    qwenConfiguration: configuration
+                )
+            }.value
+            if Task.isCancelled { return }
+            guard let pageContent else {
+                isThinking = false
+                requestTask = nil
+                response = LearningResponse(
+                    text: scopeExtractionFailureMessage(effectiveScope, pageIndex: targetPageIndex),
+                    sourceKind: .inference,
+                    pageIndex: targetPageIndex
+                )
+                return
+            }
             let assistant = QwenLearningAssistant(
                 apiKey: configuration.apiKey,
                 modelID: configuration.modelID,
@@ -1096,89 +1150,6 @@ struct LearningInspector: View {
         }
     }
 
-    /// Loads the due review questions for this book so the panel can surface
-    /// "该复习了" when spaced repetition says it's time. Reading the store is
-    /// local, so it works regardless of Qwen configuration.
-    @MainActor
-    private func loadDueReviews() async {
-        do {
-            reviewQuestions = try await reviewStore.dueQuestions(for: documentID)
-        } catch {
-            reviewQuestions = []
-        }
-    }
-
-    /// Asks the AI to generate retrieval-practice questions for the current
-    /// page, then starts the review session.
-    private func startReview() {
-        guard !isGeneratingReview, !isReviewing else { return }
-        let targetPage = pageIndex
-        guard let pageContent = PDFPageContextExtractor.extract(from: documentURL, scope: .page(targetPage)) else {
-            historyStatus = "暂时无法读取这一页，无法出题。"
-            return
-        }
-        isGeneratingReview = true
-        reviewTask = Task {
-            defer { isGeneratingReview = false }
-            let configuration = await Task.detached(priority: .userInitiated) {
-                QwenConfigurationStore.read()
-            }.value
-            guard let configuration else {
-                hasQwenConfiguration = false
-                historyStatus = "请先在设置中连接 Qwen，才能生成复习题。"
-                return
-            }
-            hasQwenConfiguration = true
-            let assistant = QwenLearningAssistant(
-                apiKey: configuration.apiKey,
-                modelID: configuration.modelID,
-                pageContent: pageContent,
-                conversationContext: turns
-                    .filter { $0.pageIndex == targetPage }
-                    .suffix(4)
-                    .map { LearningConversationContext(question: $0.question, answer: $0.answer) }
-            )
-            let questions = await assistant.generateReviewQuestions(pageIndex: targetPage, count: 3)
-            guard !questions.isEmpty else {
-                historyStatus = "AI 没能生成题目，请稍后再试。"
-                return
-            }
-            reviewQuestions = questions
-            isReviewing = true
-            reviewIndex = 0
-        }
-    }
-
-    private func rateCurrentReview(_ rating: ReviewRating) {
-        guard reviewIndex < reviewQuestions.count else { return }
-        let question = reviewQuestions[reviewIndex]
-        Task {
-            try? await reviewStore.rate(for: documentID, question: question, rating: rating)
-            await MainActor.run {
-                withAnimation(SatoriTheme.Motion.quick) {
-                    if reviewIndex + 1 < reviewQuestions.count {
-                        reviewIndex += 1
-                    } else {
-                        reviewQuestions = []
-                        isReviewing = false
-                    }
-                }
-            }
-        }
-    }
-
-    private func stopReview() {
-        reviewTask?.cancel()
-        reviewTask = nil
-        isReviewing = false
-        isGeneratingReview = false
-        reviewQuestions = []
-    }
-
-    private func revealAnswer() {
-        withAnimation(SatoriTheme.Motion.quick) { isAnswerRevealed = true }
-    }
-
     private func scopeExtractionFailureMessage(_ scope: ContextScope, pageIndex: Int) -> String {
         switch scope {
         case .selection: "没有读到选中的文字。请在 PDF 里重新划选一段再提问。"
@@ -1192,24 +1163,28 @@ struct LearningInspector: View {
         requestTask = nil
         isThinking = false
         guard let response, !response.text.isEmpty, response.sourceKind != .inference else {
-            self.response = LearningResponse(text: "已停止这次回答。", sourceKind: .inference, pageIndex: draftPageIndex)
+            // 还没有真实回答（没产出文字或只有推断态）：直接清掉草稿，
+            // 不给时间线留一个「已停止」空壳卡。
+            draftQuestion = ""
+            draftAttachmentCount = 0
+            self.response = nil
             return
         }
         completeDraft(with: response, completion: .stopped)
     }
 
     private func completeDraft(with finalResponse: LearningResponse, completion: LearningTurnCompletion) {
+        let targetPage = draftPageIndex
         let turn = LearningTurn(
             question: draftQuestion,
             answer: finalResponse.text,
-            pageIndex: draftPageIndex,
+            pageIndex: targetPage,
             sourceKind: finalResponse.sourceKind,
             citations: finalResponse.citations,
             attachmentCount: draftAttachmentCount,
             completion: completion
         )
         turns.append(turn)
-        expandedTurnIDs = [turn.id]
         draftQuestion = ""
         draftAttachmentCount = 0
         response = nil
@@ -1219,11 +1194,14 @@ struct LearningInspector: View {
             try? await LearningStatsStore.shared.recordQuestion(documentID: documentID)
             NotificationCenter.default.post(name: .learningStatsDidChange, object: nil)
         }
+        // 回答完成时用户可能已经翻到别的页：提示它存进了哪一页，不再"消失"。
+        if targetPage != pageIndex {
+            completedElsewherePage = targetPage
+        }
     }
 
     private func deleteTurn(_ turnID: UUID) {
         turns.removeAll { $0.id == turnID }
-        expandedTurnIDs.remove(turnID)
         persistTurns()
     }
 
@@ -1232,9 +1210,10 @@ struct LearningInspector: View {
         requestTask = nil
         isThinking = false
         turns = []
-        expandedTurnIDs = []
         draftQuestion = ""
         response = nil
+        completedElsewherePage = nil
+        pendingSelectionPage = nil
         Task {
             do {
                 try await sessionStore.clear(for: documentID)
@@ -1284,14 +1263,6 @@ struct LearningInspector: View {
             attachmentStatus = ""
         } catch {
             attachmentStatus = error.localizedDescription
-        }
-    }
-
-    private func toggleTurn(_ turnID: UUID) {
-        if expandedTurnIDs.contains(turnID) {
-            expandedTurnIDs.remove(turnID)
-        } else {
-            expandedTurnIDs.insert(turnID)
         }
     }
 

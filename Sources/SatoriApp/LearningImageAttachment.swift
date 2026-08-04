@@ -9,7 +9,10 @@ struct LearningImageAttachment: Identifiable {
 }
 
 enum LearningImageAttachmentLoader {
-    private static let maximumDimension: CGFloat = 1_600
+    /// 单张附图最长边上限。附图总量（≤4 张、≤3MB）在请求前还有一道
+    /// 预算：超限会降质或丢弃，并把提示带给用户（LearningResponse.attachmentNotice）。
+    private static let maximumDimension: CGFloat = 1_200
+    private static let jpegCompressionFactor: CGFloat = 0.8
 
     static func load(from url: URL) throws -> LearningImageAttachment {
         let didAccess = url.startAccessingSecurityScopedResource()
@@ -55,7 +58,7 @@ enum LearningImageAttachmentLoader {
 
         guard let tiff = resized.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff),
-              let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.82]),
+              let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: Self.jpegCompressionFactor]),
               let preview = NSImage(data: jpeg) else {
             throw AttachmentError.unreadable
         }

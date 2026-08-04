@@ -33,6 +33,10 @@ enum QwenModelOption: String, CaseIterable, Identifiable {
         case .efficient: "速度更快、费用更低，适合日常简单解释。"
         }
     }
+
+    var capabilities: Set<ModelCapability> {
+        QwenLearningAssistant.capabilities(for: rawValue)
+    }
 }
 
 enum QwenConfigurationStore {
@@ -44,8 +48,42 @@ enum QwenConfigurationStore {
     private static let storageDirectoryName = "satori"
     private static let keyFilename = "qwen-api-key"
 
+    // MARK: - API Key 进程内缓存
+
+    /// 正常使用期间 `read()` 不再每次访问钥匙串；配置变化时通过
+    /// `qwenConfigurationDidChange` 通知失效，重新读取。
+    private static let cacheLock = NSLock()
+    private nonisolated(unsafe) static var cachedAPIKey: String?
+
+    private static func cachedAPIKeyValue() -> String? {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        return cachedAPIKey
+    }
+
+    private static func setCachedAPIKey(_ key: String?) {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        cachedAPIKey = key
+    }
+
+    private nonisolated(unsafe) static let configurationDidChangeObserver: NSObjectProtocol = {
+        NotificationCenter.default.addObserver(
+            forName: .qwenConfigurationDidChange,
+            object: nil,
+            queue: .main
+        ) { _ in
+            setCachedAPIKey(nil)
+        }
+    }()
+
     static func read() -> QwenConfiguration? {
+        _ = configurationDidChangeObserver
         UserDefaults.standard.removeObject(forKey: legacyAPIHostDefaultsKey)
+        if let cachedKey = cachedAPIKeyValue() {
+            UserDefaults.standard.set(true, forKey: configuredDefaultsKey)
+            return QwenConfiguration(apiKey: cachedKey, modelID: readModelID())
+        }
         do {
             let apiKey: String
             if let savedKey = try readKeychainAPIKey() {
@@ -57,6 +95,7 @@ enum QwenConfigurationStore {
                 UserDefaults.standard.set(false, forKey: configuredDefaultsKey)
                 return nil
             }
+            setCachedAPIKey(apiKey)
             UserDefaults.standard.set(true, forKey: configuredDefaultsKey)
             return QwenConfiguration(apiKey: apiKey, modelID: readModelID())
         } catch {
@@ -84,6 +123,7 @@ enum QwenConfigurationStore {
         guard try readKeychainAPIKey() == normalizedKey else {
             throw KeychainError.verificationFailed
         }
+        setCachedAPIKey(normalizedKey)
         try removeTransitionalKeyFile()
         UserDefaults.standard.removeObject(forKey: legacyAPIHostDefaultsKey)
         UserDefaults.standard.set(normalizedModelID, forKey: modelDefaultsKey)
@@ -96,6 +136,7 @@ enum QwenConfigurationStore {
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError.status(status)
         }
+        setCachedAPIKey(nil)
         try removeTransitionalKeyFile()
         UserDefaults.standard.removeObject(forKey: legacyAPIHostDefaultsKey)
         UserDefaults.standard.removeObject(forKey: modelDefaultsKey)

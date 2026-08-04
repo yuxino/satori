@@ -1,4 +1,6 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 
 public enum LearningSourceKind: String, Codable, Sendable {
     case currentPDF
@@ -14,6 +16,18 @@ public enum LearningSourceKind: String, Codable, Sendable {
         case .inference: "AI 推断"
         }
     }
+
+    /// 持久化值未知（旧版本/未来新增 case）时回退到 .inference，
+    /// 避免学习记录存档整体解码失败。
+    public init(from decoder: Decoder) throws {
+        let rawValue = try decoder.singleValueContainer().decode(String.self)
+        self = LearningSourceKind(rawValue: rawValue) ?? .inference
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 public struct LearningResponse: Sendable, Equatable {
@@ -21,12 +35,29 @@ public struct LearningResponse: Sendable, Equatable {
     public var sourceKind: LearningSourceKind
     public var pageIndex: Int?
     public var citations: [LearningCitation]
+    /// 回答因达到输出上限等原因被截断（SSE response.incomplete）。
+    public var isTruncated: Bool
+    /// 本次请求失败时的可读中文错误；正常回答为 nil。
+    public var errorMessage: String?
+    /// 附图因体积/数量超限被压缩或丢弃时的提示；没有处理时为 nil。
+    public var attachmentNotice: String?
 
-    public init(text: String, sourceKind: LearningSourceKind, pageIndex: Int? = nil, citations: [LearningCitation] = []) {
+    public init(
+        text: String,
+        sourceKind: LearningSourceKind,
+        pageIndex: Int? = nil,
+        citations: [LearningCitation] = [],
+        isTruncated: Bool = false,
+        errorMessage: String? = nil,
+        attachmentNotice: String? = nil
+    ) {
         self.text = text
         self.sourceKind = sourceKind
         self.pageIndex = pageIndex
         self.citations = citations
+        self.isTruncated = isTruncated
+        self.errorMessage = errorMessage
+        self.attachmentNotice = attachmentNotice
     }
 }
 
@@ -78,9 +109,76 @@ public struct UnconfiguredLearningAssistant: LearningAssistant {
     }
 }
 
+/// 模型能力维度。请求前用 `QwenLearningAssistant.capabilities(for:)`
+/// 校验，图片页/联网不可用时给出可读错误，而不是静默失败。
+public enum ModelCapability: String, CaseIterable, Codable, Sendable {
+    case text
+    case image
+    case webSearch
+
+    public var localizedTitle: String {
+        switch self {
+        case .text: "文字"
+        case .image: "图片"
+        case .webSearch: "联网搜索"
+        }
+    }
+}
+
+/// 结构化错误：失败时抛给调用方，UI 可直接展示 `localizedDescription`。
+public enum AssistantError: LocalizedError, Sendable, Equatable {
+    case invalidResponse
+    case emptyOutput
+    case api(statusCode: Int?, message: String)
+    case capabilityUnavailable(capability: ModelCapability, modelID: String)
+    case reviewParsing(skippedLines: Int)
+    case reviewPageUnclear
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidResponse:
+            "百炼返回了无法识别的响应。"
+        case .emptyOutput:
+            "Qwen 没有返回可显示的文字。"
+        case let .api(statusCode, message):
+            if let statusCode {
+                "百炼请求失败（HTTP \(statusCode)）：\(message)"
+            } else {
+                message
+            }
+        case let .capabilityUnavailable(capability, modelID):
+            switch capability {
+            case .image:
+                "当前模型（\(modelID)）不支持图片输入，无法分析扫描页或附图。请在设置中切换到 qwen3.8-max 或 qwen3.7-plus。"
+            case .webSearch:
+                "当前模型（\(modelID)）不支持联网搜索。请在设置中切换到 qwen3.8-max 或 qwen3.7-plus。"
+            case .text:
+                "当前模型（\(modelID)）不支持文字输入。"
+            }
+        case let .reviewParsing(skippedLines):
+            "AI 返回的复习题无法解析（有 \(skippedLines) 行不符合“问题 | 答案”格式）。请重试。"
+        case .reviewPageUnclear:
+            "AI 没能看清页面内容，因此没有编造题目。请重试，或换用文字版 PDF。"
+        }
+    }
+}
+
 public struct QwenLearningAssistant: LearningAssistant {
     public static let defaultModelID = "qwen3.8-max"
     public static let defaultAPIHost = URL(string: "https://dashscope.aliyuncs.com/compatible-mode/v1")!
+
+    /// 模型能力矩阵。未知模型按最保守的 [.text] 处理：宁可请求前给出
+    /// 可读错误，也不要带图静默失败。
+    public static func capabilities(for modelID: String) -> Set<ModelCapability> {
+        switch modelID.trimmingCharacters(in: .whitespacesAndNewlines) {
+        case "qwen3.8-max", "qwen3.7-plus":
+            [.text, .image, .webSearch]
+        case "qwen3.7-flash":
+            [.text, .image]
+        default:
+            [.text]
+        }
+    }
 
     private let apiKey: String
     private let apiHost: URL
@@ -114,20 +212,25 @@ public struct QwenLearningAssistant: LearningAssistant {
 
     public func explain(request: String, pageIndex: Int?) async -> LearningResponse {
         do {
-            let urlRequest = try makeURLRequest(question: request, pageIndex: pageIndex, streamsResponse: false)
+            let budget = applyAttachmentBudget()
+            let urlRequest = try makeURLRequest(question: request, pageIndex: pageIndex, streamsResponse: false, imageBudget: budget)
             let transportResponse = try await transport.send(urlRequest)
             guard (200..<300).contains(transportResponse.statusCode) else {
                 let apiError = try? JSONDecoder().decode(APIErrorEnvelope.self, from: transportResponse.data)
-                throw AssistantError.api(apiError?.error.message ?? "百炼返回了错误 \(transportResponse.statusCode)")
+                throw AssistantError.api(
+                    statusCode: transportResponse.statusCode,
+                    message: apiError?.error.message ?? "请求未成功"
+                )
             }
 
             let envelope = try JSONDecoder().decode(ResponsesEnvelope.self, from: transportResponse.data)
-            return try makeLearningResponse(from: envelope, pageIndex: pageIndex)
+            return try makeLearningResponse(from: envelope, pageIndex: pageIndex, imageBudget: budget)
         } catch {
             return LearningResponse(
                 text: "暂时没能完成解释：\(error.localizedDescription)",
                 sourceKind: .inference,
-                pageIndex: pageIndex
+                pageIndex: pageIndex,
+                errorMessage: error.localizedDescription
             )
         }
     }
@@ -136,7 +239,8 @@ public struct QwenLearningAssistant: LearningAssistant {
         AsyncStream { continuation in
             let worker = Task {
                 do {
-                    let urlRequest = try makeURLRequest(question: request, pageIndex: pageIndex, streamsResponse: true)
+                    let budget = applyAttachmentBudget()
+                    let urlRequest = try makeURLRequest(question: request, pageIndex: pageIndex, streamsResponse: true, imageBudget: budget)
                     var streamedText = ""
                     var didComplete = false
 
@@ -148,14 +252,22 @@ public struct QwenLearningAssistant: LearningAssistant {
                             guard let delta = event.delta, !delta.isEmpty else { continue }
                             streamedText += delta
                             continuation.yield(
-                                LearningResponse(text: streamedText, sourceKind: .currentPDF, pageIndex: pageIndex)
+                                LearningResponse(
+                                    text: streamedText,
+                                    sourceKind: predictedSourceKind,
+                                    pageIndex: pageIndex,
+                                    attachmentNotice: budget.notice
+                                )
                             )
-                        case "response.completed":
+                        case "response.completed", "response.incomplete":
                             guard let envelope = event.response else { throw AssistantError.invalidResponse }
-                            continuation.yield(try makeLearningResponse(from: envelope, pageIndex: pageIndex))
+                            continuation.yield(try makeLearningResponse(from: envelope, pageIndex: pageIndex, imageBudget: budget))
                             didComplete = true
                         case "response.failed":
-                            throw AssistantError.api(event.error?.message ?? "Qwen 未能完成这次回答。")
+                            let message = event.response?.error?.message
+                                ?? event.error?.message
+                                ?? "Qwen 未能完成这次回答。"
+                            throw AssistantError.api(statusCode: nil, message: message)
                         default:
                             continue
                         }
@@ -165,8 +277,15 @@ public struct QwenLearningAssistant: LearningAssistant {
                     if !didComplete {
                         let finalText = streamedText.trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !finalText.isEmpty else { throw AssistantError.emptyOutput }
+                        // 没有收到完成事件就断流：按已收内容收尾并标记截断。
                         continuation.yield(
-                            LearningResponse(text: finalText, sourceKind: .currentPDF, pageIndex: pageIndex)
+                            LearningResponse(
+                                text: finalText,
+                                sourceKind: predictedSourceKind,
+                                pageIndex: pageIndex,
+                                isTruncated: true,
+                                attachmentNotice: budget.notice
+                            )
                         )
                     }
                     continuation.finish()
@@ -177,7 +296,8 @@ public struct QwenLearningAssistant: LearningAssistant {
                         LearningResponse(
                             text: "暂时没能完成解释：\(error.localizedDescription)",
                             sourceKind: .inference,
-                            pageIndex: pageIndex
+                            pageIndex: pageIndex,
+                            errorMessage: error.localizedDescription
                         )
                     )
                     continuation.finish()
@@ -187,77 +307,95 @@ public struct QwenLearningAssistant: LearningAssistant {
         }
     }
 
-    /// Generates retrieval-practice questions grounded in what the reader
-    /// actually saw and asked. The model returns lines of `问题 | 答案`, which
-    /// we parse into review questions — deliberately no code, no commentary,
-    /// so the answer can be checked against what the page says.
-    public func generateReviewQuestions(
-        pageIndex: Int?,
-        count: Int = 3
-    ) async -> [ReviewQuestion] {
+    /// 兼容入口：供尚未迁移到 `generateReviewQuestionsThrowing(pageIndex:count:)`
+    /// 的调用点过渡使用。失败时返回空数组；新代码请用抛错版本以展示可读错误。
+    public func generateReviewQuestions(pageIndex: Int?, count: Int = 3) async -> [ReviewQuestion] {
         do {
-            let urlRequest = try makeURLRequestForReview(pageIndex: pageIndex, count: count)
-            let transportResponse = try await transport.send(urlRequest)
-            guard (200..<300).contains(transportResponse.statusCode) else {
-                let apiError = try? JSONDecoder().decode(APIErrorEnvelope.self, from: transportResponse.data)
-                throw AssistantError.api(apiError?.error.message ?? "百炼返回了错误 \(transportResponse.statusCode)")
-            }
-            let envelope = try JSONDecoder().decode(ResponsesEnvelope.self, from: transportResponse.data)
-            let text = envelope.output.flatMap(\.content).compactMap(\.text).joined(separator: "\n")
-            return ReviewQuestionParser.parse(text, pageIndex: pageIndex ?? 0)
+            return try await generateReviewQuestionsThrowing(pageIndex: pageIndex, count: count)
         } catch {
             return []
         }
     }
 
-    private func makeURLRequestForReview(pageIndex: Int?, count: Int) throws -> URLRequest {
+    /// 生成复习题。扫描页会作为图片与提示词一起发送；失败时抛出
+    /// `AssistantError`（能力不足、HTTP 错误、解析失败等），不会吞成空数组。
+    public func generateReviewQuestionsThrowing(pageIndex: Int?, count: Int = 3) async throws -> [ReviewQuestion] {
+        let budget = applyAttachmentBudget()
+        let urlRequest = try makeURLRequestForReview(pageIndex: pageIndex, count: count, imageBudget: budget)
+        let transportResponse = try await transport.send(urlRequest)
+        guard (200..<300).contains(transportResponse.statusCode) else {
+            let apiError = try? JSONDecoder().decode(APIErrorEnvelope.self, from: transportResponse.data)
+            throw AssistantError.api(
+                statusCode: transportResponse.statusCode,
+                message: apiError?.error.message ?? "请求未成功"
+            )
+        }
+        let envelope = try JSONDecoder().decode(ResponsesEnvelope.self, from: transportResponse.data)
+        let text = envelope.output.flatMap(\.content).compactMap(\.text).joined(separator: "\n")
+        let result = ReviewQuestionParser.parseDetailed(text, pageIndex: pageIndex ?? 0)
+        guard !result.questions.isEmpty else {
+            if let message = envelope.error?.message {
+                throw AssistantError.api(statusCode: nil, message: message)
+            }
+            if text.contains("看不清") || text.contains("无法看清") {
+                throw AssistantError.reviewPageUnclear
+            }
+            throw AssistantError.reviewParsing(skippedLines: result.skippedLines)
+        }
+        return result.questions
+    }
+
+    // MARK: - 请求组装
+
+    private func makeURLRequestForReview(pageIndex: Int?, count: Int, imageBudget: ImageBudgetResult) throws -> URLRequest {
+        try validateCapabilities(imageBudget: imageBudget)
         let endpoint = apiHost.appending(path: "responses")
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
         let pageNumber = (pageIndex ?? 0) + 1
-        let pageText: String
-        switch pageContent {
-        case let .text(text): pageText = text
-        case .imageJPEG: pageText = "（这一页是扫描图，无法提供原文文字）"
-        }
-        let learnedContext = conversationContext.suffix(4).map { "问：\($0.question)\n答：\($0.answer.prefix(1_200))" }.joined(separator: "\n\n")
+        let learnedContext = conversationContext.suffix(4)
+            .map(Self.serializedTurn)
+            .joined(separator: "\n\n")
 
         let reviewBody = """
         用户正在阅读 PDF 第 \(pageNumber) 页。
 
-        本页原文：
-        \(pageText)
-
         用户在这本书里问过的内容：
         \(learnedContext.isEmpty ? "（还没有问过）" : learnedContext)
 
-        我的要求：请根据上面的内容，生成 \(count) 道用于自测回忆的题目，帮助用户检验是否真的记住了这一页的核心概念。
+        我的要求：请根据上面提供的内容，生成 \(count) 道用于自测回忆的题目，帮助用户检验是否真的记住了这一页的核心概念。
         要求：
         - 题目要有意义，不是“这一页讲了什么”这种泛泛的问题；而是针对具体概念、原理、区别、代码含义出题。
         - 覆盖这一页真正重要的点，优先挑容易被看过就忘的。
         - 每题用一行输出，格式为：问题 | 参考答案
-        - 答案要短（一两句话），严格依据本页原文，不要编造本页没有的内容。
+        - 题目和答案中不要使用 | 字符，因为 | 是题目与答案的分隔符。
+        - 答案要短（一两句话），严格依据本页内容，不要编造本页没有的内容。
+        - 如果看不清页面内容，直接说明“看不清页面内容”，不要编造题目或答案。
         - 只输出题目和答案，不要任何其他说明。
         """
 
-        let body: [String: Any] = [
-            "model": modelID,
-            "instructions": "你是 Satori 的复习出题助手。根据给定的教材原文出回忆题。严格按格式“问题 | 答案”，一行一题。只输出题目，不输出其它内容。",
-            "input": [
-                ["role": "user", "content": [["type": "input_text", "text": reviewBody]]]
-            ],
-            "store": false,
-            "stream": false,
-            "max_output_tokens": 1400
-        ]
-        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
+        var content: [InputContent] = [makePageContentItem(pageNumber: pageNumber)]
+        content.append(contentsOf: makeAttachmentItems(imageBudget.images))
+        content.append(.init(type: "input_text", text: reviewBody, imageURL: nil))
+
+        let request = ResponsesRequest(
+            model: modelID,
+            instructions: "你是 Satori 的复习出题助手。根据给定的教材内容出回忆题。严格按格式“问题 | 答案”，一行一题，题目中不要使用 | 字符。只输出题目，不输出其它内容。",
+            input: [InputMessage(role: "user", content: content)],
+            tools: nil,
+            store: false,
+            stream: false,
+            maxOutputTokens: 1400
+        )
+        urlRequest.httpBody = try JSONEncoder().encode(request)
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         return urlRequest
     }
 
-    private func makeURLRequest(question: String, pageIndex: Int?, streamsResponse: Bool) throws -> URLRequest {
+    private func makeURLRequest(question: String, pageIndex: Int?, streamsResponse: Bool, imageBudget: ImageBudgetResult) throws -> URLRequest {
+        try validateCapabilities(imageBudget: imageBudget)
         let endpoint = apiHost.appending(path: "responses")
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -267,43 +405,25 @@ public struct QwenLearningAssistant: LearningAssistant {
             request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         }
         request.httpBody = try JSONEncoder().encode(
-            makeRequest(question: question, pageIndex: pageIndex, streamsResponse: streamsResponse)
+            makeRequest(question: question, pageIndex: pageIndex, streamsResponse: streamsResponse, imageBudget: imageBudget)
         )
         return request
     }
 
-    private func makeRequest(question: String, pageIndex: Int?, streamsResponse: Bool) -> ResponsesRequest {
+    private func makeRequest(question: String, pageIndex: Int?, streamsResponse: Bool, imageBudget: ImageBudgetResult) -> ResponsesRequest {
         let pageNumber = (pageIndex ?? 0) + 1
-        let context: InputContent
-        switch pageContent {
-        case let .text(text):
-            context = .init(type: "input_text", text: "用户正在阅读 PDF 第 \(pageNumber) 页。\n\n当前页原文：\n\(text)", imageURL: nil)
-        case let .imageJPEG(data):
-            context = .init(
-                type: "input_image",
-                text: nil,
-                imageURL: "data:image/jpeg;base64,\(data.base64EncodedString())"
-            )
-        }
 
-        var content = [context]
-        if !additionalImagesJPEG.isEmpty {
-            content.append(
-                .init(type: "input_text", text: "用户为这个问题另外附加了 \(additionalImagesJPEG.count) 张图片：", imageURL: nil)
-            )
-            content.append(contentsOf: additionalImagesJPEG.map { data in
-                .init(type: "input_image", text: nil, imageURL: "data:image/jpeg;base64,\(data.base64EncodedString())")
-            })
-        }
+        var content: [InputContent] = [makePageContentItem(pageNumber: pageNumber)]
+        content.append(contentsOf: makeAttachmentItems(imageBudget.images))
         content.append(.init(type: "input_text", text: "我的问题：\(question)", imageURL: nil))
 
         var input = conversationContext.suffix(6).flatMap { turn in
             [
                 InputMessage(role: "user", content: [
-                    .init(type: "input_text", text: String(turn.question.prefix(1_200)), imageURL: nil)
+                    .init(type: "input_text", text: Self.serializedQuestion(turn), imageURL: nil)
                 ]),
                 InputMessage(role: "assistant", content: [
-                    .init(type: "output_text", text: String(turn.answer.prefix(6_000)), imageURL: nil)
+                    .init(type: "output_text", text: Self.serializedAnswer(turn), imageURL: nil)
                 ])
             ]
         }
@@ -315,6 +435,7 @@ public struct QwenLearningAssistant: LearningAssistant {
             你是 Satori 的学习理解助手。默认使用简体中文，直接回答问题。
             优先依据用户提供的当前 PDF 页面；不要假装看到了未提供的页面。
             可以参考前面的本地学习问答理解“这里”“刚才”等追问，但本轮页面证据优先。
+            历史对话中提到的图片当前不可见，若需图片细节请用户重新附图。
             回答依次包含“原文依据”“解释”；只有确实超出原文时才增加“补充推断”，并明确标注。
             原文依据要短，不要大段复述。解释应帮助用户建立概念联系，可以给一个具体例子。
             如果页面信息不足，直接说明缺少什么。不要要求用户做笔记或背诵。
@@ -327,10 +448,152 @@ public struct QwenLearningAssistant: LearningAssistant {
         )
     }
 
-    private func makeLearningResponse(from envelope: ResponsesEnvelope, pageIndex: Int?) throws -> LearningResponse {
+    private func makePageContentItem(pageNumber: Int) -> InputContent {
+        switch pageContent {
+        case let .text(text):
+            return .init(
+                type: "input_text",
+                text: "用户正在阅读 PDF 第 \(pageNumber) 页。\n\n当前页原文：\n\(text)",
+                imageURL: nil
+            )
+        case let .imageJPEG(data):
+            return .init(
+                type: "input_image",
+                text: nil,
+                imageURL: "data:image/jpeg;base64,\(data.base64EncodedString())"
+            )
+        }
+    }
+
+    private func makeAttachmentItems(_ images: [Data]) -> [InputContent] {
+        guard !images.isEmpty else { return [] }
+        return [
+            .init(type: "input_text", text: "用户为这次提问另外附加了 \(images.count) 张图片：", imageURL: nil)
+        ] + images.map { data in
+            .init(type: "input_image", text: nil, imageURL: "data:image/jpeg;base64,\(data.base64EncodedString())")
+        }
+    }
+
+    private func validateCapabilities(imageBudget: ImageBudgetResult) throws {
+        let capabilities = Self.capabilities(for: modelID)
+        let needsImage: Bool = {
+            if case .imageJPEG = pageContent { return true }
+            return !imageBudget.images.isEmpty
+        }()
+        if needsImage && !capabilities.contains(.image) {
+            throw AssistantError.capabilityUnavailable(capability: .image, modelID: modelID)
+        }
+        if allowsWebSearch && !capabilities.contains(.webSearch) {
+            throw AssistantError.capabilityUnavailable(capability: .webSearch, modelID: modelID)
+        }
+    }
+
+    // MARK: - 图片预算
+
+    private enum ImageBudget {
+        static let maximumCount = 4
+        static let maximumTotalBytes = 3 * 1_024 * 1_024
+    }
+
+    private struct ImageBudgetResult: Sendable {
+        let images: [Data]
+        let notice: String?
+    }
+
+    /// 附图预算：最多 4 张、总字节 ≤ 3MB。超限先整体降质，仍超限则从
+    /// 末尾丢弃，并通过 notice 提示用户。
+    private func applyAttachmentBudget() -> ImageBudgetResult {
+        var kept = Array(additionalImagesJPEG.prefix(ImageBudget.maximumCount))
+        var dropped = additionalImagesJPEG.count - kept.count
+        let originalTotal = kept.reduce(0) { $0 + $1.count }
+
+        if originalTotal > ImageBudget.maximumTotalBytes {
+            let recompressed = kept.compactMap { Self.recompressedJPEG($0, quality: 0.5) }
+            let recompressedTotal = recompressed.reduce(0) { $0 + $1.count }
+            if recompressed.count == kept.count, recompressedTotal < originalTotal {
+                kept = recompressed
+            }
+            var total = kept.reduce(0) { $0 + $1.count }
+            while total > ImageBudget.maximumTotalBytes, kept.count > 1 {
+                total -= kept.removeLast().count
+                dropped += 1
+            }
+        }
+
+        let notice: String?
+        if dropped > 0 {
+            notice = "\(dropped) 张附图因体积超限被丢弃，已用其余图片继续。"
+        } else if originalTotal > ImageBudget.maximumTotalBytes {
+            notice = "附图较多，已压缩以控制请求体积。"
+        } else {
+            notice = nil
+        }
+        return ImageBudgetResult(images: kept, notice: notice)
+    }
+
+    private static func recompressedJPEG(_ data: Data, quality: Double) -> Data? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output,
+            "public.jpeg" as CFString,
+            1,
+            nil
+        ) else { return nil }
+        CGImageDestinationAddImage(
+            destination,
+            image,
+            [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary
+        )
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
+    }
+
+    // MARK: - 历史序列化
+
+    /// 问（依据第 N 页，附图：…）：… 的前缀；无页码/附图时退回“问：”。
+    private static func turnPrefix(_ turn: LearningConversationContext) -> String {
+        var details: [String] = []
+        if let pageIndex = turn.pageIndex {
+            details.append("依据第 \(pageIndex + 1) 页")
+        }
+        if let summary = turn.attachmentSummary, !summary.isEmpty {
+            details.append("附图：\(summary)")
+        }
+        return details.isEmpty ? "问" : "问（\(details.joined(separator: "，"))）"
+    }
+
+    /// 复习场景的单轮历史：问（依据第 N 页）：…\n答：…
+    private static func serializedTurn(_ turn: LearningConversationContext) -> String {
+        "\(turnPrefix(turn))：\(turn.question.prefix(1_200))\n答：\(turn.answer.prefix(6_000))"
+    }
+
+    /// 追问场景：历史以独立的 user/assistant 消息发送，文字与
+    /// `serializedTurn` 保持一致（问（依据第 N 页）：… / 答：…）。
+    private static func serializedQuestion(_ turn: LearningConversationContext) -> String {
+        "\(turnPrefix(turn))：\(turn.question.prefix(1_200))"
+    }
+
+    private static func serializedAnswer(_ turn: LearningConversationContext) -> String {
+        "答：\(turn.answer.prefix(6_000))"
+    }
+
+    // MARK: - 响应解析
+
+    private func makeLearningResponse(
+        from envelope: ResponsesEnvelope,
+        pageIndex: Int?,
+        imageBudget: ImageBudgetResult
+    ) throws -> LearningResponse {
         let contents = envelope.output.flatMap(\.content)
         let text = contents.compactMap(\.text).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { throw AssistantError.emptyOutput }
+        guard !text.isEmpty else {
+            if let message = envelope.error?.message {
+                throw AssistantError.api(statusCode: nil, message: message)
+            }
+            throw AssistantError.emptyOutput
+        }
 
         let citations = contents
             .flatMap(\.annotations)
@@ -348,12 +611,36 @@ public struct QwenLearningAssistant: LearningAssistant {
                     return LearningCitation(title: url.host() ?? source.url, url: url)
                 }
 
+        let isTruncated = envelope.status == "incomplete" || envelope.incompleteDetails != nil
+        let sourceKind: LearningSourceKind
+        if envelope.error?.message != nil {
+            sourceKind = .inference
+        } else if !citations.isEmpty {
+            sourceKind = .web
+        } else if !imageBudget.images.isEmpty {
+            sourceKind = .relatedMaterial
+        } else if pageIndex != nil {
+            sourceKind = .currentPDF
+        } else {
+            sourceKind = .inference
+        }
+
         return LearningResponse(
             text: text,
-            sourceKind: citations.isEmpty ? .currentPDF : .web,
+            sourceKind: sourceKind,
             pageIndex: pageIndex,
-            citations: uniqueCitations(citations)
+            citations: uniqueCitations(citations),
+            isTruncated: isTruncated,
+            errorMessage: envelope.error?.message,
+            attachmentNotice: imageBudget.notice
         )
+    }
+
+    /// 流式期间的预判标签：按开关（联网搜索 → 附图 → 当前页）。
+    private var predictedSourceKind: LearningSourceKind {
+        if allowsWebSearch { return .web }
+        if !additionalImagesJPEG.isEmpty { return .relatedMaterial }
+        return .currentPDF
     }
 
     private func uniqueCitations(_ citations: [LearningCitation]) -> [LearningCitation] {
@@ -383,7 +670,10 @@ private struct URLSessionAssistantTransport: AssistantTransport {
                         var errorData = Data()
                         for try await byte in bytes { errorData.append(byte) }
                         let apiError = try? JSONDecoder().decode(APIErrorEnvelope.self, from: errorData)
-                        throw AssistantError.api(apiError?.error.message ?? "百炼返回了错误 \(httpResponse.statusCode)")
+                        throw AssistantError.api(
+                            statusCode: httpResponse.statusCode,
+                            message: apiError?.error.message ?? "请求未成功"
+                        )
                     }
 
                     for try await line in bytes.lines {
@@ -440,6 +730,18 @@ private struct Tool: Encodable { let type: String }
 
 private struct ResponsesEnvelope: Decodable {
     let output: [OutputItem]
+    let status: String?
+    let incompleteDetails: IncompleteDetails?
+    let error: APIErrorEnvelope.APIError?
+
+    enum CodingKeys: String, CodingKey {
+        case output, status, error
+        case incompleteDetails = "incomplete_details"
+    }
+}
+
+private struct IncompleteDetails: Decodable {
+    let reason: String?
 }
 
 private struct ResponsesStreamEvent: Decodable {
@@ -509,18 +811,4 @@ private struct OutputAnnotation: Decodable {
 private struct APIErrorEnvelope: Decodable {
     struct APIError: Decodable { let message: String }
     let error: APIError
-}
-
-private enum AssistantError: LocalizedError, Sendable {
-    case invalidResponse
-    case emptyOutput
-    case api(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidResponse: "百炼返回了无法识别的响应。"
-        case .emptyOutput: "Qwen 没有返回可显示的文字。"
-        case let .api(message): message
-        }
-    }
 }

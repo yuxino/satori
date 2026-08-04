@@ -31,17 +31,64 @@ public struct LearningStats: Codable, Equatable, Sendable {
         public var questionsAsked: Int
         public var codeRuns: Int
         public var pageCount: Int
+        /// How many review ratings this document has received.
+        public var reviewsCompleted: Int
+        /// Accumulated recall quality (good 1.0 / hard 0.5 / again 0.0).
+        public var masteryScore: Double
 
-        public init(pagesRead: Set<Int> = [], questionsAsked: Int = 0, codeRuns: Int = 0, pageCount: Int = 0) {
+        public init(
+            pagesRead: Set<Int> = [],
+            questionsAsked: Int = 0,
+            codeRuns: Int = 0,
+            pageCount: Int = 0,
+            reviewsCompleted: Int = 0,
+            masteryScore: Double = 0
+        ) {
             self.pagesRead = pagesRead
             self.questionsAsked = questionsAsked
             self.codeRuns = codeRuns
             self.pageCount = pageCount
+            self.reviewsCompleted = reviewsCompleted
+            self.masteryScore = masteryScore
         }
 
+        /// Fraction of reviews recalled well; 0 until the first review.
+        public var reviewMastery: Double {
+            guard reviewsCompleted > 0 else { return 0 }
+            return min(masteryScore / Double(reviewsCompleted), 1)
+        }
+
+        /// Reading coverage: distinct pages read over the book's page count.
         public var progress: Double {
             guard pageCount > 0 else { return 0 }
             return min(Double(pagesRead.count) / Double(pageCount), 1)
+        }
+
+        /// Mastery-based progress = reading coverage × review mastery, so
+        /// merely flipping pages never reads as "learned".
+        public var masteredProgress: Double {
+            progress * reviewMastery
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case pagesRead
+            case questionsAsked
+            case codeRuns
+            case pageCount
+            case reviewsCompleted
+            case masteryScore
+        }
+
+        // Custom decoding keeps archives written before the review fields
+        // existed decodable: missing keys fall back to their defaults.
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            pagesRead = try container.decode(Set<Int>.self, forKey: .pagesRead)
+            questionsAsked = try container.decodeIfPresent(Int.self, forKey: .questionsAsked) ?? 0
+            codeRuns = try container.decodeIfPresent(Int.self, forKey: .codeRuns) ?? 0
+            pageCount = try container.decodeIfPresent(Int.self, forKey: .pageCount) ?? 0
+            reviewsCompleted = try container.decodeIfPresent(Int.self, forKey: .reviewsCompleted) ?? 0
+            masteryScore = try container.decodeIfPresent(Double.self, forKey: .masteryScore) ?? 0
         }
     }
 }

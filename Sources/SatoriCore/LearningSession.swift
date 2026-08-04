@@ -42,9 +42,20 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
 public struct LearningConversationContext: Sendable, Equatable {
     public var question: String
     public var answer: String
+    /// 该轮问答依据的页码（0 起）；为 nil 表示没有锚定到具体页。
+    public var pageIndex: Int?
+    /// 附件摘要（例如「2 张附图：示意图、公式截图」）；为 nil 表示没有附图。
+    public var attachmentSummary: String?
 
-    public init(question: String, answer: String) {
+    public init(
+        question: String,
+        answer: String,
+        pageIndex: Int? = nil,
+        attachmentSummary: String? = nil
+    ) {
         self.question = question
         self.answer = answer
+        self.pageIndex = pageIndex
+        self.attachmentSummary = attachmentSummary
     }
 }

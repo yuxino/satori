@@ -5,8 +5,14 @@ import SatoriCore
 struct LearningMarkdownView: View {
     let markdown: String
 
+    /// 流式回答期间每次 delta 都重解析全文会 O(n²) 卡顿，这里把「渲染用文本」
+    /// 与「原始输入」解耦：增长 ≥40 字符立即渲染，否则 120ms 后兜底渲染，
+    /// 保证收尾的小段文本也会出现。
+    @State private var displayedMarkdown = ""
+    @State private var throttleWork: DispatchWorkItem?
+
     private var blocks: [LearningMarkdownBlock] {
-        LearningMarkdownParser.parse(markdown)
+        LearningMarkdownParser.parse(displayedMarkdown)
     }
 
     var body: some View {
@@ -16,6 +22,17 @@ struct LearningMarkdownView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear { displayedMarkdown = markdown }
+        .onChange(of: markdown) { _, newValue in
+            throttleWork?.cancel()
+            if newValue.count - displayedMarkdown.count >= 40 {
+                displayedMarkdown = newValue
+                return
+            }
+            let work = DispatchWorkItem { displayedMarkdown = newValue }
+            throttleWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
+        }
     }
 
     @ViewBuilder
@@ -61,6 +78,24 @@ struct LearningMarkdownView: View {
                     }
                 }
             }
+        case let .taskList(items):
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .firstTextBaseline, spacing: 9) {
+                        Image(systemName: item.checked ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(item.checked ? SatoriTheme.accent : Color.secondary.opacity(0.55))
+                        Text(inlineMarkdown(item.text))
+                            .font(.body)
+                            .lineSpacing(4)
+                            .strikethrough(item.checked, color: .secondary.opacity(0.65))
+                            .foregroundStyle(item.checked ? .secondary : .primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        case let .table(headers, rows):
+            markdownTable(headers: headers, rows: rows)
         case let .quote(text):
             HStack(alignment: .top, spacing: 11) {
                 RoundedRectangle(cornerRadius: 2)
@@ -84,6 +119,58 @@ struct LearningMarkdownView: View {
         CodeBlockView(language: language, content: content)
     }
 
+    /// GFM 表格：表头加粗 + 底部分隔线，偶数行浅色斑马纹，单元格自动均分
+    /// 列宽并对齐。空单元格用占位，保证不同行数也排得齐。
+    ///
+    /// 窄面板（学习面板约 360pt）里列一多就会被压成几列挤在一起，这里用
+    /// ViewThatFits 自适应：等宽均分放得下就用原样式；放不下则整表横滚，
+    /// 每列固定 96pt 保证可读，且所有行同宽、列仍然对齐。
+    private func markdownTable(headers: [String], rows: [[String]]) -> some View {
+        let columnCount = max(headers.count, rows.map(\.count).max() ?? 0)
+        return ViewThatFits(in: .horizontal) {
+            tableContent(headers: headers, rows: rows, columnCount: columnCount, fixedColumnWidth: nil)
+            ScrollView(.horizontal, showsIndicators: false) {
+                tableContent(headers: headers, rows: rows, columnCount: columnCount, fixedColumnWidth: 96)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func tableContent(headers: [String], rows: [[String]], columnCount: Int, fixedColumnWidth: CGFloat?) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            tableRow(headers, count: columnCount, isHeader: true, fixedColumnWidth: fixedColumnWidth)
+                .background(SatoriTheme.accentWash.opacity(0.55))
+            Rectangle()
+                .fill(SatoriTheme.hairline)
+                .frame(height: 1)
+            ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
+                tableRow(row, count: columnCount, isHeader: false, fixedColumnWidth: fixedColumnWidth)
+                    .background(rowIndex.isMultiple(of: 2) ? Color.primary.opacity(0.028) : Color.clear)
+            }
+        }
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous).stroke(.quaternary))
+    }
+
+    private func tableRow(_ cells: [String], count: Int, isHeader: Bool, fixedColumnWidth: CGFloat?) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 14) {
+            ForEach(0..<count, id: \.self) { column in
+                Text(inlineMarkdown(cells.indices.contains(column) ? cells[column] : ""))
+                    .font(isHeader ? .callout.weight(.semibold) : .callout)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(
+                        minWidth: fixedColumnWidth,
+                        maxWidth: fixedColumnWidth == nil ? .infinity : nil,
+                        alignment: .leading
+                    )
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+    }
+
     private func headingFont(_ level: Int) -> Font {
         switch level {
         case 1: .title3.weight(.semibold)
@@ -92,11 +179,22 @@ struct LearningMarkdownView: View {
         }
     }
 
+    /// 行内 Markdown → AttributedString。给行内代码加淡紫 chip 背景和等宽
+    /// 字体，亮暗模式都清晰可辨（系统默认的行内代码样式在深色下几乎看不见）。
     private func inlineMarkdown(_ text: String) -> AttributedString {
-        (try? AttributedString(
+        guard var attributed = try? AttributedString(
             markdown: text,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        )) ?? AttributedString(text)
+        ) else { return AttributedString(text) }
+        for run in attributed.runs {
+            guard let intent = run.inlinePresentationIntent, intent.contains(.code) else { continue }
+            attributed[run.range].backgroundColor = SatoriThemeAppKit.accent.withAlphaComponent(0.13)
+            attributed[run.range].foregroundColor = .labelColor
+            attributed[run.range].font = .monospacedSystemFont(ofSize: 12, weight: .medium)
+            // 移除系统的 code intent，避免 Text 用默认样式覆盖我们的 chip。
+            attributed[run.range].inlinePresentationIntent = intent.subtracting(.code)
+        }
+        return attributed
     }
 
     private func copyToPasteboard(_ text: String) {
@@ -112,6 +210,7 @@ private struct CodeBlockView: View {
     let content: String
 
     @State private var runState: RunState = .idle
+    @State private var copied = false
 
     private enum RunState {
         case idle
@@ -147,12 +246,22 @@ private struct CodeBlockView: View {
                     }
                     .foregroundStyle(.secondary)
                 }
-                Button("复制", systemImage: "doc.on.doc") {
+                Button {
                     copyToPasteboard(content)
+                    copied = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.2))
+                        copied = false
+                    }
+                } label: {
+                    Label(copied ? "已复制" : "复制",
+                          systemImage: copied ? "checkmark" : "doc.on.doc")
                 }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.plain)
+                .foregroundStyle(copied ? Color.green : Color.secondary)
                 .help("复制代码")
+                .animation(SatoriTheme.Motion.quick, value: copied)
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 8)
@@ -216,7 +325,7 @@ private struct CodeBlockView: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
-                    .background(Color.black.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
             }
             if !result.stderr.isEmpty {
                 Text(result.stderr)

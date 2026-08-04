@@ -66,6 +66,15 @@ public struct LearningDirectoryItem: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+public extension LearningDirectoryItem {
+    /// 返回一份仅更新页码关联的副本，保留完成状态等其他字段。
+    func withPageIndex(_ pageIndex: Int?) -> LearningDirectoryItem {
+        var copy = self
+        copy.pageIndex = pageIndex
+        return copy
+    }
+}
+
 public enum DocumentContentKind: String, Codable, CaseIterable, Sendable {
     case text
     case scanned
@@ -142,5 +151,61 @@ public struct RelatedResource: Identifiable, Codable, Hashable, Sendable {
         self.title = title
         self.location = location
         self.kind = kind
+    }
+}
+
+// MARK: - Versioned persistence envelope
+
+/// Schema-versioned wrapper for every on-disk archive. Files written today
+/// carry `version: 1` plus the payload under `value`; files written before
+/// the envelope existed (raw payload JSON) still decode as v1.
+public struct VersionedEnvelope<Value: Codable>: Codable {
+    public var version: Int
+    public var value: Value
+
+    public init(version: Int = 1, value: Value) {
+        self.version = version
+        self.value = value
+    }
+}
+
+extension VersionedEnvelope: Sendable where Value: Sendable {}
+
+/// Shared encode/decode + corruption handling for the four on-disk stores.
+public enum StoreArchive {
+    /// Schema version every store writes today.
+    public static let currentSchemaVersion = 1
+
+    /// Encodes a payload wrapped in a `currentSchemaVersion` envelope.
+    public static func encode<Value: Codable>(_ value: Value) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(VersionedEnvelope(version: currentSchemaVersion, value: value))
+    }
+
+    /// Decodes either a versioned envelope or a legacy raw payload (treated
+    /// as v1). Throws only when the data is not a valid archive at all.
+    public static func decode<Value: Codable>(_ type: Value.Type, from data: Data) throws -> Value {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        if let envelope = try? decoder.decode(VersionedEnvelope<Value>.self, from: data) {
+            return envelope.value
+        }
+        return try decoder.decode(Value.self, from: data)
+    }
+
+    /// Moves an undecodable archive aside to `<name>.corrupt-<timestamp>` so a
+    /// later save never silently overwrites the only copy of the bad file.
+    public static func backupCorruptFile(at url: URL) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let base = "\(url.path).corrupt-\(Int(Date().timeIntervalSince1970))"
+        var destination = base
+        var counter = 1
+        while FileManager.default.fileExists(atPath: destination) {
+            destination = "\(base)-\(counter)"
+            counter += 1
+        }
+        try FileManager.default.moveItem(atPath: url.path, toPath: destination)
     }
 }

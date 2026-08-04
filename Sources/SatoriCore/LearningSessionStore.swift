@@ -46,14 +46,23 @@ public actor LearningSessionStore {
             cachedArchive = empty
             return empty
         }
-        let data = try Data(contentsOf: fileURL)
-        let archive = try JSONDecoder.learningSessions.decode(LearningSessionArchive.self, from: data)
-        cachedArchive = archive
-        return archive
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let archive = try StoreArchive.decode(LearningSessionArchive.self, from: data)
+            cachedArchive = archive
+            return archive
+        } catch {
+            // Undecodable archive: keep the bad file aside and recover empty,
+            // so the next save starts fresh instead of overwriting the only copy.
+            try? StoreArchive.backupCorruptFile(at: fileURL)
+            let empty = LearningSessionArchive()
+            cachedArchive = empty
+            return empty
+        }
     }
 
     private func persist(_ archive: LearningSessionArchive) throws {
-        let data = try JSONEncoder.learningSessions.encode(archive)
+        let data = try StoreArchive.encode(archive)
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: fileURL, options: .atomic)
         cachedArchive = archive
@@ -67,21 +76,4 @@ private struct LearningSessionArchive: Codable {
 private struct DocumentLearningSession: Codable {
     let documentID: UUID
     var turns: [LearningTurn]
-}
-
-private extension JSONEncoder {
-    static var learningSessions: JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        return encoder
-    }
-}
-
-private extension JSONDecoder {
-    static var learningSessions: JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }
 }

@@ -121,6 +121,42 @@ struct SatoriCoreTests {
         }
         precondition(orderedNumbers == [[1], [2], [3]], "Expected ordered numbers to follow the source even when interrupted by paragraphs")
 
+        // Regression: AI answers frequently include GFM tables; they must parse
+        // into a dedicated table block instead of raw pipe-text paragraphs,
+        // and the parser must keep scanning after the table.
+        let tableMarkdown = """
+        | 概念 | 含义 | 例子 |
+        | --- | --- | --- |
+        | 进程 | 运行中的程序 | `ps` |
+        | 线程 | 进程内的执行流 | pthread |
+
+        表格之后还有正文。
+        """
+        let tableBlocks = LearningMarkdownParser.parse(tableMarkdown)
+        precondition(
+            tableBlocks.contains(.table(
+                headers: ["概念", "含义", "例子"],
+                rows: [["进程", "运行中的程序", "`ps`"], ["线程", "进程内的执行流", "pthread"]]
+            )),
+            "Expected GFM table parsing"
+        )
+        precondition(tableBlocks.contains(.paragraph("表格之后还有正文。")), "Expected parsing to continue after a table")
+
+        // Regression: `- [ ]` / `- [x]` task lines must become a task list,
+        // not plain unordered bullets.
+        let taskMarkdown = """
+        - [x] 已读第一章
+        - [ ] 做课后题
+        """
+        let taskBlocks = LearningMarkdownParser.parse(taskMarkdown)
+        precondition(
+            taskBlocks.contains(.taskList([
+                LearningTaskItem(checked: true, text: "已读第一章"),
+                LearningTaskItem(checked: false, text: "做课后题")
+            ])),
+            "Expected task list parsing"
+        )
+
         let response = await UnconfiguredLearningAssistant().explain(request: "解释", pageIndex: 7)
         precondition(response.sourceKind == .inference, "Expected explicit source label")
 
@@ -267,20 +303,55 @@ struct SatoriCoreTests {
         var due = try await reviewStore.dueQuestions(for: docID, now: now)
         precondition(due.count == 1, "Expected newly created question to be due")
 
-        // Rating "good" pushes it to ~1 day out (first good review → 2^0 days).
-        try await reviewStore.rate(for: docID, question: q, rating: .good, now: now)
+        // SM-2 scheduling: "good" grows the interval 1 → 2 → 4 → 8 days by the
+        // consecutive-good streak, "hard" trails one step behind, and "again"
+        // resets the streak and interval to 1 day.
+        var question = try XCTUnwrap(try await reviewStore.questions(for: docID).first)
+        precondition(question.consecutiveGoodCount == 0, "Expected a fresh question to start with no good streak")
+        precondition(question.lastIntervalDays == 0, "Expected a fresh question to start with no interval")
+
+        func dueDate(_ days: Double, after base: Date) -> Date {
+            base.addingTimeInterval(days * 86_400)
+        }
+
+        // First "good": interval 1 day → due at day 1, streak 1.
+        try await reviewStore.rate(for: docID, question: question, rating: .good, now: now)
+        question = try XCTUnwrap(try await reviewStore.questions(for: docID).first)
+        precondition(question.dueAt == dueDate(1, after: now), "Expected first good rating to schedule 1 day out")
+        precondition(question.consecutiveGoodCount == 1, "Expected good streak to advance to 1")
+        precondition(question.lastIntervalDays == 1, "Expected last interval to be 1 day")
         due = try await reviewStore.dueQuestions(for: docID, now: now)
         precondition(due.isEmpty, "Expected rated-good question to no longer be due now")
-        let later = now.addingTimeInterval(25 * 3600)
-        due = try await reviewStore.dueQuestions(for: docID, now: later)
-        precondition(due.count == 1, "Expected rated-good question to be due within ~2 days")
-        // Rating "again" brings it back quickly (~10 minutes).
-        let q2 = ReviewQuestion(question: "Q2", answer: "A2", pageIndex: 2, createdAt: now, dueAt: now)
-        try await reviewStore.save([q, q2], for: docID)
-        try await reviewStore.rate(for: docID, question: q2, rating: .again, now: later)
-        let soon = later.addingTimeInterval(11 * 60)
-        due = try await reviewStore.dueQuestions(for: docID, now: soon)
-        precondition(due.contains { $0.id == q2.id }, "Expected again-rated question to return within minutes")
+
+        // Second "good": interval 2 days → due at day 3, streak 2.
+        try await reviewStore.rate(for: docID, question: question, rating: .good, now: dueDate(1, after: now))
+        question = try XCTUnwrap(try await reviewStore.questions(for: docID).first)
+        precondition(question.dueAt == dueDate(3, after: now), "Expected second good rating to schedule 2 days out")
+        precondition(question.consecutiveGoodCount == 2, "Expected good streak to advance to 2")
+        precondition(question.lastIntervalDays == 2, "Expected last interval to be 2 days")
+
+        // Third "good": interval 4 days → due at day 7, streak 3.
+        try await reviewStore.rate(for: docID, question: question, rating: .good, now: dueDate(3, after: now))
+        question = try XCTUnwrap(try await reviewStore.questions(for: docID).first)
+        precondition(question.dueAt == dueDate(7, after: now), "Expected third good rating to schedule 4 days out")
+        precondition(question.consecutiveGoodCount == 3, "Expected good streak to advance to 3")
+        precondition(question.lastIntervalDays == 4, "Expected last interval to be 4 days")
+
+        // "hard" at streak 3: interval 4 days — one step behind the next good's 8.
+        try await reviewStore.rate(for: docID, question: question, rating: .hard, now: dueDate(7, after: now))
+        question = try XCTUnwrap(try await reviewStore.questions(for: docID).first)
+        precondition(question.dueAt == dueDate(11, after: now), "Expected hard rating to schedule 4 days out")
+        precondition(question.consecutiveGoodCount == 3, "Expected hard rating to preserve the good streak")
+        precondition(question.lastIntervalDays == 4, "Expected hard interval to stay one step behind good")
+
+        // "again" resets the streak and the interval to 1 day.
+        try await reviewStore.rate(for: docID, question: question, rating: .again, now: dueDate(11, after: now))
+        question = try XCTUnwrap(try await reviewStore.questions(for: docID).first)
+        precondition(question.dueAt == dueDate(12, after: now), "Expected again rating to reset to 1 day out")
+        precondition(question.consecutiveGoodCount == 0, "Expected again rating to reset the good streak")
+        precondition(question.lastIntervalDays == 1, "Expected again rating to reset the interval to 1 day")
+        due = try await reviewStore.dueQuestions(for: docID, now: dueDate(11.5, after: now))
+        precondition(due.isEmpty, "Expected rated question to stay hidden until its new due date")
 
         // Gamification: streaks, progress, and badges from real behavior.
         let statsFile = root.appending(path: "learning-stats.json")
