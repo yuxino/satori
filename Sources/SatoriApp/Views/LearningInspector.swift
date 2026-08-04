@@ -4,6 +4,26 @@ import SatoriCore
 import UniformTypeIdentifiers
 
 struct LearningInspector: View {
+    /// The panel has three distinct spaces, each with one job: ask about the
+    /// page you're reading, browse every page's notes, or self-test with spaced
+    /// review. Keeping them apart is what stops the interaction from feeling
+    /// like a wall of unrelated cards.
+    enum PanelSection: String, CaseIterable, Identifiable {
+        case ask = "问"
+        case notes = "笔记"
+        case review = "复习"
+
+        var id: Self { self }
+
+        var icon: String {
+            switch self {
+            case .ask: "bubble.left.and.bubble.right"
+            case .notes: "book.pages"
+            case .review: "arrow.counterclockwise"
+            }
+        }
+    }
+
     enum ContextScope: Equatable {
         case selection
         case page
@@ -36,6 +56,7 @@ struct LearningInspector: View {
 
     @Environment(\.openSettings) private var openSettings
     @Environment(\.scenePhase) private var scenePhase
+    @State private var section: PanelSection = .ask
     @State private var question = ""
     @State private var turns: [LearningTurn] = []
     @State private var expandedTurnIDs: Set<UUID> = []
@@ -83,7 +104,11 @@ struct LearningInspector: View {
             inspectorHeader
             Divider()
 
-            understandingView
+            switch section {
+            case .ask: askView
+            case .notes: notesView
+            case .review: reviewView
+            }
         }
         .background(SatoriTheme.paper)
         .task(id: documentID) { await loadHistory() }
@@ -116,20 +141,10 @@ struct LearningInspector: View {
     private var inspectorHeader: some View {
         VStack(spacing: SatoriTheme.Spacing.md) {
             HStack(spacing: SatoriTheme.Spacing.sm) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(SatoriTheme.gold)
-                    .frame(width: 26, height: 26)
-                    .background(SatoriTheme.goldWash, in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("理解")
-                        .font(.headline)
-                    Text("边读边问，理解你的下一页")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text("这本书")
+                    .font(.headline)
                 Spacer()
-                if !turns.isEmpty {
+                if section == .notes, !turns.isEmpty {
                     Button("清空记录", systemImage: "trash") { showsClearConfirmation = true }
                         .labelStyle(.iconOnly)
                         .buttonStyle(.plain)
@@ -142,6 +157,14 @@ struct LearningInspector: View {
                     .foregroundStyle(.secondary)
                     .help("关闭学习面板")
             }
+
+            Picker("面板", selection: $section) {
+                ForEach(PanelSection.allCases) { item in
+                    Label(item.rawValue, systemImage: item.icon).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
         }
         .padding(.horizontal, SatoriTheme.Spacing.lg)
         .padding(.vertical, SatoriTheme.Spacing.md)
@@ -149,28 +172,13 @@ struct LearningInspector: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
-    private var understandingView: some View {
+    /// 问 — the page you're reading, its Q&A, and the composer. Nothing else.
+    private var askView: some View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: SatoriTheme.Spacing.lg) {
-                        contextCard
-
-                        // Spaced retrieval: a due question surfaces here, and
-                        // "考考你" turns the page into a self-test.
-                        if isReviewing {
-                            reviewSessionView
-                        } else if isGeneratingReview {
-                            HStack(spacing: SatoriTheme.Spacing.sm) {
-                                ProgressView().controlSize(.small)
-                                Text("正在根据这一页生成自测题…")
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, SatoriTheme.Spacing.sm)
-                        } else if !reviewQuestions.isEmpty {
-                            reviewPromptView
-                        }
+                        askScopeHeader
 
                         if isLoadingHistory {
                             HStack(spacing: 8) {
@@ -183,16 +191,10 @@ struct LearningInspector: View {
                         } else if turns.isEmpty, draftQuestion.isEmpty {
                             promptStarter
                         } else {
-                            // Notes are grouped by the page they belong to, so
-                            // the AI visibly works on the book — each question
-                            // lives under "第 N 页" instead of in a disconnected
-                            // chat log.
                             if !currentPageHasNotes {
                                 currentPageInvitation
                             }
-                            ForEach(pageSections) { section in
-                                pageSectionView(section)
-                            }
+                            currentPageTurns
                         }
 
                         if !draftQuestion.isEmpty, let response {
@@ -224,6 +226,105 @@ struct LearningInspector: View {
             Divider()
             composer
         }
+    }
+
+    /// The turn cards for the page currently on screen.
+    private var currentPageTurns: some View {
+        let current = turns.filter { $0.pageIndex == pageIndex }
+        return VStack(alignment: .leading, spacing: SatoriTheme.Spacing.lg) {
+            ForEach(current) { turn in
+                learningTurnCard(turn)
+                    .id(turn.id)
+            }
+        }
+    }
+
+    /// 笔记 — every page's Q&A, organized by page. Read-only browse of what
+    /// was learned; no composer, no scope picker, no distractions.
+    private var notesView: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: SatoriTheme.Spacing.xl) {
+                if isLoadingHistory {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("正在载入这本书的学习记录…")
+                    }
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 18)
+                } else if turns.isEmpty {
+                    VStack(spacing: SatoriTheme.Spacing.sm) {
+                        Image(systemName: "book.pages")
+                            .font(.system(size: 32))
+                            .foregroundStyle(.tertiary)
+                        Text("还没有笔记")
+                            .font(.callout.weight(.medium))
+                        Text("去「问」里和 AI 讨论这一页，笔记会自动按页整理在这里。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, SatoriTheme.Spacing.xxl)
+                } else {
+                    ForEach(pageSections) { section in
+                        pageSectionView(section)
+                    }
+                }
+            }
+            .padding(SatoriTheme.Spacing.lg)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// 复习 — self-testing with spaced retrieval. Own the whole space so due
+    /// questions and the active session don't collide with reading.
+    private var reviewView: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: SatoriTheme.Spacing.lg) {
+                if isReviewing {
+                    reviewSessionView
+                } else if isGeneratingReview {
+                    HStack(spacing: SatoriTheme.Spacing.sm) {
+                        ProgressView().controlSize(.small)
+                        Text("正在根据这一页生成自测题…")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, SatoriTheme.Spacing.sm)
+                } else if !reviewQuestions.isEmpty {
+                    reviewPromptView
+                } else {
+                    reviewEmptyView
+                }
+            }
+            .padding(SatoriTheme.Spacing.lg)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// The review space's empty state — explains what this tab is for and
+    /// offers to generate a first batch from the current page.
+    private var reviewEmptyView: some View {
+        VStack(spacing: SatoriTheme.Spacing.lg) {
+            Image(systemName: "arrow.counterclockwise")
+                .font(.system(size: 32))
+                .foregroundStyle(SatoriTheme.gold)
+            VStack(spacing: SatoriTheme.Spacing.xs + 1) {
+                Text("把读过的东西记住")
+                    .font(.title3.weight(.semibold))
+                Text("Satori 会根据第 \(pageIndex + 1) 页和你的问答出几道题，\n先回想、再对答案。忘记的很快回来，记住的越隔越久。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            Button("考考我这一页", systemImage: "questionmark.circle") { startReview() }
+                .buttonStyle(.borderedProminent)
+                .tint(SatoriTheme.accent)
+                .disabled(isGeneratingReview)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, SatoriTheme.Spacing.xxl)
     }
 
     /// The passage "选中内容" asks about: the live PDF highlight when there is
@@ -263,30 +364,11 @@ struct LearningInspector: View {
         hasSelection ? [.selection, .page, .wholeDocument] : [.page, .wholeDocument]
     }
 
-    private var contextCard: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 10) {
-                Image(systemName: "text.viewfinder")
-                    .foregroundStyle(SatoriTheme.iconChrome)
-                    .frame(width: 30, height: 30)
-                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("提问依据")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(scopeSummary)
-                        .font(.callout.weight(.medium))
-                        .lineLimit(1)
-                }
-                Spacer()
-                Button("考考你", systemImage: "questionmark.circle") { startReview() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .tint(SatoriTheme.accent)
-                    .disabled(isGeneratingReview || isReviewing)
-                    .help("根据这一页生成自测题")
-            }
-
+    /// A compact header for the ask space: what the next question is grounded
+    /// in (selection / page / whole book). No buttons — this space is only
+    /// about asking.
+    private var askScopeHeader: some View {
+        VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
             Picker("提问依据", selection: $contextScope) {
                 ForEach(availableScopes, id: \.self) { scope in
                     Label(scope.pickerTitle, systemImage: scope.systemImage).tag(scope)
@@ -294,6 +376,16 @@ struct LearningInspector: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+
+            HStack(spacing: SatoriTheme.Spacing.sm) {
+                Image(systemName: scopeIcon)
+                    .font(.caption)
+                    .foregroundStyle(SatoriTheme.iconChrome)
+                Text(scopeSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
 
             if contextScope == .selection, hasSelection {
                 Text(activeSelection)
@@ -314,6 +406,14 @@ struct LearningInspector: View {
             } else if contextScope == .selection {
                 contextScope = .page
             }
+        }
+    }
+
+    private var scopeIcon: String {
+        switch contextScope {
+        case .selection: "text.cursor"
+        case .page: "doc.text"
+        case .wholeDocument: "books.vertical"
         }
     }
 
