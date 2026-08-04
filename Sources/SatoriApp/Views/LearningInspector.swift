@@ -61,12 +61,22 @@ struct LearningInspector: View {
     @State private var showsClearConfirmation = false
 
     private let sessionStore = LearningSessionStore.shared
+    private let reviewStore = ReviewStore.shared
     private let responseBottomID = "learning-response-bottom"
     private let quickPrompts = [
         "这一页主要在讲什么？",
         "用更简单的话解释",
         "给我一个具体例子"
     ]
+
+    // MARK: Review (spaced retrieval)
+
+    @State private var reviewQuestions: [ReviewQuestion] = []
+    @State private var isGeneratingReview = false
+    @State private var isReviewing = false
+    @State private var reviewIndex = 0
+    @State private var isAnswerRevealed = false
+    @State private var reviewTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -77,6 +87,7 @@ struct LearningInspector: View {
         }
         .background(SatoriTheme.paper)
         .task(id: documentID) { await loadHistory() }
+        .task(id: documentID) { await loadDueReviews() }
         .onAppear { refreshConfigurationState() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { refreshConfigurationState() }
@@ -144,6 +155,22 @@ struct LearningInspector: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: SatoriTheme.Spacing.lg) {
                         contextCard
+
+                        // Spaced retrieval: a due question surfaces here, and
+                        // "考考你" turns the page into a self-test.
+                        if isReviewing {
+                            reviewSessionView
+                        } else if isGeneratingReview {
+                            HStack(spacing: SatoriTheme.Spacing.sm) {
+                                ProgressView().controlSize(.small)
+                                Text("正在根据这一页生成自测题…")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, SatoriTheme.Spacing.sm)
+                        } else if !reviewQuestions.isEmpty {
+                            reviewPromptView
+                        }
 
                         if isLoadingHistory {
                             HStack(spacing: 8) {
@@ -252,6 +279,12 @@ struct LearningInspector: View {
                         .lineLimit(1)
                 }
                 Spacer()
+                Button("考考你", systemImage: "questionmark.circle") { startReview() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(SatoriTheme.accent)
+                    .disabled(isGeneratingReview || isReviewing)
+                    .help("根据这一页生成自测题")
             }
 
             Picker("提问依据", selection: $contextScope) {
@@ -419,6 +452,104 @@ struct LearningInspector: View {
         }
         .padding(SatoriTheme.Spacing.lg)
         .background(SatoriTheme.goldWash.opacity(0.5), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous))
+    }
+
+    /// A review question is due — invite the reader to self-test before it
+    /// disappears from memory.
+    private var reviewPromptView: some View {
+        HStack(spacing: SatoriTheme.Spacing.md) {
+            Image(systemName: "arrow.counterclockwise.circle.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(SatoriTheme.gold)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("该复习了")
+                    .font(.callout.weight(.semibold))
+                Text("有 \(reviewQuestions.count) 道题到期，先回想再对答案")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("开始复习") { isReviewing = true; reviewIndex = 0 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(SatoriTheme.accent)
+        }
+        .padding(SatoriTheme.Spacing.md)
+        .background(SatoriTheme.goldWash.opacity(0.5), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous))
+    }
+
+    /// The active self-test: one question at a time, reveal the answer, then
+    /// rate how well it was recalled.
+    private var reviewSessionView: some View {
+        let question = reviewQuestions[reviewIndex]
+        let isLast = reviewIndex == reviewQuestions.count - 1
+        return VStack(alignment: .leading, spacing: SatoriTheme.Spacing.md) {
+            HStack {
+                Text("自测 · 第 \(pageIndex + 1) 页")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(reviewIndex + 1) / \(reviewQuestions.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+
+            Text(question.question)
+                .font(.title3.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            if reviewIndex < reviewQuestions.count, isAnswerRevealed {
+                VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
+                    Text("答案")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(question.answer)
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+                .padding(SatoriTheme.Spacing.md)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(SatoriTheme.accentWash.opacity(0.5), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+            }
+
+            if isAnswerRevealed {
+                VStack(spacing: SatoriTheme.Spacing.sm) {
+                    Text("你回想得怎么样？")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: SatoriTheme.Spacing.sm) {
+                        ForEach(ReviewRating.allCases, id: \.self) { rating in
+                            Button(rating.localizedTitle) {
+                                rateCurrentReview(rating)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                        Spacer()
+                    }
+                }
+            } else {
+                HStack {
+                    Button("先回想，再对答案") { revealAnswer() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(SatoriTheme.accent)
+                    Spacer()
+                    Button("放弃这次复习") { stopReview() }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(SatoriTheme.Spacing.lg)
+        .satoriPaper(radius: SatoriTheme.Radius.md, padding: SatoriTheme.Spacing.lg)
+        .id(question.id)
+        .transition(.opacity.combined(with: .move(edge: .trailing)))
+        .animation(SatoriTheme.Motion.standard, value: reviewIndex)
+        .onAppear { isAnswerRevealed = false }
     }
 
     private func draftTurnCard(_ draftResponse: LearningResponse) -> some View {
@@ -839,6 +970,89 @@ struct LearningInspector: View {
         case .compose:
             isQuestionFocused = true
         }
+    }
+
+    /// Loads the due review questions for this book so the panel can surface
+    /// "该复习了" when spaced repetition says it's time. Reading the store is
+    /// local, so it works regardless of Qwen configuration.
+    @MainActor
+    private func loadDueReviews() async {
+        do {
+            reviewQuestions = try await reviewStore.dueQuestions(for: documentID)
+        } catch {
+            reviewQuestions = []
+        }
+    }
+
+    /// Asks the AI to generate retrieval-practice questions for the current
+    /// page, then starts the review session.
+    private func startReview() {
+        guard !isGeneratingReview, !isReviewing else { return }
+        let targetPage = pageIndex
+        guard let pageContent = PDFPageContextExtractor.extract(from: documentURL, scope: .page(targetPage)) else {
+            historyStatus = "暂时无法读取这一页，无法出题。"
+            return
+        }
+        isGeneratingReview = true
+        reviewTask = Task {
+            defer { isGeneratingReview = false }
+            let configuration = await Task.detached(priority: .userInitiated) {
+                QwenConfigurationStore.read()
+            }.value
+            guard let configuration else {
+                hasQwenConfiguration = false
+                historyStatus = "请先在设置中连接 Qwen，才能生成复习题。"
+                return
+            }
+            hasQwenConfiguration = true
+            let assistant = QwenLearningAssistant(
+                apiKey: configuration.apiKey,
+                modelID: configuration.modelID,
+                pageContent: pageContent,
+                conversationContext: turns
+                    .filter { $0.pageIndex == targetPage }
+                    .suffix(4)
+                    .map { LearningConversationContext(question: $0.question, answer: $0.answer) }
+            )
+            let questions = await assistant.generateReviewQuestions(pageIndex: targetPage, count: 3)
+            guard !questions.isEmpty else {
+                historyStatus = "AI 没能生成题目，请稍后再试。"
+                return
+            }
+            reviewQuestions = questions
+            isReviewing = true
+            reviewIndex = 0
+        }
+    }
+
+    private func rateCurrentReview(_ rating: ReviewRating) {
+        guard reviewIndex < reviewQuestions.count else { return }
+        let question = reviewQuestions[reviewIndex]
+        Task {
+            try? await reviewStore.rate(for: documentID, question: question, rating: rating)
+            await MainActor.run {
+                withAnimation(SatoriTheme.Motion.quick) {
+                    if reviewIndex + 1 < reviewQuestions.count {
+                        reviewIndex += 1
+                    } else {
+                        reviewQuestions = []
+                        isReviewing = false
+                    }
+                }
+            }
+        }
+    }
+
+    private func stopReview() {
+        reviewTask?.cancel()
+        reviewTask = nil
+        isReviewing = false
+        isGeneratingReview = false
+        reviewQuestions = []
+    }
+
+    private func revealAnswer() {
+        withAnimation(SatoriTheme.Motion.quick) { isAnswerRevealed = true }
     }
 
     private func scopeExtractionFailureMessage(_ scope: ContextScope, pageIndex: Int) -> String {

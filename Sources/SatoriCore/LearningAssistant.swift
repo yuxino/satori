@@ -187,6 +187,76 @@ public struct QwenLearningAssistant: LearningAssistant {
         }
     }
 
+    /// Generates retrieval-practice questions grounded in what the reader
+    /// actually saw and asked. The model returns lines of `问题 | 答案`, which
+    /// we parse into review questions — deliberately no code, no commentary,
+    /// so the answer can be checked against what the page says.
+    public func generateReviewQuestions(
+        pageIndex: Int?,
+        count: Int = 3
+    ) async -> [ReviewQuestion] {
+        do {
+            let urlRequest = try makeURLRequestForReview(pageIndex: pageIndex, count: count)
+            let transportResponse = try await transport.send(urlRequest)
+            guard (200..<300).contains(transportResponse.statusCode) else {
+                let apiError = try? JSONDecoder().decode(APIErrorEnvelope.self, from: transportResponse.data)
+                throw AssistantError.api(apiError?.error.message ?? "百炼返回了错误 \(transportResponse.statusCode)")
+            }
+            let envelope = try JSONDecoder().decode(ResponsesEnvelope.self, from: transportResponse.data)
+            let text = envelope.output.flatMap(\.content).compactMap(\.text).joined(separator: "\n")
+            return ReviewQuestionParser.parse(text, pageIndex: pageIndex ?? 0)
+        } catch {
+            return []
+        }
+    }
+
+    private func makeURLRequestForReview(pageIndex: Int?, count: Int) throws -> URLRequest {
+        let endpoint = apiHost.appending(path: "responses")
+        var urlRequest = URLRequest(url: endpoint)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        let pageNumber = (pageIndex ?? 0) + 1
+        let pageText: String
+        switch pageContent {
+        case let .text(text): pageText = text
+        case .imageJPEG: pageText = "（这一页是扫描图，无法提供原文文字）"
+        }
+        let learnedContext = conversationContext.suffix(4).map { "问：\($0.question)\n答：\($0.answer.prefix(1_200))" }.joined(separator: "\n\n")
+
+        let reviewBody = """
+        用户正在阅读 PDF 第 \(pageNumber) 页。
+
+        本页原文：
+        \(pageText)
+
+        用户在这本书里问过的内容：
+        \(learnedContext.isEmpty ? "（还没有问过）" : learnedContext)
+
+        我的要求：请根据上面的内容，生成 \(count) 道用于自测回忆的题目，帮助用户检验是否真的记住了这一页的核心概念。
+        要求：
+        - 题目要有意义，不是“这一页讲了什么”这种泛泛的问题；而是针对具体概念、原理、区别、代码含义出题。
+        - 覆盖这一页真正重要的点，优先挑容易被看过就忘的。
+        - 每题用一行输出，格式为：问题 | 参考答案
+        - 答案要短（一两句话），严格依据本页原文，不要编造本页没有的内容。
+        - 只输出题目和答案，不要任何其他说明。
+        """
+
+        let body: [String: Any] = [
+            "model": modelID,
+            "instructions": "你是 Satori 的复习出题助手。根据给定的教材原文出回忆题。严格按格式“问题 | 答案”，一行一题。只输出题目，不输出其它内容。",
+            "input": [
+                ["role": "user", "content": [["type": "input_text", "text": reviewBody]]]
+            ],
+            "store": false,
+            "stream": false,
+            "max_output_tokens": 1400
+        ]
+        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        return urlRequest
+    }
+
     private func makeURLRequest(question: String, pageIndex: Int?, streamsResponse: Bool) throws -> URLRequest {
         let endpoint = apiHost.appending(path: "responses")
         var request = URLRequest(url: endpoint)

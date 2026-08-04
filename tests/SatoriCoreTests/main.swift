@@ -245,6 +245,43 @@ struct SatoriCoreTests {
         )
         precondition(outputLimitRun.stdout.count <= 1_100, "Expected stdout to be capped")
 
+        // Review questions: parser handles fenced, bulleted, varied output.
+        let parsedQuestions = ReviewQuestionParser.parse("""
+        ```text
+        - 什么是进程？ | 运行中的程序实例，包含代码、数据和资源。
+        - 什么是死锁？ | 多个进程互相等待对方占用的资源而无法推进。
+        3. 什么是系统调用？ | 应用程序请求内核服务的接口。
+        ```
+        """, pageIndex: 5)
+        precondition(parsedQuestions.count == 3, "Expected three parsed review questions")
+        precondition(parsedQuestions.allSatisfy { $0.pageIndex == 5 }, "Expected page index attached")
+        precondition(parsedQuestions[0].question == "什么是进程？", "Expected question text parsed")
+
+        // Review store: saves, lists due, and advances spacing on rating.
+        let reviewFile = root.appending(path: "review-questions.json")
+        let reviewStore = ReviewStore(fileURL: reviewFile)
+        let docID = UUID()
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let q = ReviewQuestion(question: "Q", answer: "A", pageIndex: 1, createdAt: now, dueAt: now)
+        try await reviewStore.save([q], for: docID)
+        var due = try await reviewStore.dueQuestions(for: docID, now: now)
+        precondition(due.count == 1, "Expected newly created question to be due")
+
+        // Rating "good" pushes it to ~1 day out (first good review → 2^0 days).
+        try await reviewStore.rate(for: docID, question: q, rating: .good, now: now)
+        due = try await reviewStore.dueQuestions(for: docID, now: now)
+        precondition(due.isEmpty, "Expected rated-good question to no longer be due now")
+        let later = now.addingTimeInterval(25 * 3600)
+        due = try await reviewStore.dueQuestions(for: docID, now: later)
+        precondition(due.count == 1, "Expected rated-good question to be due within ~2 days")
+        // Rating "again" brings it back quickly (~10 minutes).
+        let q2 = ReviewQuestion(question: "Q2", answer: "A2", pageIndex: 2, createdAt: now, dueAt: now)
+        try await reviewStore.save([q, q2], for: docID)
+        try await reviewStore.rate(for: docID, question: q2, rating: .again, now: later)
+        let soon = later.addingTimeInterval(11 * 60)
+        due = try await reviewStore.dueQuestions(for: docID, now: soon)
+        precondition(due.contains { $0.id == q2.id }, "Expected again-rated question to return within minutes")
+
         print("Satori core checks passed")
     }
 }
