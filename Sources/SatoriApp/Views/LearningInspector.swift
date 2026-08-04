@@ -4,26 +4,10 @@ import SatoriCore
 import UniformTypeIdentifiers
 
 struct LearningInspector: View {
-    /// The panel has three distinct spaces, each with one job: ask about the
-    /// page you're reading, browse every page's notes, or self-test with spaced
-    /// review. Keeping them apart is what stops the interaction from feeling
-    /// like a wall of unrelated cards.
-    enum PanelSection: String, CaseIterable, Identifiable {
-        case ask = "问"
-        case run = "运行"
-        case notes = "笔记"
-
-        var id: Self { self }
-
-        var icon: String {
-            switch self {
-            case .ask: "bubble.left.and.bubble.right"
-            case .run: "play.rectangle"
-            case .notes: "book.pages"
-            }
-        }
-    }
-
+    /// The learning panel has no parallel tabs. It flows: default is the ask
+    /// space; selecting code flips it to run; the notes button overlays the
+    /// book's notes on demand. One space at a time, driven by the reader's
+    /// action — not by a tab they have to remember to switch.
     enum ContextScope: Equatable {
         case selection
         case page
@@ -56,7 +40,8 @@ struct LearningInspector: View {
 
     @Environment(\.openSettings) private var openSettings
     @Environment(\.scenePhase) private var scenePhase
-    @State private var section: PanelSection = .ask
+    @State private var showsNotes = false
+    @State private var isShowingRun = false
     @State private var question = ""
     @State private var turns: [LearningTurn] = []
     @State private var expandedTurnIDs: Set<UUID> = []
@@ -111,10 +96,12 @@ struct LearningInspector: View {
             inspectorHeader
             Divider()
 
-            switch section {
-            case .ask: askView
-            case .run: runView
-            case .notes: notesView
+            if showsNotes {
+                notesView
+            } else if isShowingRun {
+                runView
+            } else {
+                askView
             }
         }
         .background(SatoriTheme.paper)
@@ -146,32 +133,33 @@ struct LearningInspector: View {
     }
 
     private var inspectorHeader: some View {
-        VStack(spacing: SatoriTheme.Spacing.md) {
-            HStack(spacing: SatoriTheme.Spacing.sm) {
-                Text("这本书")
-                    .font(.headline)
-                Spacer()
-                if section == .notes, !turns.isEmpty {
-                    Button("清空记录", systemImage: "trash") { showsClearConfirmation = true }
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
-                        .help("清空这本书的学习记录")
-                }
-                Button("关闭", systemImage: "xmark", action: onClose)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help("关闭学习面板")
-            }
+        HStack(spacing: SatoriTheme.Spacing.sm) {
+            Text("这本书")
+                .font(.headline)
+            Spacer()
 
-            Picker("面板", selection: $section) {
-                ForEach(PanelSection.allCases) { item in
-                    Label(item.rawValue, systemImage: item.icon).tag(item)
-                }
+            // 笔记 is a temporary overlay, not a parallel space: a click shows
+            // the book's notes and a click (or any ask/run action) returns.
+            Button {
+                withAnimation(SatoriTheme.Motion.quick) { showsNotes.toggle() }
+            } label: {
+                Label("笔记", systemImage: "book.pages")
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(showsNotes ? SatoriTheme.accent : .secondary)
+
+            Button("截图提问", systemImage: "camera") { captureScreenshot() }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(SatoriTheme.accent)
+                .help("截取屏幕画面来提问")
+
+            Button("关闭", systemImage: "xmark", action: onClose)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("关闭学习面板")
         }
         .padding(.horizontal, SatoriTheme.Spacing.lg)
         .padding(.vertical, SatoriTheme.Spacing.md)
@@ -317,6 +305,14 @@ struct LearningInspector: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: SatoriTheme.Spacing.md) {
                     HStack(spacing: SatoriTheme.Spacing.sm) {
+                        Button {
+                            withAnimation(SatoriTheme.Motion.quick) { isShowingRun = false }
+                        } label: {
+                            Label("回到对话", systemImage: "chevron.left")
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+
                         Picker("语言", selection: $runLanguage) {
                             ForEach(CodeRunner.Language.allCases, id: \.self) { lang in
                                 Text(lang.rawValue).tag(lang)
@@ -1196,12 +1192,17 @@ struct LearningInspector: View {
 
         switch command.action {
         case .explain:
+            showsNotes = false
+            isShowingRun = false
             askAssistant("解释我选中的这段内容", selectionOverride: text)
         case .compose:
+            showsNotes = false
+            isShowingRun = false
             isQuestionFocused = true
         case .run:
+            showsNotes = false
             runCode = text
-            section = .run
+            isShowingRun = true
         }
     }
 
@@ -1286,6 +1287,38 @@ struct LearningInspector: View {
 
     private func revealAnswer() {
         withAnimation(SatoriTheme.Motion.quick) { isAnswerRevealed = true }
+    }
+
+    /// Captures the current screen and attaches it as an image for the next
+    /// question — a fast path for asking about something you see (a chart, a
+    /// diagram, a scan) without typing.
+    private func captureScreenshot() {
+        guard let screenshot = captureScreenImage() else {
+            attachmentStatus = "截图失败，请重试。"
+            return
+        }
+        guard let attachment = LearningImageAttachmentLoader.normalizeImage(screenshot, name: "屏幕截图") else {
+            attachmentStatus = "截图无法作为图片使用。"
+            return
+        }
+        let remaining = max(0, 4 - attachments.count)
+        guard remaining > 0 else {
+            attachmentStatus = "每次最多附加 4 张图片。"
+            return
+        }
+        attachments.append(attachment)
+        showsNotes = false
+        isShowingRun = false
+        isQuestionFocused = true
+    }
+
+    /// Grabs the whole screen via `CGDisplayCreateImage`. A full-window picker
+    /// would be nicer but needs Screen Recording permission; the system picker
+    /// (Cmd+Shift+5) is the trusted route, and pasting with ⌘V works too.
+    private func captureScreenImage() -> NSImage? {
+        let display = CGMainDisplayID()
+        guard let image = CGDisplayCreateImage(display) else { return nil }
+        return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
     }
 
     private func scopeExtractionFailureMessage(_ scope: ContextScope, pageIndex: Int) -> String {

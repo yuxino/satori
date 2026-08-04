@@ -36,6 +36,13 @@ enum LearningImageAttachmentLoader {
         }
     }
 
+    /// Normalizes an image that's already in memory (e.g. a screen capture)
+    /// into a JPEG attachment. Returns nil if it can't be converted.
+    static func normalizeImage(_ source: NSImage, name: String) -> LearningImageAttachment? {
+        guard source.size.width > 0, source.size.height > 0 else { return nil }
+        return try? normalize(source, name: name)
+    }
+
     private static func normalize(_ source: NSImage, name: String) throws -> LearningImageAttachment {
         let scale = min(1, maximumDimension / max(source.size.width, source.size.height))
         let targetSize = NSSize(
