@@ -495,6 +495,13 @@ private final class SelectionToolbarButton: NSButton {
         layer?.cornerRadius = SatoriTheme.Radius.sm - 2
         layer?.cornerCurve = .continuous
         self.title = title
+        // attributedTitle 只在这里设置一次。带 image 的 NSButton 反复设置
+        // attributedTitle 会每次都加宽约 3px（AppKit cell 缓存怪癖），
+        // hover 触发 updateStyle 会让工具条越变越长、按钮溢出。
+        attributedTitle = NSAttributedString(string: " " + title, attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+            .foregroundColor: prominent ? SatoriThemeAppKit.onAccent : NSColor.labelColor
+        ])
         updateStyle()
     }
 
@@ -556,9 +563,5 @@ private final class SelectionToolbarButton: NSButton {
             foreground = .labelColor
         }
         contentTintColor = foreground
-        attributedTitle = NSAttributedString(string: " " + title, attributes: [
-            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-            .foregroundColor: foreground
-        ])
     }
 }

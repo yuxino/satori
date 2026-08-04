@@ -84,11 +84,9 @@ struct LearningInspector: View {
     @State private var isThinking = false
     @State private var isLoadingHistory = true
     @State private var historyStatus = ""
-    /// 流式回答期间是否跟随最新（用户上滑看历史时停止跟随）。
-    @State private var followStream = true
-    /// 有新回答/历史加载完成时，等待列表尾部真正出现后再滚到底部，
-    /// 避免 LazyVStack 还没排好布局时 scrollTo 静默失效。
-    @State private var pendingScrollToLatest = false
+    /// 滚动锚点：绑定到列表底部锚点 id 时，内容增长会平滑保持贴底
+    /// （ChatGPT 式跟随）；用户上滑看历史时绑定自动脱离，不再打扰。
+    @State private var scrollAnchorID: String?
     /// 列表底部是否在视野内；滚上去看历史时变 false，用来显示
     /// 「回到底部」浮动按钮。
     @State private var isAtBottom = true
@@ -197,6 +195,11 @@ struct LearningInspector: View {
                 Text("这本书")
                     .font(.headline)
                 Spacer()
+                Button("回答设置", systemImage: "gearshape") { openSettings() }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("打开设置：模型、API Key、回答提示词")
                 Button("关闭", systemImage: "xmark", action: onClose)
                     .labelStyle(.iconOnly)
                     .buttonStyle(.plain)
@@ -287,117 +290,71 @@ struct LearningInspector: View {
     /// 问 — 这本书的对话流 + 输入框。所有问答连成一条对话，翻页不消失。
     private var askView: some View {
         VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: SatoriTheme.Spacing.lg) {
-                        if let completedPage = completedElsewherePage {
-                            savedElsewhereBanner(pageIndex: completedPage)
-                        }
+            ScrollView {
+                VStack(alignment: .leading, spacing: SatoriTheme.Spacing.lg) {
+                    if let completedPage = completedElsewherePage {
+                        savedElsewhereBanner(pageIndex: completedPage)
+                    }
 
-                        if isLoadingHistory {
-                            HStack(spacing: 8) {
-                                ProgressView().controlSize(.small)
-                                Text("正在载入这本书的学习记录…")
-                            }
-                            .font(.callout)
+                    if isLoadingHistory {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("正在载入这本书的学习记录…")
+                        }
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 18)
+                    } else if turns.isEmpty, activeTurn == nil {
+                        promptStarter
+                    } else {
+                        // 一条连续的对话流：历史问答 + 正在进行的这一轮。
+                        // 提问消息一发送就出现在列表里，回答紧跟其下流式输出。
+                        ForEach(turns) { turn in
+                            conversationTurnCard(turn)
+                                .id(turn.id)
+                        }
+                        if let activeTurn {
+                            conversationTurnCard(activeTurn, isActive: true)
+                                .id("streaming-draft")
+                        }
+                    }
+
+                    if !historyStatus.isEmpty {
+                        Label(historyStatus, systemImage: "exclamationmark.triangle")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
-                            .padding(.vertical, 18)
-                        } else if turns.isEmpty, activeTurn == nil {
-                            promptStarter
-                        } else {
-                            // 一条连续的对话流：历史问答 + 正在进行的这一轮。
-                            // 提问消息一发送就出现在列表里，回答紧跟其下流式输出。
-                            ForEach(turns) { turn in
-                                conversationTurnCard(turn)
-                                    .id(turn.id)
-                            }
-                            if let activeTurn {
-                                conversationTurnCard(activeTurn, isActive: true)
-                                    .id("streaming-draft")
-                                    .onAppear {
-                                        // 进行中的对话在视野里 = 用户在看底部，恢复跟随。
-                                        followStream = true
-                                        pendingScrollToLatest = false
-                                        scrollToLatest(proxy)
-                                    }
-                                    .onDisappear {
-                                        // 滚出视野 = 用户在翻历史，不再自动跟随。
-                                        followStream = false
-                                        pendingScrollToLatest = false
-                                    }
-                            }
-                        }
+                    }
 
-                        if !historyStatus.isEmpty {
-                            Label(historyStatus, systemImage: "exclamationmark.triangle")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Color.clear
-                            .frame(height: 1)
-                            .id(responseBottomID)
-                            .onAppear {
-                                isAtBottom = true
-                                followStream = true
-                                // 列表尾部真正出现时才执行挂起的「滚到底部」。
-                                if pendingScrollToLatest {
-                                    pendingScrollToLatest = false
-                                    scrollToLatest(proxy)
-                                }
-                            }
-                            .onDisappear {
-                                isAtBottom = false
-                            }
-                    }
-                    .padding(SatoriTheme.Spacing.lg)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Color.clear
+                        .frame(height: 1)
+                        .id(responseBottomID)
+                        .onAppear { isAtBottom = true }
+                        .onDisappear { isAtBottom = false }
                 }
-                .onChange(of: response?.text) { _, _ in
-                    // 流式期间跟随最新回答；用户上滑看历史时不再拉回。
-                    guard followStream else { return }
-                    scrollToLatest(proxy)
-                }
-                .onChange(of: turns.count) { _, _ in
-                    // 回答完成/删除：用户在底部就跟过去；在看历史就不抢滚动，
-                    // 只留「回到底部」按钮让用户自己决定。
-                    if followStream {
-                        pendingScrollToLatest = true
-                        scrollToLatest(proxy)
+                .padding(SatoriTheme.Spacing.lg)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollPosition(id: $scrollAnchorID, anchor: .bottom)
+            .overlay(alignment: .bottomTrailing) {
+                if !isAtBottom {
+                    Button {
+                        scrollAnchorID = responseBottomID
+                    } label: {
+                        Label("回到底部", systemImage: "arrow.down")
                     }
-                }
-                .overlay(alignment: .bottomTrailing) {
-                    if !isAtBottom {
-                        Button {
-                            followStream = true
-                            pendingScrollToLatest = true
-                            scrollToLatest(proxy)
-                        } label: {
-                            Label("回到底部", systemImage: "arrow.down")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        .tint(SatoriTheme.accent)
-                        .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
-                        .padding(.trailing, SatoriTheme.Spacing.lg)
-                        .padding(.bottom, SatoriTheme.Spacing.sm)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .animation(SatoriTheme.Motion.quick, value: isAtBottom)
-                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(SatoriTheme.accent)
+                    .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
+                    .padding(.trailing, SatoriTheme.Spacing.lg)
+                    .padding(.bottom, SatoriTheme.Spacing.sm)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .animation(SatoriTheme.Motion.quick, value: isAtBottom)
                 }
             }
 
             Divider()
             composer
-        }
-    }
-
-    /// 滚到底部。延迟到下一帧执行：LazyVStack 在状态变化的同一轮里还没
-    /// 排好新内容，立刻 scrollTo 会按旧布局滚动，出现滚过头、底部空白的
-    /// 错位。流式期间不带动画，避免每个 delta 都做滚动动画的拖影。
-    private func scrollToLatest(_ proxy: ScrollViewProxy) {
-        DispatchQueue.main.async {
-            proxy.scrollTo(responseBottomID, anchor: .bottom)
         }
     }
 
@@ -1050,6 +1007,8 @@ struct LearningInspector: View {
         historyStatus = ""
         do {
             turns = try await sessionStore.turns(for: documentID)
+            // 打开面板默认看最新对话：锚定到底部，历史加载完自动贴底。
+            scrollAnchorID = responseBottomID
         } catch {
             turns = []
             historyStatus = "学习记录暂时无法读取；不影响继续阅读和提问。"
@@ -1089,8 +1048,8 @@ struct LearningInspector: View {
         draftQuestion = request
         draftPageIndex = targetPageIndex
         draftAttachmentCount = submittedAttachments.count
-        followStream = true
-        pendingScrollToLatest = true
+        // 锚定到底部：新消息出现后内容自然向上生长，平滑贴底跟随。
+        scrollAnchorID = responseBottomID
         question = ""
         attachments = []
         attachmentStatus = ""

@@ -46,6 +46,8 @@ enum QwenConfigurationStore {
     private static let modelDefaultsKey = "qwen-model-id"
     private static let configuredDefaultsKey = "qwen-is-configured"
     private static let customPromptDefaultsKey = "qwen-custom-prompt"
+    /// 旧版钥匙串项（未信任当前应用、每次读取都弹授权框）是否已迁移。
+    private static let keychainAccessFixedDefaultsKey = "qwen-keychain-access-trusted"
     private static let storageDirectoryName = "satori"
     private static let keyFilename = "qwen-api-key"
 
@@ -90,6 +92,7 @@ enum QwenConfigurationStore {
             if let savedKey = try readKeychainAPIKey() {
                 apiKey = savedKey
                 try? removeTransitionalKeyFile()
+                migrateKeychainAccessIfNeeded(apiKey: apiKey)
             } else if let migratedKey = try migrateTransitionalKeyFile() {
                 apiKey = migratedKey
             } else {
@@ -150,6 +153,7 @@ enum QwenConfigurationStore {
         UserDefaults.standard.removeObject(forKey: legacyAPIHostDefaultsKey)
         UserDefaults.standard.set(normalizedModelID, forKey: modelDefaultsKey)
         UserDefaults.standard.set(true, forKey: configuredDefaultsKey)
+        UserDefaults.standard.set(true, forKey: keychainAccessFixedDefaultsKey)
         postConfigurationDidChange()
     }
 
@@ -163,6 +167,7 @@ enum QwenConfigurationStore {
         UserDefaults.standard.removeObject(forKey: legacyAPIHostDefaultsKey)
         UserDefaults.standard.removeObject(forKey: modelDefaultsKey)
         UserDefaults.standard.set(false, forKey: configuredDefaultsKey)
+        UserDefaults.standard.removeObject(forKey: keychainAccessFixedDefaultsKey)
         postConfigurationDidChange()
     }
 
@@ -208,17 +213,47 @@ enum QwenConfigurationStore {
             throw KeychainError.status(updateStatus)
         }
 
+        var attributes = keychainLookup
+        attributes[kSecValueData as String] = data
+        attributes[kSecAttrAccess as String] = try makeTrustedAccess()
+        let addStatus = SecItemAdd(attributes as CFDictionary, nil)
+        guard addStatus == errSecSuccess else { throw KeychainError.status(addStatus) }
+    }
+
+    /// 把当前应用加入钥匙串项的信任列表：只有本应用能读，且读取不再弹授权框。
+    /// 旧版用空信任列表创建，导致每次启动读取都弹窗。
+    private static func makeTrustedAccess() throws -> SecAccess {
+        var trustedApp: SecTrustedApplication?
+        let appStatus = SecTrustedApplicationCreateFromPath(nil, &trustedApp)
+        guard appStatus == errSecSuccess, let trustedApp else {
+            throw KeychainError.status(appStatus)
+        }
         var access: SecAccess?
-        let accessStatus = SecAccessCreate("Satori Qwen API Key" as CFString, nil, &access)
+        let accessStatus = SecAccessCreate(
+            "Satori Qwen API Key" as CFString,
+            [trustedApp] as CFArray,
+            &access
+        )
         guard accessStatus == errSecSuccess, let access else {
             throw KeychainError.status(accessStatus)
         }
+        return access
+    }
 
-        var attributes = keychainLookup
-        attributes[kSecValueData as String] = data
-        attributes[kSecAttrAccess as String] = access
-        let addStatus = SecItemAdd(attributes as CFDictionary, nil)
-        guard addStatus == errSecSuccess else { throw KeychainError.status(addStatus) }
+    /// 旧版钥匙串项没把当前应用加入信任列表，每次读取都弹授权框。
+    /// 检测到后删除并用正确的信任列表重建（只弹最后一次窗）；
+    /// 迁移失败不阻塞，下次在设置里保存连接时会用新 access 重写。
+    private static func migrateKeychainAccessIfNeeded(apiKey: String) {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: keychainAccessFixedDefaultsKey) else { return }
+        let deleteStatus = SecItemDelete(keychainLookup as CFDictionary)
+        guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else { return }
+        do {
+            try writeKeychainAPIKey(apiKey)
+            defaults.set(true, forKey: keychainAccessFixedDefaultsKey)
+        } catch {
+            // 保持未迁移状态，等待下次保存连接时重建。
+        }
     }
 
     private static func migrateTransitionalKeyFile() throws -> String? {
