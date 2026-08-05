@@ -35,13 +35,13 @@ enum PDFPageContextExtractor {
         case let .pageRange(range):
             return await extractPageRange(from: url, range: range, qwenConfiguration: qwenConfiguration)
         case .wholeDocument:
-            return extractWholeDocument(from: url)
+            return await extractWholeDocument(from: url)
         case .none:
             return nil
         }
     }
 
-    /// 多页范围：逐页取文字层，扫描页按需 Qwen OCR / 本地 Vision，
+    /// 多页范围：并发取各页文字层，扫描页按需 Qwen OCR / 本地 Vision，
     /// 带【第 N 页】标记拼接成一整段。纯图片页没有可识别文字时跳过。
     private static func extractPageRange(
         from url: URL,
@@ -57,27 +57,21 @@ enum PDFPageContextExtractor {
               document.pageCount > 0 else { return nil }
 
         let limit = 60_000
-        var assembled = ""
         let clampedEnd = min(range.upperBound, document.pageCount - 1)
         guard range.lowerBound <= clampedEnd else { return nil }
 
-        for pageIndex in range.lowerBound...clampedEnd {
-            guard let page = document.page(at: pageIndex) else { continue }
-            var text = ExtractedTextNormalizer.normalize(page.string ?? "")
-            if text.count < 40,
-               let qwenConfiguration,
-               let image = renderPageImage(page, maximumLongestSide: Self.ocrRenderLongestSide),
-               let jpeg = jpegData(from: image),
-               let recognized = await QwenOCRService.recognizeText(in: jpeg, configuration: qwenConfiguration),
-               recognized.count >= 40 {
-                text = ExtractedTextNormalizer.normalize(recognized)
-            }
-            if text.count < 40,
-               let image = renderPageImage(page, maximumLongestSide: Self.ocrRenderLongestSide),
-               let recognized = recognizeText(in: image),
-               recognized.count >= 40 {
-                text = recognized
-            }
+        // 扫描页 OCR 是最大的耗时点，4 路并发显著加快整章/多页理解。
+        let pages = await extractPagesConcurrently(
+            document: document,
+            indices: Array(range.lowerBound...clampedEnd),
+            qwenConfiguration: qwenConfiguration,
+            useQwenOCR: true,
+            ocrBudget: nil,
+            concurrency: 4
+        )
+
+        var assembled = ""
+        for (pageIndex, text) in pages {
             guard !text.isEmpty else { continue }
             assembled += "【第 \(pageIndex + 1) 页】\n\(text)\n\n"
             if assembled.count >= limit { break }
@@ -103,7 +97,8 @@ enum PDFPageContextExtractor {
 
         let text = ExtractedTextNormalizer.normalize(page.string ?? "")
         if text.count >= 40 {
-            return .text(String(text.prefix(24_000)))
+            // 带页码标注返回，和整章/多页提取的格式一致，模型能明确知道是哪一页。
+            return .text("【第 \(pageIndex + 1) 页】\n" + String(text.prefix(24_000)))
         }
 
         // 扫描版 / 图片页：先 Qwen OCR（识别质量更好），失败再本地 Vision，
@@ -177,7 +172,7 @@ enum PDFPageContextExtractor {
         return normalized.isEmpty ? nil : normalized
     }
 
-    private static func extractWholeDocument(from url: URL) -> LearningPageContent? {
+    private static func extractWholeDocument(from url: URL) async -> LearningPageContent? {
         let didAccess = url.startAccessingSecurityScopedResource()
         defer {
             if didAccess { url.stopAccessingSecurityScopedResource() }
@@ -185,21 +180,20 @@ enum PDFPageContextExtractor {
 
         guard let document = PDFDocument(url: url), document.pageCount > 0 else { return nil }
 
-        var assembled = ""
         let limit = 60_000
         // 扫描版全书 OCR 很耗时，最多识别前 40 页就够撑满上下文；
-        // 有文字层的页不 OCR。
-        let maxOCRPages = 40
-        var ocrPages = 0
-        for pageIndex in 0..<document.pageCount {
-            guard let page = document.page(at: pageIndex) else { continue }
-            var text = ExtractedTextNormalizer.normalize(page.string ?? "")
-            if text.count < 40, ocrPages < maxOCRPages,
-               let image = renderPageImage(page, maximumLongestSide: Self.ocrRenderLongestSide),
-               let recognized = recognizeText(in: image) {
-                ocrPages += 1
-                text = recognized
-            }
+        // 有文字层的页不 OCR；本地 Vision 3 路并发。
+        let pages = await extractPagesConcurrently(
+            document: document,
+            indices: Array(0..<document.pageCount),
+            qwenConfiguration: nil,
+            useQwenOCR: false,
+            ocrBudget: OCRBudget(40),
+            concurrency: 3
+        )
+
+        var assembled = ""
+        for (pageIndex, text) in pages {
             guard !text.isEmpty else { continue }
             assembled += "【第 \(pageIndex + 1) 页】\n\(text)\n\n"
             if assembled.count >= limit { break }
@@ -208,5 +202,114 @@ enum PDFPageContextExtractor {
         let trimmed = assembled.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         return .text(String(trimmed.prefix(limit)))
+    }
+
+    // MARK: - 并发提取
+
+    /// 有界并发地提取一批页面的文字（结果按页序返回）。
+    /// 扫描页的 OCR（网络调用或本地 Vision）是主要耗时点，并行处理后
+    /// 整章/整本书提取大幅提速。`useQwenOCR` 控制是否走 Qwen OCR；
+    /// `ocrBudget` 限制整本书场景里做 OCR 的页数上限（nil 表示不限）。
+    private static func extractPagesConcurrently(
+        document: PDFDocument,
+        indices: [Int],
+        qwenConfiguration: QwenConfiguration?,
+        useQwenOCR: Bool,
+        ocrBudget: OCRBudget?,
+        concurrency: Int
+    ) async -> [(pageIndex: Int, text: String)] {
+        var results: [(pageIndex: Int, text: String)] = []
+        results.reserveCapacity(indices.count)
+        let documentBox = PDFDocumentBox(document: document)
+
+        await withTaskGroup(of: (Int, String).self) { group in
+            var iterator = indices.makeIterator()
+            // 先填满并发窗口，之后每完成一个就补一个。
+            for _ in 0..<min(concurrency, indices.count) {
+                if let pageIndex = iterator.next() {
+                    group.addTask {
+                        let text = await Self.extractPageText(
+                            document: documentBox.document,
+                            pageIndex: pageIndex,
+                            qwenConfiguration: qwenConfiguration,
+                            useQwenOCR: useQwenOCR,
+                            ocrBudget: ocrBudget
+                        )
+                        return (pageIndex, text)
+                    }
+                }
+            }
+            while let result = await group.next() {
+                results.append(result)
+                if let next = iterator.next() {
+                    group.addTask {
+                        let text = await Self.extractPageText(
+                            document: documentBox.document,
+                            pageIndex: next,
+                            qwenConfiguration: qwenConfiguration,
+                            useQwenOCR: useQwenOCR,
+                            ocrBudget: ocrBudget
+                        )
+                        return (next, text)
+                    }
+                }
+            }
+        }
+        return results.sorted { $0.pageIndex < $1.pageIndex }
+    }
+
+    /// 提取单页文字：优先文字层；不足时按配置走 Qwen OCR / 本地 Vision。
+    /// OCR 预算（整本书场景）耗尽后不再识别，保持原有行为。
+    private static func extractPageText(
+        document: PDFDocument,
+        pageIndex: Int,
+        qwenConfiguration: QwenConfiguration?,
+        useQwenOCR: Bool,
+        ocrBudget: OCRBudget?
+    ) async -> String {
+        guard let page = document.page(at: pageIndex) else { return "" }
+        var text = ExtractedTextNormalizer.normalize(page.string ?? "")
+        guard text.count < 40, (await ocrBudget?.take()) ?? true else { return text }
+
+        if useQwenOCR, let qwenConfiguration,
+           let image = renderPageImage(page, maximumLongestSide: Self.ocrRenderLongestSide),
+           let jpeg = jpegData(from: image),
+           let recognized = await QwenOCRService.recognizeText(in: jpeg, configuration: qwenConfiguration),
+           recognized.count >= 40 {
+            text = ExtractedTextNormalizer.normalize(recognized)
+        }
+        if text.count < 40,
+           let image = renderPageImage(page, maximumLongestSide: Self.ocrRenderLongestSide),
+           let recognized = recognizeText(in: image),
+           recognized.count >= 40 {
+            text = recognized
+        }
+        return text
+    }
+}
+
+/// PDFDocument 不是 Sendable，但这里只做只读的逐页文字提取，
+/// 用盒子包装以允许并发访问。
+private final class PDFDocumentBox: @unchecked Sendable {
+    let document: PDFDocument
+
+    init(document: PDFDocument) {
+        self.document = document
+    }
+}
+
+/// 整本书场景的 OCR 页数预算：多路并发下原子扣减。
+private actor OCRBudget {
+    private var remaining: Int
+
+    init(_ remaining: Int) {
+        self.remaining = remaining
+    }
+
+    /// 还有预算则扣 1 并返回 true；否则返回 false。
+    func take() -> Bool {
+        guard remaining > 0 else { return false }
+        remaining -= 1
+        return true
     }
 }

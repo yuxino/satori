@@ -511,7 +511,7 @@ private struct FixtureAssistantTransport: AssistantTransport {
         let content = try XCTUnwrap(input.last?["content"] as? [[String: Any]])
         let pageText = content.filter { $0["type"] as? String == "input_text" }
             .compactMap { $0["text"] as? String }
-            .first { $0.hasPrefix("用户正在阅读 PDF 第") }
+            .first { $0.hasPrefix("用户正在阅读教材 PDF") }
         precondition((pageText != nil) == expectsPageContent, "Expected page content presence to match scope")
         let images = content.filter { $0["type"] as? String == "input_image" }
         precondition(images.count == expectedImageCount, "Expected page and attachment image inputs")

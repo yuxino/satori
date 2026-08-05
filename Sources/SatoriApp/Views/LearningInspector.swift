@@ -190,6 +190,13 @@ struct LearningInspector: View {
         .onChange(of: pageIndex) { _, _ in
             // 用户翻页后，之前选中的上下文不再指向当前阅读位置。
             pendingSelectionPage = nil
+            // 章节选择自动同步阅读位置：翻到别的章节时取消手动选择，跟随当前章节。
+            if let selectedChapterID,
+               let selected = chapters.first(where: { $0.id == selectedChapterID }),
+               let current = currentChapter,
+               selected.id != current.id {
+                self.selectedChapterID = nil
+            }
         }
     }
 
@@ -798,6 +805,8 @@ struct LearningInspector: View {
     private func answerCard(turn: LearningTurn, isActive: Bool) -> some View {
         let isStreaming = isActive && isStreamingAnswer
         return VStack(alignment: .leading, spacing: 12) {
+            // 回答直接平铺在纸面上：不再用白色卡片气泡，也没有黄色强调描边。
+            Divider()
             answerHeader(
                 sourceKind: turn.sourceKind,
                 isStreaming: isStreaming,
@@ -849,7 +858,7 @@ struct LearningInspector: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .satoriPaper(radius: SatoriTheme.Radius.md, padding: SatoriTheme.Spacing.lg, emphasized: isStreaming)
+        .padding(.top, SatoriTheme.Spacing.xs)
     }
 
     /// A page in the margin notes: "第 N 页" header followed by that page's turns.
@@ -1110,16 +1119,34 @@ struct LearningInspector: View {
     }
 
     /// 「章节」上下文里的章节选择器：默认当前章节，可任选一章。
+    /// 按章分组、章下用子菜单展开节/小节，条目再多也不会变成一长条平铺列表。
     private var chapterPickerMenu: some View {
         Menu {
-            ForEach(chapters) { chapter in
-                Button {
-                    selectedChapterID = chapter.id
-                } label: {
-                    if chapter.id == activeChapter?.id {
-                        Label(chapterPickerLabel(chapter), systemImage: "checkmark")
-                    } else {
-                        Text(chapterPickerLabel(chapter))
+            ForEach(groupedChapters, id: \.chapter.id) { group in
+                if group.sections.isEmpty {
+                    Button {
+                        selectedChapterID = group.chapter.id
+                    } label: {
+                        chapterRowLabel(group.chapter)
+                    }
+                } else {
+                    Menu {
+                        // 子菜单第一项是整章，下面再展开这一章的节/小节。
+                        Button {
+                            selectedChapterID = group.chapter.id
+                        } label: {
+                            chapterRowLabel(group.chapter)
+                        }
+                        Divider()
+                        ForEach(group.sections) { section in
+                            Button {
+                                selectedChapterID = section.id
+                            } label: {
+                                chapterRowLabel(section)
+                            }
+                        }
+                    } label: {
+                        chapterRowLabel(group.chapter)
                     }
                 }
             }
@@ -1130,14 +1157,56 @@ struct LearningInspector: View {
         .menuStyle(.borderlessButton)
         .font(.caption)
         .foregroundStyle(.secondary)
-        .help("选择要提问的章节")
+        .help("选择要提问的章节；翻页后会自动跟随当前章节")
     }
 
-    private func chapterPickerLabel(_ chapter: BookChapter) -> String {
-        if let range = chapterRange(for: chapter) {
-            return "\(chapter.title)（第 \(range.lowerBound + 1)–\(range.upperBound + 1) 页）"
+    /// 章（depth ≤ 1）作为一级菜单，其下到下一章之前的所有条目归入该章的子菜单。
+    private var groupedChapters: [(chapter: BookChapter, sections: [BookChapter])] {
+        var result: [(chapter: BookChapter, sections: [BookChapter])] = []
+        var current: BookChapter?
+        var sections: [BookChapter] = []
+        for chapter in chapters {
+            if chapter.depth <= 1 {
+                if let current {
+                    result.append((current, sections))
+                }
+                current = chapter
+                sections = []
+            } else {
+                sections.append(chapter)
+            }
         }
-        return chapter.title
+        if let current {
+            result.append((current, sections))
+        }
+        return result
+    }
+
+    private func chapterRowLabel(_ chapter: BookChapter) -> some View {
+        HStack(spacing: 6) {
+            if chapter.id == activeChapter?.id {
+                Image(systemName: "checkmark")
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 12)
+            } else {
+                Color.clear.frame(width: 12, height: 1)
+            }
+            Text(chapter.title)
+                .font(.caption)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text(chapterPageRangeLabel(chapter))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.leading, CGFloat(min(max(chapter.depth - 1, 0), 3)) * 10)
+    }
+
+    private func chapterPageRangeLabel(_ chapter: BookChapter) -> String {
+        if let range = BookChapter.pageRange(for: chapter, in: chapters, pageCount: pageCount) {
+            return "\(range.lowerBound + 1)–\(range.upperBound + 1)"
+        }
+        return "\(chapter.pageIndex + 1)"
     }
 
     /// 当前页所属的章节（最后一个起始页 ≤ 当前页）。
@@ -1151,19 +1220,6 @@ struct LearningInspector: View {
             return chapter
         }
         return currentChapter
-    }
-
-    /// 章节页码范围（0 起、含两端）：本章起始页到下一章起始页前 1 页，最后一章到全书末页。
-    private func chapterRange(for chapter: BookChapter) -> ClosedRange<Int>? {
-        guard let index = chapters.firstIndex(where: { $0.id == chapter.id }) else { return nil }
-        let start = chapter.pageIndex
-        let end: Int
-        if index + 1 < chapters.count {
-            end = max(start, chapters[index + 1].pageIndex - 1)
-        } else {
-            end = pageCount - 1
-        }
-        return start...end
     }
 
     /// 切到「多页」时默认从当前页开始，再往前后扩展。
@@ -1189,7 +1245,8 @@ struct LearningInspector: View {
         case .none: "不带上下文"
         case .page: "当前页"
         case .chapter:
-            if let activeChapter, let range = chapterRange(for: activeChapter) {
+            if let activeChapter,
+               let range = BookChapter.pageRange(for: activeChapter, in: chapters, pageCount: pageCount) {
                 "章节 · \(activeChapter.title)（第 \(range.lowerBound + 1)–\(range.upperBound + 1) 页）"
             } else {
                 "章节"
@@ -1319,7 +1376,8 @@ struct LearningInspector: View {
             case .page:
                 effectiveScope = .page
             case .chapter:
-                if let activeChapter, let range = chapterRange(for: activeChapter) {
+                if let activeChapter,
+                   let range = BookChapter.pageRange(for: activeChapter, in: chapters, pageCount: pageCount) {
                     effectiveScope = .pageRange(start: range.lowerBound, end: range.upperBound)
                 } else {
                     effectiveScope = .page
@@ -1443,6 +1501,13 @@ struct LearningInspector: View {
             requestTask = nil
             guard let latestResponse else {
                 restoreSubmittedAttachments(submittedAttachments)
+                // 流里一条消息都没有（连接异常、空响应）：给明确提示，而不是
+                // 留下一张空白卡片让用户以为应用卡死、只能重启。
+                response = LearningResponse(
+                    text: "没有收到回答，请重试。",
+                    sourceKind: .inference,
+                    pageIndex: targetPageIndex
+                )
                 return
             }
             if latestResponse.sourceKind == .inference {
@@ -1572,16 +1637,27 @@ struct LearningInspector: View {
     /// returns whether it consumed the event; when there is no image we let the
     /// text editor paste text as usual.
     private func pasteFromPasteboard() -> Bool {
-        let pasted = LearningImageAttachmentLoader.load(from: .general)
-        guard !pasted.isEmpty else { return false }
+        // 主线程只快速取剪贴板对象；压缩/缩放放到后台并行做，贴大图不卡界面。
+        let images = NSPasteboard.general.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage] ?? []
+        let valid = images.enumerated().filter { $0.element.size.width > 0 && $0.element.size.height > 0 }
+        guard !valid.isEmpty else { return false }
 
         let remaining = max(0, 4 - attachments.count)
         guard remaining > 0 else {
             attachmentStatus = "每次最多附加 4 张图片，粘贴的图片没有加入。"
             return true
         }
-        attachments.append(contentsOf: pasted.prefix(remaining))
-        attachmentStatus = pasted.count > remaining ? "每次最多附加 4 张图片，其余图片没有加入。" : ""
+        let selected = Array(valid.prefix(remaining))
+        let extraCount = valid.count - selected.count
+        let items = selected.map { (name: "粘贴图片 \($0.offset + 1)", image: $0.element) }
+        Task {
+            let loaded = await LearningImageAttachmentLoader.normalizeConcurrently(items)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                attachments.append(contentsOf: loaded)
+                attachmentStatus = extraCount > 0 ? "每次最多附加 4 张图片，其余图片没有加入。" : ""
+            }
+        }
         return true
     }
 
@@ -1590,8 +1666,26 @@ struct LearningInspector: View {
             let urls = try result.get()
             let remaining = max(0, 4 - attachments.count)
             let selected = Array(urls.prefix(remaining))
-            attachments.append(contentsOf: try selected.map(LearningImageAttachmentLoader.load))
-            attachmentStatus = urls.count > remaining ? "每次最多附加 4 张图片，其余图片没有加入。" : ""
+            let extraCount = urls.count - selected.count
+            guard !selected.isEmpty else {
+                attachmentStatus = extraCount > 0 ? "每次最多附加 4 张图片，其余图片没有加入。" : ""
+                return
+            }
+            // 读取与压缩在后台并行，多张大图也不会卡住输入框。
+            Task {
+                let loaded = await Task.detached(priority: .userInitiated) {
+                    await LearningImageAttachmentLoader.loadConcurrently(from: selected)
+                }.value
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    if loaded.isEmpty {
+                        attachmentStatus = "这些图片无法读取，请换一张常见格式的图片。"
+                    } else {
+                        attachments.append(contentsOf: loaded)
+                        attachmentStatus = extraCount > 0 ? "每次最多附加 4 张图片，其余图片没有加入。" : ""
+                    }
+                }
+            }
         } catch CocoaError.userCancelled {
             attachmentStatus = ""
         } catch {

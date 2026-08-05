@@ -39,6 +39,42 @@ enum LearningImageAttachmentLoader {
         }
     }
 
+    /// 后台并行压缩/缩放一批图片，结果按输入顺序返回；单张失败会被跳过。
+    static func normalizeConcurrently(_ items: [(name: String, image: NSImage)]) async -> [LearningImageAttachment] {
+        let pairs = await withTaskGroup(of: (Int, LearningImageAttachment?).self) { group in
+            var collected: [(Int, LearningImageAttachment?)] = []
+            for (index, item) in items.enumerated() {
+                group.addTask {
+                    let attachment = try? normalize(item.image, name: item.name)
+                    return (index, attachment)
+                }
+            }
+            for await pair in group {
+                collected.append(pair)
+            }
+            return collected
+        }
+        return pairs.sorted { $0.0 < $1.0 }.compactMap { $0.1 }
+    }
+
+    /// 后台并行读取并压缩一批图片文件，结果按输入顺序返回；单张失败会被跳过。
+    static func loadConcurrently(from urls: [URL]) async -> [LearningImageAttachment] {
+        let pairs = await withTaskGroup(of: (Int, LearningImageAttachment?).self) { group in
+            var collected: [(Int, LearningImageAttachment?)] = []
+            for (index, url) in urls.enumerated() {
+                group.addTask {
+                    let attachment = try? load(from: url)
+                    return (index, attachment)
+                }
+            }
+            for await pair in group {
+                collected.append(pair)
+            }
+            return collected
+        }
+        return pairs.sorted { $0.0 < $1.0 }.compactMap { $0.1 }
+    }
+
     private static func normalize(_ source: NSImage, name: String) throws -> LearningImageAttachment {
         let scale = min(1, maximumDimension / max(source.size.width, source.size.height))
         let targetSize = NSSize(

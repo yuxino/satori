@@ -24,11 +24,11 @@ import SwiftUI
 enum SatoriTheme {
     // MARK: Adaptive colors — single source of truth
 
-    /// Warm ivory paper for the reading / learning surface. The "book".
+    /// White paper for the reading / learning surface（用户要求纯白，不要米白/奶油色）。
     static let paperColor = NSColor(name: "SatoriPaper") { appearance in
         appearance.isDarkMode
             ? NSColor(srgbRed: 0.098, green: 0.092, blue: 0.118, alpha: 1)   // #191821 warm dark
-            : NSColor(srgbRed: 0.965, green: 0.949, blue: 0.918, alpha: 1)   // #F6F2EA warm ivory
+            : NSColor(white: 1.0, alpha: 1)                                  // pure white
     }
     static let paper = Color(nsColor: paperColor)
 

@@ -129,6 +129,7 @@ public enum ModelCapability: String, CaseIterable, Codable, Sendable {
 public enum AssistantError: LocalizedError, Sendable, Equatable {
     case invalidResponse
     case emptyOutput
+    case timeout
     case api(statusCode: Int?, message: String)
     case capabilityUnavailable(capability: ModelCapability, modelID: String)
     case reviewParsing(skippedLines: Int)
@@ -140,6 +141,8 @@ public enum AssistantError: LocalizedError, Sendable, Equatable {
             "百炼返回了无法识别的响应。"
         case .emptyOutput:
             "Qwen 没有返回可显示的文字。"
+        case .timeout:
+            "回答超时（长时间没有新内容），请重试。"
         case let .api(statusCode, message):
             if let statusCode {
                 "百炼请求失败（HTTP \(statusCode)）：\(message)"
@@ -166,10 +169,14 @@ public enum AssistantError: LocalizedError, Sendable, Equatable {
 public struct QwenLearningAssistant: LearningAssistant {
     public static let defaultModelID = "qwen3.8-max"
     public static let defaultAPIHost = URL(string: "https://dashscope.aliyuncs.com/compatible-mode/v1")!
+    /// 流式回答的总超时：连接挂起（既不返回数据也不结束）时强制结束，
+    /// 避免界面永远停在等待状态、只能重启应用。
+    public static let streamTotalTimeout: Duration = .seconds(180)
     /// 回答问题的默认系统提示词。用户可在设置里用自定义 prompt 覆盖。
     public static let defaultLearningInstructions = """
     你是 Satori 的学习理解助手。默认使用简体中文，直接回答问题。
-    优先依据用户提供的当前 PDF 页面；不要假装看到了未提供的页面。
+    优先依据用户提供的 PDF 原文；原文可能包含一页或多页，每段以【第 N 页】标注，
+    请综合所有提供的页面回答，不要假装看到了未提供的页面。
     可以参考前面的本地学习问答理解“这里”“刚才”等追问，但本轮页面证据优先。
     历史对话中提到的图片当前不可见，若需图片细节请用户重新附图。
     回答依次包含“原文依据”“解释”；只有确实超出原文时才增加“补充推断”，并明确标注。
@@ -254,41 +261,53 @@ public struct QwenLearningAssistant: LearningAssistant {
                 do {
                     let budget = applyAttachmentBudget()
                     let urlRequest = try makeURLRequest(question: request, pageIndex: pageIndex, streamsResponse: true, imageBudget: budget)
-                    var streamedText = ""
-                    var didComplete = false
+                    let state = StreamState()
 
-                    for try await data in transport.stream(urlRequest) {
-                        try Task.checkCancellation()
-                        let event = try JSONDecoder().decode(ResponsesStreamEvent.self, from: data)
-                        switch event.type {
-                        case "response.output_text.delta":
-                            guard let delta = event.delta, !delta.isEmpty else { continue }
-                            streamedText += delta
-                            continuation.yield(
-                                LearningResponse(
-                                    text: streamedText,
-                                    sourceKind: predictedSourceKind,
-                                    pageIndex: pageIndex,
-                                    attachmentNotice: budget.notice
-                                )
-                            )
-                        case "response.completed", "response.incomplete":
-                            guard let envelope = event.response else { throw AssistantError.invalidResponse }
-                            continuation.yield(try makeLearningResponse(from: envelope, pageIndex: pageIndex, imageBudget: budget))
-                            didComplete = true
-                        case "response.failed":
-                            let message = event.response?.error?.message
-                                ?? event.error?.message
-                                ?? "Qwen 未能完成这次回答。"
-                            throw AssistantError.api(statusCode: nil, message: message)
-                        default:
-                            continue
+                    // 超时保护：总时长超过上限（连接挂起、服务端既不返回也不结束）时
+                    // 抛 AssistantError.timeout，由外层转成可读错误，界面不再无限等待。
+                    try await withThrowingTaskGroup(of: Void.self) { group in
+                        group.addTask {
+                            try await Task.sleep(for: Self.streamTotalTimeout)
+                            throw AssistantError.timeout
                         }
+                        group.addTask {
+                            for try await data in transport.stream(urlRequest) {
+                                try Task.checkCancellation()
+                                let event = try JSONDecoder().decode(ResponsesStreamEvent.self, from: data)
+                                switch event.type {
+                                case "response.output_text.delta":
+                                    guard let delta = event.delta, !delta.isEmpty else { continue }
+                                    state.text += delta
+                                    continuation.yield(
+                                        LearningResponse(
+                                            text: state.text,
+                                            sourceKind: predictedSourceKind,
+                                            pageIndex: pageIndex,
+                                            attachmentNotice: budget.notice
+                                        )
+                                    )
+                                case "response.completed", "response.incomplete":
+                                    guard let envelope = event.response else { throw AssistantError.invalidResponse }
+                                    continuation.yield(try makeLearningResponse(from: envelope, pageIndex: pageIndex, imageBudget: budget))
+                                    state.didComplete = true
+                                case "response.failed":
+                                    let message = event.response?.error?.message
+                                        ?? event.error?.message
+                                        ?? "Qwen 未能完成这次回答。"
+                                    throw AssistantError.api(statusCode: nil, message: message)
+                                default:
+                                    continue
+                                }
+                            }
+                        }
+                        // 完成或超时，任一先结束就收尾。
+                        try await group.next()
+                        group.cancelAll()
                     }
 
                     try Task.checkCancellation()
-                    if !didComplete {
-                        let finalText = streamedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !state.didComplete {
+                        let finalText = state.text.trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !finalText.isEmpty else { throw AssistantError.emptyOutput }
                         // 没有收到完成事件就断流：按已收内容收尾并标记截断。
                         continuation.yield(
@@ -465,7 +484,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         case .text(let text)?:
             return .init(
                 type: "input_text",
-                text: "用户正在阅读 PDF 第 \(pageNumber) 页。\n\n当前页原文：\n\(text)",
+                text: "用户正在阅读教材 PDF。\n\n以下是可参考的 PDF 原文（可能包含一页或多页，每段以【第 N 页】标注）：\n\(text)",
                 imageURL: nil
             )
         case .imageJPEG(let data)?:
@@ -707,6 +726,13 @@ private struct URLSessionAssistantTransport: AssistantTransport {
             continuation.onTermination = { @Sendable _ in worker.cancel() }
         }
     }
+}
+
+/// 流式处理期间的收尾状态：只在流式任务里写、主流程读，单写者，
+/// 用 @unchecked Sendable 避免跨并发闭包捕获可变变量。
+private final class StreamState: @unchecked Sendable {
+    var text = ""
+    var didComplete = false
 }
 
 private struct ResponsesRequest: Encodable {

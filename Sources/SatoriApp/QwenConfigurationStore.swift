@@ -46,8 +46,9 @@ enum QwenConfigurationStore {
     private static let modelDefaultsKey = "qwen-model-id"
     private static let configuredDefaultsKey = "qwen-is-configured"
     private static let customPromptDefaultsKey = "qwen-custom-prompt"
-    /// 旧版钥匙串项（未信任当前应用、每次读取都弹授权框）是否已迁移。
-    private static let keychainAccessFixedDefaultsKey = "qwen-keychain-access-trusted"
+    /// 创建/重建钥匙串项时应用的签名标识（designated requirement）。
+    /// 重签或换证书后该值变化，据此自动重建 ACL，避免授权弹窗反复出现。
+    private static let keychainACLRequirementDefaultsKey = "qwen-keychain-acl-requirement"
     private static let storageDirectoryName = "satori"
     private static let keyFilename = "qwen-api-key"
 
@@ -92,7 +93,7 @@ enum QwenConfigurationStore {
             if let savedKey = try readKeychainAPIKey() {
                 apiKey = savedKey
                 try? removeTransitionalKeyFile()
-                migrateKeychainAccessIfNeeded(apiKey: apiKey)
+                ensureKeychainACL(apiKey: apiKey)
             } else if let migratedKey = try migrateTransitionalKeyFile() {
                 apiKey = migratedKey
             } else {
@@ -153,7 +154,7 @@ enum QwenConfigurationStore {
         UserDefaults.standard.removeObject(forKey: legacyAPIHostDefaultsKey)
         UserDefaults.standard.set(normalizedModelID, forKey: modelDefaultsKey)
         UserDefaults.standard.set(true, forKey: configuredDefaultsKey)
-        UserDefaults.standard.set(true, forKey: keychainAccessFixedDefaultsKey)
+        recordACLRequirement()
         postConfigurationDidChange()
     }
 
@@ -167,7 +168,7 @@ enum QwenConfigurationStore {
         UserDefaults.standard.removeObject(forKey: legacyAPIHostDefaultsKey)
         UserDefaults.standard.removeObject(forKey: modelDefaultsKey)
         UserDefaults.standard.set(false, forKey: configuredDefaultsKey)
-        UserDefaults.standard.removeObject(forKey: keychainAccessFixedDefaultsKey)
+        UserDefaults.standard.removeObject(forKey: keychainACLRequirementDefaultsKey)
         postConfigurationDidChange()
     }
 
@@ -240,20 +241,44 @@ enum QwenConfigurationStore {
         return access
     }
 
-    /// 旧版钥匙串项没把当前应用加入信任列表，每次读取都弹授权框。
-    /// 检测到后删除并用正确的信任列表重建（只弹最后一次窗）；
-    /// 迁移失败不阻塞，下次在设置里保存连接时会用新 access 重写。
-    private static func migrateKeychainAccessIfNeeded(apiKey: String) {
-        let defaults = UserDefaults.standard
-        guard !defaults.bool(forKey: keychainAccessFixedDefaultsKey) else { return }
+    /// 保证钥匙串项的访问控制信任当前应用：签名标识与记录不一致时
+    /// （重新打包、换证书、从旧构建迁移过来），删除并用当前应用重建。
+    /// 重建只发生在签名变化后的第一次读取（最多弹一次授权框），之后保持静默。
+    /// 拿不到签名标识（未签名调试构建）时跳过，避免反复重建。
+    private static func ensureKeychainACL(apiKey: String) {
+        guard let current = currentAppRequirement() else { return }
+        let stored = UserDefaults.standard.string(forKey: keychainACLRequirementDefaultsKey)
+        guard stored != current else { return }
+
         let deleteStatus = SecItemDelete(keychainLookup as CFDictionary)
         guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else { return }
         do {
             try writeKeychainAPIKey(apiKey)
-            defaults.set(true, forKey: keychainAccessFixedDefaultsKey)
+            guard try readKeychainAPIKey() == apiKey else { return }
+            UserDefaults.standard.set(current, forKey: keychainACLRequirementDefaultsKey)
         } catch {
-            // 保持未迁移状态，等待下次保存连接时重建。
+            // 重建失败：保持现状，下次读取或保存连接时再试。
         }
+    }
+
+    /// 当前应用的签名标识（designated requirement）。签名稳定时跨构建不变，
+    /// 未签名进程（如调试构建）返回 nil。
+    private static func currentAppRequirement() -> String? {
+        var code: SecCode?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return nil }
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
+        var requirement: SecRequirement?
+        guard SecCodeCopyDesignatedRequirement(staticCode, [], &requirement) == errSecSuccess, let requirement else { return nil }
+        var text: CFString?
+        guard SecRequirementCopyString(requirement, [], &text) == errSecSuccess else { return nil }
+        return text as String?
+    }
+
+    /// 保存连接后记录当前签名标识，与重建的 ACL 保持一致。
+    private static func recordACLRequirement() {
+        guard let current = currentAppRequirement() else { return }
+        UserDefaults.standard.set(current, forKey: keychainACLRequirementDefaultsKey)
     }
 
     private static func migrateTransitionalKeyFile() throws -> String? {

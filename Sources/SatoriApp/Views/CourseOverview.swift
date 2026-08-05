@@ -126,6 +126,25 @@ struct BookChapter: Identifiable, Equatable {
     let pageIndex: Int
     /// outline 里的层级：0 为章，1 为节，2 为小节；课程目录回退时均为 0。
     let depth: Int
+
+    /// 层级感知的页码范围（0 起、含两端）：从自己的起始页到**下一个同级或更高级**
+    /// 条目的起始页前 1 页。这样选「第一章」得到整章（含其下所有节），
+    /// 选「第一节」只得到这一节。
+    static func pageRange(
+        for chapter: BookChapter,
+        in chapters: [BookChapter],
+        pageCount: Int
+    ) -> ClosedRange<Int>? {
+        guard let index = chapters.firstIndex(where: { $0.id == chapter.id }) else { return nil }
+        let start = chapter.pageIndex
+        let end: Int
+        if let nextSibling = chapters.dropFirst(index + 1).first(where: { $0.depth <= chapter.depth }) {
+            end = max(start, nextSibling.pageIndex - 1)
+        } else {
+            end = pageCount - 1
+        }
+        return start...end
+    }
 }
 
 private struct DocumentWorkspace: View {
@@ -383,6 +402,7 @@ private struct DocumentWorkspace: View {
                     TOCDrawer(
                         chapters: chapters,
                         currentChapterID: currentChapter?.id,
+                        pageCount: pageCount,
                         onJump: { targetPage in
                             currentPageIndex = min(max(targetPage, 0), pageCount - 1)
                             pageInput = ""
@@ -597,6 +617,7 @@ private struct DocumentWorkspace: View {
 private struct TOCDrawer: View {
     let chapters: [BookChapter]
     let currentChapterID: Int?
+    let pageCount: Int
     let onJump: (Int) -> Void
     let onClose: () -> Void
 
@@ -675,7 +696,7 @@ private struct TOCDrawer: View {
                     .truncationMode(.tail)
                     .foregroundStyle(isCurrent ? SatoriTheme.accent : Color.primary)
                 Spacer(minLength: 4)
-                Text("\(chapter.pageIndex + 1)")
+                Text(pageRangeLabel(chapter))
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
@@ -686,6 +707,13 @@ private struct TOCDrawer: View {
             .background(isCurrent ? SatoriTheme.accentWash.opacity(0.65) : Color.clear)
         }
         .buttonStyle(.plain)
+    }
+
+    private func pageRangeLabel(_ chapter: BookChapter) -> String {
+        if let range = BookChapter.pageRange(for: chapter, in: chapters, pageCount: pageCount) {
+            return "\(range.lowerBound + 1)–\(range.upperBound + 1)"
+        }
+        return "\(chapter.pageIndex + 1)"
     }
 }
 
@@ -747,8 +775,8 @@ private enum OutlinePageMatcher {
         into entries: inout [(title: String, pageIndex: Int, depth: Int)]
     ) {
         let page = node.destination?.page ?? firstPage(of: node)
-        if let page {
-            entries.append((node.label ?? "", pdf.index(for: page), depth))
+        if let page, let label = node.label, !label.isEmpty {
+            entries.append((label, pdf.index(for: page), depth))
         }
         for index in 0..<node.numberOfChildren {
             if let child = node.child(at: index) {
