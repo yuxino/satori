@@ -45,6 +45,7 @@ struct LearningInspector: View {
     enum ContextMode: String, CaseIterable, Identifiable {
         case none
         case page
+        case chapter
         case pageRange
         case wholeDocument
 
@@ -55,6 +56,8 @@ struct LearningInspector: View {
     let pageIndex: Int
     let pageCount: Int
     let documentURL: URL
+    /// 这本书的章节导览（PDF outline 优先，课程目录回退）；为空时「章节」选项隐藏。
+    let chapters: [BookChapter]
     let onNavigateToPage: (Int) -> Void
     let onClose: () -> Void
 
@@ -67,6 +70,8 @@ struct LearningInspector: View {
     /// 「多页」范围（1 起，UI 显示用；发送时转成 0 起）。
     @State private var rangeStart = 1
     @State private var rangeEnd = 1
+    /// 「章节」上下文里用户选中的章节 id；nil 表示跟随当前章节。
+    @State private var selectedChapterID: Int?
     /// 上次「问 AI」选中的页码：文本已填入输入框等用户编辑/追问，
     /// 发送时用它锚定上下文；用户翻页或自行改写后失效。
     @State private var pendingSelectionPage: Int?
@@ -1072,6 +1077,9 @@ struct LearningInspector: View {
                 Picker("参考上下文", selection: contextModeBinding) {
                     Label("不带上下文", systemImage: "text.bubble").tag(ContextMode.none)
                     Label("当前页", systemImage: "doc.text").tag(ContextMode.page)
+                    if !chapters.isEmpty {
+                        Label("章节", systemImage: "list.bullet.rectangle").tag(ContextMode.chapter)
+                    }
                     Label("多页…", systemImage: "doc.on.doc").tag(ContextMode.pageRange)
                     Label("整本书", systemImage: "books.vertical").tag(ContextMode.wholeDocument)
                 }
@@ -1083,6 +1091,10 @@ struct LearningInspector: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .help("提问时给 AI 的参考内容。默认不带上下文，需要时再选。")
+
+            if contextMode == .chapter, !chapters.isEmpty {
+                chapterPickerMenu
+            }
 
             if contextMode == .pageRange {
                 Stepper("起始页", value: $rangeStart, in: 1...max(1, rangeEnd - 1))
@@ -1097,11 +1109,71 @@ struct LearningInspector: View {
         }
     }
 
+    /// 「章节」上下文里的章节选择器：默认当前章节，可任选一章。
+    private var chapterPickerMenu: some View {
+        Menu {
+            ForEach(chapters) { chapter in
+                Button {
+                    selectedChapterID = chapter.id
+                } label: {
+                    if chapter.id == activeChapter?.id {
+                        Label(chapterPickerLabel(chapter), systemImage: "checkmark")
+                    } else {
+                        Text(chapterPickerLabel(chapter))
+                    }
+                }
+            }
+        } label: {
+            Label(activeChapter?.title ?? "选择章节", systemImage: "list.bullet.rectangle")
+                .lineLimit(1)
+        }
+        .menuStyle(.borderlessButton)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .help("选择要提问的章节")
+    }
+
+    private func chapterPickerLabel(_ chapter: BookChapter) -> String {
+        if let range = chapterRange(for: chapter) {
+            return "\(chapter.title)（第 \(range.lowerBound + 1)–\(range.upperBound + 1) 页）"
+        }
+        return chapter.title
+    }
+
+    /// 当前页所属的章节（最后一个起始页 ≤ 当前页）。
+    private var currentChapter: BookChapter? {
+        chapters.last { $0.pageIndex <= pageIndex }
+    }
+
+    /// 实际使用的章节：用户选中的优先，否则跟随当前章节。
+    private var activeChapter: BookChapter? {
+        if let selectedChapterID, let chapter = chapters.first(where: { $0.id == selectedChapterID }) {
+            return chapter
+        }
+        return currentChapter
+    }
+
+    /// 章节页码范围（0 起、含两端）：本章起始页到下一章起始页前 1 页，最后一章到全书末页。
+    private func chapterRange(for chapter: BookChapter) -> ClosedRange<Int>? {
+        guard let index = chapters.firstIndex(where: { $0.id == chapter.id }) else { return nil }
+        let start = chapter.pageIndex
+        let end: Int
+        if index + 1 < chapters.count {
+            end = max(start, chapters[index + 1].pageIndex - 1)
+        } else {
+            end = pageCount - 1
+        }
+        return start...end
+    }
+
     /// 切到「多页」时默认从当前页开始，再往前后扩展。
     private var contextModeBinding: Binding<ContextMode> {
         Binding(
             get: { contextMode },
             set: { newMode in
+                if newMode == .chapter {
+                    selectedChapterID = nil // 重新选择时默认跟随当前章节
+                }
                 if newMode == .pageRange {
                     let anchor = min(max(pageIndex + 1, 1), pageCount)
                     rangeStart = anchor
@@ -1116,6 +1188,12 @@ struct LearningInspector: View {
         switch contextMode {
         case .none: "不带上下文"
         case .page: "当前页"
+        case .chapter:
+            if let activeChapter, let range = chapterRange(for: activeChapter) {
+                "章节 · \(activeChapter.title)（第 \(range.lowerBound + 1)–\(range.upperBound + 1) 页）"
+            } else {
+                "章节"
+            }
         case .pageRange:
             rangeStart == rangeEnd ? "第 \(rangeStart) 页" : "第 \(rangeStart)–\(rangeEnd) 页"
         case .wholeDocument: "整本书"
@@ -1126,6 +1204,7 @@ struct LearningInspector: View {
         switch contextMode {
         case .none: "text.bubble"
         case .page: "doc.text"
+        case .chapter: "list.bullet.rectangle"
         case .pageRange: "doc.on.doc"
         case .wholeDocument: "books.vertical"
         }
@@ -1172,6 +1251,8 @@ struct LearningInspector: View {
         switch contextMode {
         case .none: scopeText = "不带上下文"
         case .page: scopeText = "第 \(pageIndex + 1) 页"
+        case .chapter:
+            scopeText = activeChapter?.title ?? "章节"
         case .pageRange: scopeText = "第 \(rangeStart)–\(rangeEnd) 页"
         case .wholeDocument: scopeText = "整本书"
         }
@@ -1180,6 +1261,11 @@ struct LearningInspector: View {
 
     private var streamingStatusText: String {
         if allowsWebSearch { return "正在联网搜索资料并组织回答…" }
+        if contextMode == .chapter {
+            if case .pageRange = draftContextScope {
+                return "正在通读章节内容找依据…"
+            }
+        }
         return switch draftContextScope {
         case .none: "正在思考…"
         case .page: "正在理解当前页…"
@@ -1232,6 +1318,12 @@ struct LearningInspector: View {
                 effectiveScope = .none
             case .page:
                 effectiveScope = .page
+            case .chapter:
+                if let activeChapter, let range = chapterRange(for: activeChapter) {
+                    effectiveScope = .pageRange(start: range.lowerBound, end: range.upperBound)
+                } else {
+                    effectiveScope = .page
+                }
             case .pageRange:
                 let start = max(1, min(rangeStart, pageCount))
                 let end = max(start, min(rangeEnd, pageCount))

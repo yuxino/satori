@@ -120,10 +120,12 @@ struct CourseOverview: View {
 }
 
 /// 章节导览里的一章：标题 + 起始页（0 起）。id 用章节序号，避免同页多个标题冲突。
-private struct BookChapter: Identifiable, Equatable {
+struct BookChapter: Identifiable, Equatable {
     let id: Int
     let title: String
     let pageIndex: Int
+    /// outline 里的层级：0 为章，1 为节，2 为小节；课程目录回退时均为 0。
+    let depth: Int
 }
 
 private struct DocumentWorkspace: View {
@@ -140,6 +142,8 @@ private struct DocumentWorkspace: View {
     @State private var pageInput = ""
     /// 这本书的章节导览（PDF outline 优先，课程目录回退）；打开时一次性加载。
     @State private var chapters: [BookChapter] = []
+    /// 目录快速跳转浮层是否显示（⌘T 或点目录按钮）。
+    @State private var showsTOC = false
     @State private var showsInspector = true
     /// 最近一次上报的页内偏移（0…1），随 onPositionChanged 更新；布局切换
     /// 重建 PDFReaderView 时用它恢复位置，避免回落到持久化里的旧页码。
@@ -226,12 +230,17 @@ private struct DocumentWorkspace: View {
     /// 章节来源：优先 PDF 自带 outline；没有 outline 时回退到这门课学习目录里
     /// 已关联页码的章节项；两者都没有则返回空（阅读栏不显示目录）。
     private static func makeChapters(
-        entries: [(title: String, pageIndex: Int)],
+        entries: [(title: String, pageIndex: Int, depth: Int)],
         directory: [LearningDirectoryItem]
     ) -> [BookChapter] {
         if !entries.isEmpty {
             return entries.enumerated().map {
-                BookChapter(id: $0.offset, title: $0.element.title, pageIndex: $0.element.pageIndex)
+                BookChapter(
+                    id: $0.offset,
+                    title: $0.element.title,
+                    pageIndex: $0.element.pageIndex,
+                    depth: $0.element.depth
+                )
             }
         }
         return directory.compactMap { item -> (title: String, pageIndex: Int)? in
@@ -239,7 +248,9 @@ private struct DocumentWorkspace: View {
             return (item.title, pageIndex)
         }
         .enumerated()
-        .map { BookChapter(id: $0.offset, title: $0.element.title, pageIndex: $0.element.pageIndex) }
+        .map {
+            BookChapter(id: $0.offset, title: $0.element.title, pageIndex: $0.element.pageIndex, depth: 0)
+        }
     }
 
     /// 当前页所属的章节：最后一个起始页 ≤ 当前页的章节。
@@ -254,7 +265,7 @@ private struct DocumentWorkspace: View {
 
     /// 用当前 PDF 的 outline 补齐课程目录项缺失的页码并持久化。
     /// 全部已关联（此前已持久化）或 PDF 没有 outline 时直接跳过，保持现状。
-    private func linkDirectoryPages(entries: [(title: String, pageIndex: Int)]) async {
+    private func linkDirectoryPages(entries: [(title: String, pageIndex: Int, depth: Int)]) async {
         let directory = course.learningDirectory
         guard !directory.isEmpty,
               directory.contains(where: { $0.pageIndex == nil }),
@@ -295,6 +306,7 @@ private struct DocumentWorkspace: View {
                     pageIndex: currentPageIndex,
                     pageCount: pageCount,
                     documentURL: url,
+                    chapters: chapters,
                     onNavigateToPage: { targetPage in
                         currentPageIndex = min(max(targetPage, 0), pageCount - 1)
                     },
@@ -317,6 +329,7 @@ private struct DocumentWorkspace: View {
                     pageIndex: currentPageIndex,
                     pageCount: pageCount,
                     documentURL: url,
+                    chapters: chapters,
                     onNavigateToPage: { targetPage in
                         currentPageIndex = min(max(targetPage, 0), pageCount - 1)
                     },
@@ -332,38 +345,56 @@ private struct DocumentWorkspace: View {
         VStack(spacing: 0) {
             readingBar
             Divider()
-            PDFReaderView(
-                url: url,
-                // 用实时位置而非持久化快照：窄/宽布局切换会重建 PDFReaderView，
-                // 此时持久化值可能落后于用户当前页，回退到旧页会丢进度。
-                initialPosition: ReadingPosition(
-                    pageIndex: currentPageIndex,
-                    normalizedPageOffset: currentOffset
-                ),
-                currentPageIndex: $currentPageIndex,
-                onPositionChanged: { pageIndex, offset in
-                    currentOffset = offset
-                    store.updateReadingPosition(
-                        courseID: course.id,
-                        documentID: document.id,
-                        pageIndex: pageIndex,
-                        normalizedOffset: offset
-                    )
-                    // Feed the progress bar: record this page as read.
-                    Task {
-                        do {
-                            try await LearningStatsStore.shared.recordPageRead(
-                                documentID: document.id,
-                                pageIndex: pageIndex,
-                                pageCount: document.pageCount
-                            )
-                            NotificationCenter.default.post(name: .learningStatsDidChange, object: nil)
-                        } catch {
-                            print("recordPageRead failed: \(error)")
+            ZStack {
+                PDFReaderView(
+                    url: url,
+                    // 用实时位置而非持久化快照：窄/宽布局切换会重建 PDFReaderView，
+                    // 此时持久化值可能落后于用户当前页，回退到旧页会丢进度。
+                    initialPosition: ReadingPosition(
+                        pageIndex: currentPageIndex,
+                        normalizedPageOffset: currentOffset
+                    ),
+                    currentPageIndex: $currentPageIndex,
+                    onPositionChanged: { pageIndex, offset in
+                        currentOffset = offset
+                        store.updateReadingPosition(
+                            courseID: course.id,
+                            documentID: document.id,
+                            pageIndex: pageIndex,
+                            normalizedOffset: offset
+                        )
+                        // Feed the progress bar: record this page as read.
+                        Task {
+                            do {
+                                try await LearningStatsStore.shared.recordPageRead(
+                                    documentID: document.id,
+                                    pageIndex: pageIndex,
+                                    pageCount: document.pageCount
+                                )
+                                NotificationCenter.default.post(name: .learningStatsDidChange, object: nil)
+                            } catch {
+                                print("recordPageRead failed: \(error)")
+                            }
                         }
                     }
+                )
+
+                if showsTOC, !chapters.isEmpty {
+                    TOCDrawer(
+                        chapters: chapters,
+                        currentChapterID: currentChapter?.id,
+                        onJump: { targetPage in
+                            currentPageIndex = min(max(targetPage, 0), pageCount - 1)
+                            pageInput = ""
+                            showsTOC = false
+                        },
+                        onClose: { showsTOC = false }
+                    )
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .zIndex(2)
                 }
-            )
+            }
+            .animation(SatoriTheme.Motion.quick, value: showsTOC)
         }
         .frame(minWidth: 620)
         .frame(maxWidth: .infinity)
@@ -432,7 +463,7 @@ private struct DocumentWorkspace: View {
             documentMenu
 
             if !chapters.isEmpty {
-                chapterMenu
+                tocButton
             }
 
             Spacer(minLength: 8)
@@ -485,23 +516,10 @@ private struct DocumentWorkspace: View {
         .background(.bar)
     }
 
-    /// 章节导览：菜单按钮常驻显示当前章节，展开后点击任意章节跳转。
-    private var chapterMenu: some View {
-        Menu {
-            Section("目录") {
-                ForEach(chapters) { chapter in
-                    Button {
-                        currentPageIndex = min(max(chapter.pageIndex, 0), pageCount - 1)
-                        pageInput = ""
-                    } label: {
-                        if chapter.id == currentChapter?.id {
-                            Label("\(chapter.title) · 第 \(chapter.pageIndex + 1) 页", systemImage: "checkmark")
-                        } else {
-                            Text("\(chapter.title) · 第 \(chapter.pageIndex + 1) 页")
-                        }
-                    }
-                }
-            }
+    /// 目录按钮：常驻显示当前章节，点击（或按 ⌘T）呼出可跳转任意章节/小节的浮层。
+    private var tocButton: some View {
+        Button {
+            showsTOC.toggle()
         } label: {
             HStack(spacing: 7) {
                 Image(systemName: "list.bullet.indent")
@@ -517,9 +535,10 @@ private struct DocumentWorkspace: View {
             .padding(.vertical, 6)
             .background(SatoriTheme.accentWash, in: RoundedRectangle(cornerRadius: 9))
         }
-        .menuStyle(.borderlessButton)
+        .buttonStyle(.plain)
+        .keyboardShortcut("t", modifiers: .command)
         .frame(maxWidth: 180, alignment: .leading)
-        .help(currentChapter.map { "当前章节：\($0.title)" } ?? "这本书的目录")
+        .help(currentChapter.map { "目录（⌘T）· 当前章节：\($0.title)" } ?? "目录（⌘T）")
     }
 
     private var documentMenu: some View {
@@ -573,12 +592,109 @@ private struct DocumentWorkspace: View {
     }
 }
 
+/// 目录快速跳转浮层：右侧抽屉列出全书章节/小节（按大纲层级缩进），
+/// 当前所在位置高亮并自动滚动到视野内；点击任意一项跳转并关闭，点遮罩或 Esc 关闭。
+private struct TOCDrawer: View {
+    let chapters: [BookChapter]
+    let currentChapterID: Int?
+    let onJump: (Int) -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // 左侧遮罩：点击 PDF 区域关闭浮层。
+            Color.black.opacity(0.10)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onClose)
+
+            VStack(spacing: 0) {
+                header
+                Divider()
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(chapters) { chapter in
+                                row(chapter)
+                                    .id(chapter.id)
+                            }
+                        }
+                        .padding(.vertical, 6)
+                    }
+                    .onAppear {
+                        if let currentChapterID {
+                            withAnimation(SatoriTheme.Motion.quick) {
+                                proxy.scrollTo(currentChapterID, anchor: .center)
+                            }
+                        }
+                    }
+                }
+            }
+            .frame(width: 300)
+            .background(SatoriTheme.paperRaised)
+            .overlay(alignment: .leading) { Divider() }
+        }
+        .onExitCommand(perform: onClose)
+    }
+
+    private var header: some View {
+        HStack(spacing: SatoriTheme.Spacing.sm) {
+            Text("目录")
+                .font(.headline)
+            Spacer()
+            Button {
+                onClose()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("关闭目录（Esc）")
+        }
+        .padding(.horizontal, SatoriTheme.Spacing.md)
+        .padding(.vertical, SatoriTheme.Spacing.sm)
+    }
+
+    private func row(_ chapter: BookChapter) -> some View {
+        let isCurrent = chapter.id == currentChapterID
+        return Button {
+            onJump(chapter.pageIndex)
+        } label: {
+            HStack(spacing: 7) {
+                if isCurrent {
+                    Image(systemName: "bookmark.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(SatoriTheme.accent)
+                        .frame(width: 12)
+                } else {
+                    Color.clear.frame(width: 12, height: 1)
+                }
+                Text(chapter.title)
+                    .font(.callout)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(isCurrent ? SatoriTheme.accent : Color.primary)
+                Spacer(minLength: 4)
+                Text("\(chapter.pageIndex + 1)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.leading, 10 + CGFloat(min(chapter.depth, 4)) * 14)
+            .padding(.trailing, 10)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+            .background(isCurrent ? SatoriTheme.accentWash.opacity(0.65) : Color.clear)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 /// 从 PDF outline 提取「章节标题 → 页码」，把课程目录项关联到真实页码。
 /// 标题按模糊包含匹配（去空白、忽略「第X章」等前缀）；匹配不到时按
 /// outline 的书本顺序顺延到下一个节点。PDF 没有 outline 时返回全 nil。
 private enum OutlinePageMatcher {
     /// PDF outline 的全部章节条目（按页码升序）；没有 outline 时返回空数组。
-    static func allEntries(url: URL) -> [(title: String, pageIndex: Int)] {
+    static func allEntries(url: URL) -> [(title: String, pageIndex: Int, depth: Int)] {
         extractOutlineEntries(url: url)
     }
 
@@ -590,7 +706,7 @@ private enum OutlinePageMatcher {
     /// 返回与输入目录标题一一对应的页索引；无匹配且无剩余 outline 节点时为 nil。
     static func linkedPageIndices(
         titles: [String],
-        entries: [(title: String, pageIndex: Int)]
+        entries: [(title: String, pageIndex: Int, depth: Int)]
     ) -> [Int?] {
         guard !entries.isEmpty else { return Array(repeating: nil, count: titles.count) }
         let normalized = entries.map { (normalize($0.title), $0.pageIndex) }
@@ -617,21 +733,26 @@ private enum OutlinePageMatcher {
         return result
     }
 
-    private static func extractOutlineEntries(url: URL) -> [(title: String, pageIndex: Int)] {
+    private static func extractOutlineEntries(url: URL) -> [(title: String, pageIndex: Int, depth: Int)] {
         guard let pdf = PDFDocument(url: url), let root = pdf.outlineRoot else { return [] }
-        var entries: [(title: String, pageIndex: Int)] = []
-        collectOutline(root, in: pdf, into: &entries)
+        var entries: [(title: String, pageIndex: Int, depth: Int)] = []
+        collectOutline(root, in: pdf, depth: 0, into: &entries)
         return entries.sorted { $0.pageIndex < $1.pageIndex }
     }
 
-    private static func collectOutline(_ node: PDFOutline, in pdf: PDFDocument, into entries: inout [(title: String, pageIndex: Int)]) {
+    private static func collectOutline(
+        _ node: PDFOutline,
+        in pdf: PDFDocument,
+        depth: Int,
+        into entries: inout [(title: String, pageIndex: Int, depth: Int)]
+    ) {
         let page = node.destination?.page ?? firstPage(of: node)
         if let page {
-            entries.append((node.label ?? "", pdf.index(for: page)))
+            entries.append((node.label ?? "", pdf.index(for: page), depth))
         }
         for index in 0..<node.numberOfChildren {
             if let child = node.child(at: index) {
-                collectOutline(child, in: pdf, into: &entries)
+                collectOutline(child, in: pdf, depth: depth + 1, into: &entries)
             }
         }
     }
