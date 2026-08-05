@@ -41,30 +41,19 @@ struct LearningInspector: View {
     }
 
 
-    enum ContextScope: Equatable {
-        case selection
+    /// 提问时参考的上下文：默认不带页上下文，需要时再主动选。
+    enum ContextMode: String, CaseIterable, Identifiable {
+        case none
         case page
+        case pageRange
         case wholeDocument
 
-        var pickerTitle: String {
-            switch self {
-            case .selection: "选中内容"
-            case .page: "当前页"
-            case .wholeDocument: "整本书"
-            }
-        }
-
-        var systemImage: String {
-            switch self {
-            case .selection: "text.cursor"
-            case .page: "doc.text"
-            case .wholeDocument: "books.vertical"
-            }
-        }
+        var id: String { rawValue }
     }
 
     let documentID: UUID
     let pageIndex: Int
+    let pageCount: Int
     let documentURL: URL
     let onNavigateToPage: (Int) -> Void
     let onClose: () -> Void
@@ -73,12 +62,18 @@ struct LearningInspector: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var mode: InspectorMode = .ask
     @State private var question = ""
+    /// 发送问题时给 AI 的上下文：默认不带上下文（需要时主动选页）。
+    @State private var contextMode: ContextMode = .none
+    /// 「多页」范围（1 起，UI 显示用；发送时转成 0 起）。
+    @State private var rangeStart = 1
+    @State private var rangeEnd = 1
     /// 上次「问 AI」选中的页码：文本已填入输入框等用户编辑/追问，
     /// 发送时用它锚定上下文；用户翻页或自行改写后失效。
     @State private var pendingSelectionPage: Int?
     @State private var turns: [LearningTurn] = []
     @State private var draftQuestion = ""
     @State private var draftPageIndex = 0
+    @State private var draftContextScope: LearningContextScope = .none
     @State private var draftAttachmentCount = 0
     @State private var response: LearningResponse?
     @State private var isThinking = false
@@ -92,6 +87,7 @@ struct LearningInspector: View {
     @State private var isAtBottom = true
     @State private var hasQwenConfiguration = false
     @State private var isCheckingConfiguration = false
+    @State private var configuredModelID: String?
     @State private var allowsWebSearch = false
     @State private var completedElsewherePage: Int?
     @State private var attachments: [LearningImageAttachment] = []
@@ -99,6 +95,8 @@ struct LearningInspector: View {
     @State private var activeAttachmentPreviews: [NSImage] = []
     @State private var isImportingImage = false
     @State private var attachmentStatus = ""
+    /// 这一轮回答开始的时间；用于「过程」脚注里显示耗时。
+    @State private var streamStartDate: Date?
     @FocusState private var isQuestionFocused: Bool
     @State private var requestTask: Task<Void, Never>?
     @State private var showsClearConfirmation = false
@@ -109,6 +107,7 @@ struct LearningInspector: View {
     @State private var runLanguage: CodeRunner.Language = .python
     @State private var runOutput: CodeRunResult?
     @State private var isRunning = false
+    @State private var runTask: Task<Void, Never>?
 
     private let sessionStore = LearningSessionStore.shared
     private let responseBottomID = "learning-response-bottom"
@@ -264,7 +263,6 @@ struct LearningInspector: View {
         guard newMode != mode else { return }
         if mode == .run {
             stopRunning()
-            runOutput = nil
         }
         withAnimation(SatoriTheme.Motion.quick) { mode = newMode }
     }
@@ -335,19 +333,23 @@ struct LearningInspector: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollPosition(id: $scrollAnchorID, anchor: .bottom)
-            .overlay(alignment: .bottomTrailing) {
+            .overlay(alignment: .bottom) {
                 if !isAtBottom {
                     Button {
                         scrollAnchorID = responseBottomID
                     } label: {
                         Label("回到底部", systemImage: "arrow.down")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .tint(SatoriTheme.accent)
-                    .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
-                    .padding(.trailing, SatoriTheme.Spacing.lg)
-                    .padding(.bottom, SatoriTheme.Spacing.sm)
+                    .buttonStyle(.plain)
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 5)
+                    .background(.regularMaterial, in: Capsule())
+                    .overlay(
+                        Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(0.10), radius: 5, y: 1)
+                    .padding(.bottom, 7)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .animation(SatoriTheme.Motion.quick, value: isAtBottom)
                 }
@@ -510,6 +512,11 @@ struct LearningInspector: View {
                             .scrollContentBackground(.hidden)
                             .padding(SatoriTheme.Spacing.sm)
                             .frame(minHeight: 180, maxHeight: 360)
+                            .onKeyPress(.return, phases: .down) { keyPress in
+                                guard keyPress.modifiers.contains(.command) else { return .ignored }
+                                isRunning ? stopRunning() : runSnippet()
+                                return .handled
+                            }
                     }
                     .background(SatoriTheme.paperRaised, in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous).strokeBorder(SatoriTheme.hairline))
@@ -563,8 +570,9 @@ struct LearningInspector: View {
         isRunning = true
         runOutput = nil
         let language = runLanguage
-        Task {
+        runTask = Task {
             let result = await CodeRunner.run(code: code, language: language)
+            guard !Task.isCancelled else { return }
             await MainActor.run {
                 runOutput = result
                 isRunning = false
@@ -576,8 +584,10 @@ struct LearningInspector: View {
     }
 
     private func stopRunning() {
-        // A running snippet has no cancellable handle exposed; the timeout is
-        // the backstop. Flip the flag so the next run is allowed immediately.
+        // 取消运行任务会真正终止进程（CodeRunner 在取消时 SIGTERM→SIGKILL），
+        // 不再只是把按钮翻回去、让程序在后台跑到超时。
+        runTask?.cancel()
+        runTask = nil
         isRunning = false
     }
 
@@ -612,7 +622,9 @@ struct LearningInspector: View {
 
             VStack(spacing: SatoriTheme.Spacing.sm) {
                 ForEach(quickPrompts, id: \.self) { prompt in
-                    QuickPromptButton(prompt: prompt) { askAssistant(prompt) }
+                    // 快捷提问就是围绕当前页的，显式带上页上下文；
+                    // 输入框里手打的问题默认不带上下文，用户可按需选择。
+                    QuickPromptButton(prompt: prompt) { askAssistant(prompt, scope: .page) }
                 }
             }
 
@@ -632,6 +644,7 @@ struct LearningInspector: View {
             userMessageBubble(
                 question: turn.question,
                 pageIndex: turn.pageIndex,
+                contextScope: turn.contextScope,
                 attachmentCount: turn.attachmentCount,
                 createdAt: turn.createdAt,
                 previews: isActive ? activeAttachmentPreviews : []
@@ -644,6 +657,7 @@ struct LearningInspector: View {
     private func userMessageBubble(
         question: String,
         pageIndex: Int,
+        contextScope: LearningContextScope?,
         attachmentCount: Int,
         createdAt: Date,
         previews: [NSImage]
@@ -675,8 +689,14 @@ struct LearningInspector: View {
                     if attachmentCount > 0 {
                         Text("\(attachmentCount) 张附图")
                     }
-                    Button("第 \(pageIndex + 1) 页") { onNavigateToPage(pageIndex) }
-                        .buttonStyle(.plain)
+                    if let label = contextAnchorLabel(contextScope, pageIndex: pageIndex) {
+                        if contextScope == .some(.wholeDocument) {
+                            Text(label)
+                        } else {
+                            Button(label) { onNavigateToPage(pageIndex) }
+                                .buttonStyle(.plain)
+                        }
+                    }
                     Text(createdAt, style: .time)
                 }
                 .font(.caption2)
@@ -692,20 +712,96 @@ struct LearningInspector: View {
         }
     }
 
+    /// 气泡里展示「这一轮问答依据什么」；nil 视为旧版本数据（按「当前页」理解）。
+    private func contextAnchorLabel(_ scope: LearningContextScope?, pageIndex: Int) -> String? {
+        switch scope {
+        case .some(.none):
+            // 不带上下文：不显示页码锚点，避免误导。
+            return nil
+        case .some(.page), nil:
+            return "第 \(pageIndex + 1) 页"
+        case let .some(.pageRange(start, end)):
+            return start == end ? "第 \(start + 1) 页" : "第 \(start + 1)–\(end + 1) 页"
+        case .some(.wholeDocument):
+            return "整本书"
+        }
+    }
+
+    /// 「过程」脚注里的一枚小标签：这一轮问答实际发生了什么。
+    private struct ProcessChip: Equatable {
+        let symbol: String
+        let text: String
+    }
+
+    /// 回答卡片底部的处理过程：上下文、附图、联网搜索来源、模型、耗时。
+    private func processChips(turn: LearningTurn, isActive: Bool) -> [ProcessChip] {
+        var chips: [ProcessChip] = []
+        if let label = contextAnchorLabel(turn.contextScope, pageIndex: turn.pageIndex) {
+            chips.append(.init(symbol: "book", text: label))
+        }
+        if turn.attachmentCount > 0 {
+            chips.append(.init(symbol: "paperclip", text: "附图 \(turn.attachmentCount) 张"))
+        }
+        if isActive, allowsWebSearch {
+            chips.append(.init(symbol: "globe", text: "正在联网搜索…"))
+        } else if !turn.citations.isEmpty {
+            chips.append(.init(symbol: "globe", text: "联网搜索 · \(turn.citations.count) 个来源"))
+        }
+        if let modelID = configuredModelID, !modelID.isEmpty {
+            chips.append(.init(symbol: "cpu", text: modelID))
+        }
+        if !isActive, let duration = turn.responseDuration {
+            chips.append(.init(symbol: "clock", text: String(format: "%.1fs", duration)))
+        }
+        return chips
+    }
+
+    private func processFooter(turn: LearningTurn, isActive: Bool) -> some View {
+        HStack(spacing: 6) {
+            ForEach(Array(processChips(turn: turn, isActive: isActive).enumerated()), id: \.offset) { _, chip in
+                Label(chip.text, systemImage: chip.symbol)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Color.primary.opacity(0.05), in: Capsule())
+            }
+            if isActive, isStreamingAnswer {
+                // 流式期间实时显示已用时间，不再靠猜。
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Label(elapsedString(context.date), systemImage: "clock")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Color.primary.opacity(0.05), in: Capsule())
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 2)
+    }
+
+    private func elapsedString(_ now: Date) -> String {
+        guard let start = streamStartDate else { return "…" }
+        let seconds = now.timeIntervalSince(start)
+        if seconds < 60 { return String(format: "%.0fs", seconds) }
+        return String(format: "%.0f:%02.0f", seconds / 60, seconds.truncatingRemainder(dividingBy: 60))
+    }
+
     /// AI 回答：左对齐卡片。进行中时金色描边 + 流式输出。
     private func answerCard(turn: LearningTurn, isActive: Bool) -> some View {
         let isStreaming = isActive && isStreamingAnswer
         return VStack(alignment: .leading, spacing: 12) {
             answerHeader(
                 sourceKind: turn.sourceKind,
-                pageIndex: turn.pageIndex,
                 isStreaming: isStreaming,
                 completion: turn.completion
             )
             if isStreaming, turn.answer.isEmpty {
                 HStack(spacing: SatoriTheme.Spacing.sm) {
                     ProgressView().controlSize(.small)
-                    Text(allowsWebSearch ? "正在理解原文并检索资料…" : "正在理解当前页…")
+                    Text(streamingStatusText)
                         .foregroundStyle(.secondary)
                 }
                 .font(.callout)
@@ -725,6 +821,7 @@ struct LearningInspector: View {
                 }
                 citationsView(turn.citations)
             }
+            processFooter(turn: turn, isActive: isActive)
             if isActive, !isStreaming, turn.sourceKind == .inference {
                 HStack {
                     if !hasQwenConfiguration {
@@ -733,7 +830,11 @@ struct LearningInspector: View {
                     }
                     Spacer()
                     Button("重试", systemImage: "arrow.clockwise") {
-                        askAssistant(turn.question, pageOverride: turn.pageIndex)
+                        askAssistant(
+                            turn.question,
+                            pageOverride: turn.pageIndex,
+                            scope: turn.contextScope ?? .page
+                        )
                     }
                     .buttonStyle(.borderless)
                 }
@@ -782,7 +883,6 @@ struct LearningInspector: View {
 
     private func answerHeader(
         sourceKind: LearningSourceKind,
-        pageIndex: Int,
         isStreaming: Bool,
         completion: LearningTurnCompletion
     ) -> some View {
@@ -802,9 +902,6 @@ struct LearningInspector: View {
                     .background(Color.secondary.opacity(0.1), in: Capsule())
             }
             Spacer()
-            Text("依据第 \(pageIndex + 1) 页")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
         }
     }
 
@@ -854,7 +951,12 @@ struct LearningInspector: View {
                 .buttonStyle(.borderless)
             Button("重试", systemImage: "arrow.clockwise") {
                 onNavigateToPage(turn.pageIndex)
-                askAssistant(turn.question, pageOverride: turn.pageIndex, excludingTurnID: turn.id)
+                askAssistant(
+                    turn.question,
+                    pageOverride: turn.pageIndex,
+                    excludingTurnID: turn.id,
+                    scope: turn.contextScope ?? .page
+                )
             }
             .buttonStyle(.borderless)
             Menu {
@@ -875,9 +977,11 @@ struct LearningInspector: View {
         VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
             if !attachments.isEmpty { attachmentStrip }
 
+            contextScopeRow
+
             ZStack(alignment: .topLeading) {
                 if question.isEmpty {
-                    Text(turns.isEmpty ? "问这一页，也可以附上图片…" : "继续追问这里为什么、再举个例子…")
+                    Text(turns.isEmpty ? "想问什么？可以附上图片…" : "继续追问这里为什么、再举个例子…")
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, SatoriTheme.Spacing.md + 1)
                         .padding(.vertical, SatoriTheme.Spacing.md)
@@ -961,6 +1065,72 @@ struct LearningInspector: View {
         .background(.bar)
     }
 
+    /// 提问参考上下文选择：默认不带页上下文，需要时再选当前页/多页/整本书。
+    private var contextScopeRow: some View {
+        HStack(spacing: SatoriTheme.Spacing.sm) {
+            Menu {
+                Picker("参考上下文", selection: contextModeBinding) {
+                    Label("不带上下文", systemImage: "text.bubble").tag(ContextMode.none)
+                    Label("当前页", systemImage: "doc.text").tag(ContextMode.page)
+                    Label("多页…", systemImage: "doc.on.doc").tag(ContextMode.pageRange)
+                    Label("整本书", systemImage: "books.vertical").tag(ContextMode.wholeDocument)
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Label(contextModePickerTitle, systemImage: contextModeSystemImage)
+            }
+            .menuStyle(.borderlessButton)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .help("提问时给 AI 的参考内容。默认不带上下文，需要时再选。")
+
+            if contextMode == .pageRange {
+                Stepper("起始页", value: $rangeStart, in: 1...max(1, rangeEnd - 1))
+                    .labelsHidden()
+                    .controlSize(.small)
+                Stepper("结束页", value: $rangeEnd, in: rangeStart...max(rangeStart, pageCount))
+                    .labelsHidden()
+                    .controlSize(.small)
+            }
+
+            Spacer()
+        }
+    }
+
+    /// 切到「多页」时默认从当前页开始，再往前后扩展。
+    private var contextModeBinding: Binding<ContextMode> {
+        Binding(
+            get: { contextMode },
+            set: { newMode in
+                if newMode == .pageRange {
+                    let anchor = min(max(pageIndex + 1, 1), pageCount)
+                    rangeStart = anchor
+                    rangeEnd = anchor
+                }
+                contextMode = newMode
+            }
+        )
+    }
+
+    private var contextModePickerTitle: String {
+        switch contextMode {
+        case .none: "不带上下文"
+        case .page: "当前页"
+        case .pageRange:
+            rangeStart == rangeEnd ? "第 \(rangeStart) 页" : "第 \(rangeStart)–\(rangeEnd) 页"
+        case .wholeDocument: "整本书"
+        }
+    }
+
+    private var contextModeSystemImage: String {
+        switch contextMode {
+        case .none: "text.bubble"
+        case .page: "doc.text"
+        case .pageRange: "doc.on.doc"
+        case .wholeDocument: "books.vertical"
+        }
+    }
+
     private var attachmentStrip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 9) {
@@ -998,7 +1168,24 @@ struct LearningInspector: View {
 
     private var composerHint: String {
         let web = allowsWebSearch ? "、联网" : ""
-        return "Enter 发送 · Shift+Enter 换行 · ⌘V 贴图 · 依据第 \(pageIndex + 1) 页、最近对话、附件\(web)"
+        let scopeText: String
+        switch contextMode {
+        case .none: scopeText = "不带上下文"
+        case .page: scopeText = "第 \(pageIndex + 1) 页"
+        case .pageRange: scopeText = "第 \(rangeStart)–\(rangeEnd) 页"
+        case .wholeDocument: scopeText = "整本书"
+        }
+        return "Enter 发送 · Shift+Enter 换行 · ⌘V 贴图 · 参考：\(scopeText)、最近对话、附件\(web)"
+    }
+
+    private var streamingStatusText: String {
+        if allowsWebSearch { return "正在联网搜索资料并组织回答…" }
+        return switch draftContextScope {
+        case .none: "正在思考…"
+        case .page: "正在理解当前页…"
+        case .pageRange: "正在结合所选多页理解…"
+        case .wholeDocument: "正在通读全书找依据…"
+        }
     }
 
     @MainActor
@@ -1020,7 +1207,7 @@ struct LearningInspector: View {
         _ suppliedQuestion: String? = nil,
         pageOverride: Int? = nil,
         excludingTurnID: UUID? = nil,
-        scope: ContextScope = .page
+        scope: LearningContextScope = .page
     ) {
         let request = (suppliedQuestion ?? question).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty, !isThinking else { return }
@@ -1036,17 +1223,43 @@ struct LearningInspector: View {
         } else {
             targetPageIndex = pageIndex
         }
-        let effectiveScope: ContextScope = scope
+
+        // 输入框发送跟着选择器走（默认不带上下文）；快捷提问、重问各自带上下文。
+        let effectiveScope: LearningContextScope
+        if suppliedQuestion == nil {
+            switch contextMode {
+            case .none:
+                effectiveScope = .none
+            case .page:
+                effectiveScope = .page
+            case .pageRange:
+                let start = max(1, min(rangeStart, pageCount))
+                let end = max(start, min(rangeEnd, pageCount))
+                effectiveScope = .pageRange(start: start - 1, end: end - 1)
+            case .wholeDocument:
+                effectiveScope = .wholeDocument
+            }
+        } else {
+            effectiveScope = scope
+        }
 
         let submittedAttachments = attachments
         activeAttachmentPreviews = submittedAttachments.map(\.preview)
         let context = turns
             .filter { $0.id != excludingTurnID }
             .suffix(6)
-            .map { LearningConversationContext(question: $0.question, answer: $0.answer) }
+            .map {
+                LearningConversationContext(
+                    question: $0.question,
+                    answer: $0.answer,
+                    pageIndex: $0.contextScope == .none ? nil : $0.pageIndex,
+                    attachmentSummary: $0.attachmentCount > 0 ? "\($0.attachmentCount) 张附图" : nil
+                )
+            }
 
         draftQuestion = request
         draftPageIndex = targetPageIndex
+        draftContextScope = effectiveScope
         draftAttachmentCount = submittedAttachments.count
         // 锚定到底部：新消息出现后内容自然向上生长，平滑贴底跟随。
         scrollAnchorID = responseBottomID
@@ -1055,6 +1268,7 @@ struct LearningInspector: View {
         attachmentStatus = ""
         response = LearningResponse(text: "", sourceKind: .currentPDF, pageIndex: targetPageIndex)
         isThinking = true
+        streamStartDate = .now
         completedElsewherePage = nil
 
         requestTask = Task {
@@ -1068,6 +1282,7 @@ struct LearningInspector: View {
                 hasQwenConfiguration = false
                 restoreSubmittedAttachments(submittedAttachments)
                 isThinking = false
+                streamStartDate = nil
                 requestTask = nil
                 response = LearningResponse(
                     text: "请先在设置中连接 Qwen。百炼 API Key 只会保存在这台 Mac 的钥匙串中。",
@@ -1078,26 +1293,34 @@ struct LearningInspector: View {
             }
             hasQwenConfiguration = true
 
-            // PDF 提取（含扫描页渲染 + Qwen OCR）放到后台任务，完成后回主线程，
-            // 提问瞬间不再冻结 UI。
-            let extractionScope: PDFPageContextExtractor.Scope = {
-                switch effectiveScope {
-                case .selection: .selection(request)
-                case .page: .page(targetPageIndex)
-                case .wholeDocument: .wholeDocument
-                }
-            }()
-            let pageContent = await Task.detached(priority: .userInitiated) {
-                await PDFPageContextExtractor.extract(
-                    from: documentURL,
-                    scope: extractionScope,
-                    qwenConfiguration: config
-                )
-            }.value
+            // 不带上下文时直接跳过 PDF 提取，提问零等待、请求也不夹带页面。
+            // 需要上下文时，提取（含扫描页渲染 + Qwen OCR）放到后台任务，
+            // 完成后回主线程，提问瞬间不再冻结 UI。
+            let pageContent: LearningPageContent?
+            if case .none = effectiveScope {
+                pageContent = nil
+            } else {
+                let extractionScope: PDFPageContextExtractor.Scope = {
+                    switch effectiveScope {
+                    case .none: .none
+                    case .page: .page(targetPageIndex)
+                    case let .pageRange(start, end): .pageRange(start...end)
+                    case .wholeDocument: .wholeDocument
+                    }
+                }()
+                pageContent = await Task.detached(priority: .userInitiated) {
+                    await PDFPageContextExtractor.extract(
+                        from: documentURL,
+                        scope: extractionScope,
+                        qwenConfiguration: config
+                    )
+                }.value
+            }
             if Task.isCancelled { return }
             guard let pageContent else {
                 restoreSubmittedAttachments(submittedAttachments)
                 isThinking = false
+                streamStartDate = nil
                 requestTask = nil
                 response = LearningResponse(
                     text: scopeExtractionFailureMessage(effectiveScope, pageIndex: targetPageIndex),
@@ -1121,8 +1344,10 @@ struct LearningInspector: View {
                 latestResponse = update
                 response = update
             }
+            let responseDuration = streamStartDate.map { Date().timeIntervalSince($0) }
             if Task.isCancelled { return }
             isThinking = false
+            streamStartDate = nil
             requestTask = nil
             guard let latestResponse else {
                 restoreSubmittedAttachments(submittedAttachments)
@@ -1132,7 +1357,7 @@ struct LearningInspector: View {
                 restoreSubmittedAttachments(submittedAttachments)
                 response = latestResponse
             } else {
-                completeDraft(with: latestResponse, completion: .completed)
+                completeDraft(with: latestResponse, completion: .completed, duration: responseDuration)
             }
         }
     }
@@ -1149,10 +1374,11 @@ struct LearningInspector: View {
         attachmentStatus = "图片已保留在输入框，修改问题后可以直接重新发送。"
     }
 
-    private func scopeExtractionFailureMessage(_ scope: ContextScope, pageIndex: Int) -> String {
+    private func scopeExtractionFailureMessage(_ scope: LearningContextScope, pageIndex: Int) -> String {
         switch scope {
-        case .selection: "没有读到选中的文字。请在 PDF 里重新划选一段再提问。"
+        case .none: ""
         case .page: "暂时无法读取第 \(pageIndex + 1) 页。请确认 PDF 文件仍然可以打开。"
+        case .pageRange: "所选页里没有读到可用的文字（可能是纯图片页）。可以改选“当前页”，Satori 会把该页作为图片交给 AI。"
         case .wholeDocument: "这本书里没有可提取的文字（可能是扫描版）。可以改用“当前页”，Satori 会把该页作为图片交给 AI。"
         }
     }
@@ -1161,19 +1387,26 @@ struct LearningInspector: View {
         requestTask?.cancel()
         requestTask = nil
         isThinking = false
+        let duration = streamStartDate.map { Date().timeIntervalSince($0) }
+        streamStartDate = nil
         guard let response, !response.text.isEmpty, response.sourceKind != .inference else {
             // 还没有真实回答（没产出文字或只有推断态）：直接清掉草稿，
             // 不给时间线留一个「已停止」空壳卡。
             draftQuestion = ""
             draftAttachmentCount = 0
+            draftContextScope = .none
             activeAttachmentPreviews = []
             self.response = nil
             return
         }
-        completeDraft(with: response, completion: .stopped)
+        completeDraft(with: response, completion: .stopped, duration: duration)
     }
 
-    private func completeDraft(with finalResponse: LearningResponse, completion: LearningTurnCompletion) {
+    private func completeDraft(
+        with finalResponse: LearningResponse,
+        completion: LearningTurnCompletion,
+        duration: TimeInterval? = nil
+    ) {
         let targetPage = draftPageIndex
         let turn = LearningTurn(
             question: draftQuestion,
@@ -1182,11 +1415,14 @@ struct LearningInspector: View {
             sourceKind: finalResponse.sourceKind,
             citations: finalResponse.citations,
             attachmentCount: draftAttachmentCount,
-            completion: completion
+            completion: completion,
+            contextScope: draftContextScope,
+            responseDuration: duration
         )
         turns.append(turn)
         draftQuestion = ""
         draftAttachmentCount = 0
+        draftContextScope = .none
         activeAttachmentPreviews = []
         response = nil
         persistTurns()
@@ -1210,6 +1446,7 @@ struct LearningInspector: View {
         requestTask?.cancel()
         requestTask = nil
         isThinking = false
+        streamStartDate = nil
         turns = []
         draftQuestion = ""
         response = nil
@@ -1273,6 +1510,7 @@ struct LearningInspector: View {
     private func refreshConfigurationState() {
         let markedAsConfigured = QwenConfigurationStore.hasSavedConfigurationMarker()
         hasQwenConfiguration = markedAsConfigured
+        configuredModelID = QwenConfigurationStore.readModelID()
         guard markedAsConfigured, !isCheckingConfiguration else { return }
         isCheckingConfiguration = true
         Task {

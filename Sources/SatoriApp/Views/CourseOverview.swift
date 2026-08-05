@@ -119,6 +119,13 @@ struct CourseOverview: View {
     }
 }
 
+/// 章节导览里的一章：标题 + 起始页（0 起）。id 用章节序号，避免同页多个标题冲突。
+private struct BookChapter: Identifiable, Equatable {
+    let id: Int
+    let title: String
+    let pageIndex: Int
+}
+
 private struct DocumentWorkspace: View {
     @EnvironmentObject private var store: AppModel
     @EnvironmentObject private var router: ReaderSelectionRouter
@@ -131,6 +138,8 @@ private struct DocumentWorkspace: View {
     let onRemove: () -> Void
     @State private var currentPageIndex: Int
     @State private var pageInput = ""
+    /// 这本书的章节导览（PDF outline 优先，课程目录回退）；打开时一次性加载。
+    @State private var chapters: [BookChapter] = []
     @State private var showsInspector = true
     /// 最近一次上报的页内偏移（0…1），随 onPositionChanged 更新；布局切换
     /// 重建 PDFReaderView 时用它恢复位置，避免回落到持久化里的旧页码。
@@ -176,8 +185,14 @@ private struct DocumentWorkspace: View {
             }
         }
         .task(id: document.id) {
-            // 打开 PDF 时把课程目录项关联到书内 outline 的真实页码。
-            await linkDirectoryPages()
+            // 打开 PDF 时一次性提取目录大纲：既做章节导览，也用于把课程目录项
+            // 关联到书内真实页码，避免同一份 PDF 重复解析。
+            let entries = await Task.detached(priority: .utility) {
+                OutlinePageMatcher.allEntries(url: url)
+            }.value
+            guard !Task.isCancelled else { return }
+            chapters = Self.makeChapters(entries: entries, directory: course.learningDirectory)
+            await linkDirectoryPages(entries: entries)
         }
         .task(id: document.id) {
             // 这本书一被打开就记住「课程 + 书」，重启后回到同一本；
@@ -208,6 +223,30 @@ private struct DocumentWorkspace: View {
         return CGFloat(stored)
     }
 
+    /// 章节来源：优先 PDF 自带 outline；没有 outline 时回退到这门课学习目录里
+    /// 已关联页码的章节项；两者都没有则返回空（阅读栏不显示目录）。
+    private static func makeChapters(
+        entries: [(title: String, pageIndex: Int)],
+        directory: [LearningDirectoryItem]
+    ) -> [BookChapter] {
+        if !entries.isEmpty {
+            return entries.enumerated().map {
+                BookChapter(id: $0.offset, title: $0.element.title, pageIndex: $0.element.pageIndex)
+            }
+        }
+        return directory.compactMap { item -> (title: String, pageIndex: Int)? in
+            guard let pageIndex = item.pageIndex else { return nil }
+            return (item.title, pageIndex)
+        }
+        .enumerated()
+        .map { BookChapter(id: $0.offset, title: $0.element.title, pageIndex: $0.element.pageIndex) }
+    }
+
+    /// 当前页所属的章节：最后一个起始页 ≤ 当前页的章节。
+    private var currentChapter: BookChapter? {
+        chapters.last { $0.pageIndex <= currentPageIndex }
+    }
+
     private func persistPanelSize() {
         UserDefaults.standard.set(Double(panelWidth), forKey: "satori.workspace.panelWidth.\(document.id.uuidString)")
         UserDefaults.standard.set(Double(panelHeight), forKey: "satori.workspace.panelHeight.\(document.id.uuidString)")
@@ -215,15 +254,13 @@ private struct DocumentWorkspace: View {
 
     /// 用当前 PDF 的 outline 补齐课程目录项缺失的页码并持久化。
     /// 全部已关联（此前已持久化）或 PDF 没有 outline 时直接跳过，保持现状。
-    private func linkDirectoryPages() async {
+    private func linkDirectoryPages(entries: [(title: String, pageIndex: Int)]) async {
         let directory = course.learningDirectory
         guard !directory.isEmpty,
               directory.contains(where: { $0.pageIndex == nil }),
-              let resolvedURL = DocumentBookmarkStore.resolveURL(for: document) else { return }
+              !entries.isEmpty else { return }
         let titles = directory.map(\.title)
-        let linked = await Task.detached(priority: .utility) {
-            OutlinePageMatcher.linkedPageIndices(titles: titles, url: resolvedURL)
-        }.value
+        let linked = OutlinePageMatcher.linkedPageIndices(titles: titles, entries: entries)
         guard !linked.allSatisfy({ $0 == nil }), !Task.isCancelled else { return }
 
         var updated = store.plan
@@ -256,6 +293,7 @@ private struct DocumentWorkspace: View {
                 LearningInspector(
                     documentID: document.id,
                     pageIndex: currentPageIndex,
+                    pageCount: pageCount,
                     documentURL: url,
                     onNavigateToPage: { targetPage in
                         currentPageIndex = min(max(targetPage, 0), pageCount - 1)
@@ -277,6 +315,7 @@ private struct DocumentWorkspace: View {
                 LearningInspector(
                     documentID: document.id,
                     pageIndex: currentPageIndex,
+                    pageCount: pageCount,
                     documentURL: url,
                     onNavigateToPage: { targetPage in
                         currentPageIndex = min(max(targetPage, 0), pageCount - 1)
@@ -392,6 +431,10 @@ private struct DocumentWorkspace: View {
         HStack(spacing: 14) {
             documentMenu
 
+            if !chapters.isEmpty {
+                chapterMenu
+            }
+
             Spacer(minLength: 8)
 
             HStack(spacing: 7) {
@@ -404,9 +447,11 @@ private struct DocumentWorkspace: View {
                 Text("\(currentPageIndex + 1)")
                     .font(.callout.monospacedDigit().weight(.semibold))
                     .frame(minWidth: 30, alignment: .trailing)
+                    .fixedSize()
                 Text("/ \(pageCount)")
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
+                    .fixedSize()
 
                 Button("下一页", systemImage: "chevron.right") {
                     currentPageIndex = min(pageCount - 1, currentPageIndex + 1)
@@ -438,6 +483,43 @@ private struct DocumentWorkspace: View {
         .padding(.horizontal, 14)
         .frame(height: 58)
         .background(.bar)
+    }
+
+    /// 章节导览：菜单按钮常驻显示当前章节，展开后点击任意章节跳转。
+    private var chapterMenu: some View {
+        Menu {
+            Section("目录") {
+                ForEach(chapters) { chapter in
+                    Button {
+                        currentPageIndex = min(max(chapter.pageIndex, 0), pageCount - 1)
+                        pageInput = ""
+                    } label: {
+                        if chapter.id == currentChapter?.id {
+                            Label("\(chapter.title) · 第 \(chapter.pageIndex + 1) 页", systemImage: "checkmark")
+                        } else {
+                            Text("\(chapter.title) · 第 \(chapter.pageIndex + 1) 页")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "list.bullet.indent")
+                    .foregroundStyle(SatoriTheme.accent)
+                Text(currentChapter?.title ?? "目录")
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(SatoriTheme.accentWash, in: RoundedRectangle(cornerRadius: 9))
+        }
+        .menuStyle(.borderlessButton)
+        .frame(maxWidth: 180, alignment: .leading)
+        .help(currentChapter.map { "当前章节：\($0.title)" } ?? "这本书的目录")
     }
 
     private var documentMenu: some View {
@@ -495,9 +577,21 @@ private struct DocumentWorkspace: View {
 /// 标题按模糊包含匹配（去空白、忽略「第X章」等前缀）；匹配不到时按
 /// outline 的书本顺序顺延到下一个节点。PDF 没有 outline 时返回全 nil。
 private enum OutlinePageMatcher {
+    /// PDF outline 的全部章节条目（按页码升序）；没有 outline 时返回空数组。
+    static func allEntries(url: URL) -> [(title: String, pageIndex: Int)] {
+        extractOutlineEntries(url: url)
+    }
+
     /// 返回与输入目录标题一一对应的页索引；无匹配且无剩余 outline 节点时为 nil。
     static func linkedPageIndices(titles: [String], url: URL) -> [Int?] {
-        let entries = extractOutlineEntries(url: url)
+        linkedPageIndices(titles: titles, entries: extractOutlineEntries(url: url))
+    }
+
+    /// 返回与输入目录标题一一对应的页索引；无匹配且无剩余 outline 节点时为 nil。
+    static func linkedPageIndices(
+        titles: [String],
+        entries: [(title: String, pageIndex: Int)]
+    ) -> [Int?] {
         guard !entries.isEmpty else { return Array(repeating: nil, count: titles.count) }
         let normalized = entries.map { (normalize($0.title), $0.pageIndex) }
         var cursor = 0

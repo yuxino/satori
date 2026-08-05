@@ -193,7 +193,7 @@ public struct QwenLearningAssistant: LearningAssistant {
     private let apiKey: String
     private let apiHost: URL
     private let modelID: String
-    private let pageContent: LearningPageContent
+    private let pageContent: LearningPageContent?
     private let additionalImagesJPEG: [Data]
     private let conversationContext: [LearningConversationContext]
     private let allowsWebSearch: Bool
@@ -204,7 +204,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         apiKey: String,
         apiHost: URL = QwenLearningAssistant.defaultAPIHost,
         modelID: String = QwenLearningAssistant.defaultModelID,
-        pageContent: LearningPageContent,
+        pageContent: LearningPageContent?,
         additionalImagesJPEG: [Data] = [],
         conversationContext: [LearningConversationContext] = [],
         allowsWebSearch: Bool = false,
@@ -389,7 +389,10 @@ public struct QwenLearningAssistant: LearningAssistant {
         - 只输出题目和答案，不要任何其他说明。
         """
 
-        var content: [InputContent] = [makePageContentItem(pageNumber: pageNumber)]
+        var content: [InputContent] = []
+        if let item = makePageContentItem(pageNumber: pageNumber) {
+            content.append(item)
+        }
         content.append(contentsOf: makeAttachmentItems(imageBudget.images))
         content.append(.init(type: "input_text", text: reviewBody, imageURL: nil))
 
@@ -426,7 +429,10 @@ public struct QwenLearningAssistant: LearningAssistant {
     private func makeRequest(question: String, pageIndex: Int?, streamsResponse: Bool, imageBudget: ImageBudgetResult) -> ResponsesRequest {
         let pageNumber = (pageIndex ?? 0) + 1
 
-        var content: [InputContent] = [makePageContentItem(pageNumber: pageNumber)]
+        var content: [InputContent] = []
+        if let item = makePageContentItem(pageNumber: pageNumber) {
+            content.append(item)
+        }
         content.append(contentsOf: makeAttachmentItems(imageBudget.images))
         content.append(.init(type: "input_text", text: "我的问题：\(question)", imageURL: nil))
 
@@ -453,20 +459,23 @@ public struct QwenLearningAssistant: LearningAssistant {
         )
     }
 
-    private func makePageContentItem(pageNumber: Int) -> InputContent {
+    /// 页上下文内容；没有页上下文（不带上下文提问）时返回 nil，请求里不夹带页面。
+    private func makePageContentItem(pageNumber: Int) -> InputContent? {
         switch pageContent {
-        case let .text(text):
+        case .text(let text)?:
             return .init(
                 type: "input_text",
                 text: "用户正在阅读 PDF 第 \(pageNumber) 页。\n\n当前页原文：\n\(text)",
                 imageURL: nil
             )
-        case let .imageJPEG(data):
+        case .imageJPEG(let data)?:
             return .init(
                 type: "input_image",
                 text: nil,
                 imageURL: "data:image/jpeg;base64,\(data.base64EncodedString())"
             )
+        case nil:
+            return nil
         }
     }
 
@@ -482,7 +491,7 @@ public struct QwenLearningAssistant: LearningAssistant {
     private func validateCapabilities(imageBudget: ImageBudgetResult) throws {
         let capabilities = Self.capabilities(for: modelID)
         let needsImage: Bool = {
-            if case .imageJPEG = pageContent { return true }
+            if case .imageJPEG? = pageContent { return true }
             return !imageBudget.images.isEmpty
         }()
         if needsImage && !capabilities.contains(.image) {

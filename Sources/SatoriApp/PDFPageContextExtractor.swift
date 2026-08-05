@@ -10,8 +10,12 @@ enum PDFPageContextExtractor {
         case selection(String)
         /// The page currently on screen.
         case page(Int)
+        /// 连续多页（0 起、含两端）：逐页提取并拼接，扫描页走 OCR。
+        case pageRange(ClosedRange<Int>)
         /// The whole book, as concatenated page text.
         case wholeDocument
+        /// 不带任何页上下文。
+        case none
     }
 
     /// 提取页面内容。配置了 Qwen 时，扫描页优先走 Qwen OCR；
@@ -28,9 +32,60 @@ enum PDFPageContextExtractor {
             return .text(String(cleaned.prefix(24_000)))
         case let .page(pageIndex):
             return await extractPage(from: url, pageIndex: pageIndex, qwenConfiguration: qwenConfiguration)
+        case let .pageRange(range):
+            return await extractPageRange(from: url, range: range, qwenConfiguration: qwenConfiguration)
         case .wholeDocument:
             return extractWholeDocument(from: url)
+        case .none:
+            return nil
         }
+    }
+
+    /// 多页范围：逐页取文字层，扫描页按需 Qwen OCR / 本地 Vision，
+    /// 带【第 N 页】标记拼接成一整段。纯图片页没有可识别文字时跳过。
+    private static func extractPageRange(
+        from url: URL,
+        range: ClosedRange<Int>,
+        qwenConfiguration: QwenConfiguration?
+    ) async -> LearningPageContent? {
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess { url.stopAccessingSecurityScopedResource() }
+        }
+
+        guard let document = PDFDocument(url: url),
+              document.pageCount > 0 else { return nil }
+
+        let limit = 60_000
+        var assembled = ""
+        let clampedEnd = min(range.upperBound, document.pageCount - 1)
+        guard range.lowerBound <= clampedEnd else { return nil }
+
+        for pageIndex in range.lowerBound...clampedEnd {
+            guard let page = document.page(at: pageIndex) else { continue }
+            var text = ExtractedTextNormalizer.normalize(page.string ?? "")
+            if text.count < 40,
+               let qwenConfiguration,
+               let image = renderPageImage(page, maximumLongestSide: Self.ocrRenderLongestSide),
+               let jpeg = jpegData(from: image),
+               let recognized = await QwenOCRService.recognizeText(in: jpeg, configuration: qwenConfiguration),
+               recognized.count >= 40 {
+                text = ExtractedTextNormalizer.normalize(recognized)
+            }
+            if text.count < 40,
+               let image = renderPageImage(page, maximumLongestSide: Self.ocrRenderLongestSide),
+               let recognized = recognizeText(in: image),
+               recognized.count >= 40 {
+                text = recognized
+            }
+            guard !text.isEmpty else { continue }
+            assembled += "【第 \(pageIndex + 1) 页】\n\(text)\n\n"
+            if assembled.count >= limit { break }
+        }
+
+        let trimmed = assembled.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return .text(String(trimmed.prefix(limit)))
     }
 
     private static func extractPage(

@@ -167,6 +167,14 @@ enum SatoriThemeAppKit {
             ? NSColor.white.withAlphaComponent(0.22)
             : NSColor.black.withAlphaComponent(0.14)
     }
+    /// PDF 文字选中的高亮：薰衣草强调色的半透明版。PDFKit 默认用系统蓝
+    /// （selectedTextBackgroundColor），和主题的暖纸 + 薰衣草不搭；用覆盖层
+    /// 把高亮叠成这个颜色，亮暗模式都保持文字可读。
+    static let selectionHighlight = NSColor(name: "SatoriSelectionHighlight") { appearance in
+        appearance.isDarkMode
+            ? NSColor(srgbRed: 0.68, green: 0.63, blue: 0.98, alpha: 0.60)
+            : NSColor(srgbRed: 0.42, green: 0.35, blue: 0.74, alpha: 0.55)
+    }
 }
 
 // MARK: - Reusable surface modifiers

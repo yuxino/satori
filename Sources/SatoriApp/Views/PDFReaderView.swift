@@ -97,6 +97,9 @@ struct PDFReaderView: NSViewRepresentable {
         /// the reader highlighted.
         private var pinnedSelection = ""
         private var toolbar: SelectionToolbarView?
+        /// 主题化选中高亮的覆盖层（PDFKit 不支持直接改内置选区颜色，
+        /// 用一层薰衣草半透明视图叠在系统蓝色选区上）。
+        private var selectionOverlayViews: [NSView] = []
         /// A jump requested through the notification channel but not yet
         /// applied by a binding-driven page change.
         private var pendingJump: ReadingPosition?
@@ -218,9 +221,40 @@ struct PDFReaderView: NSViewRepresentable {
             }
             guard let selection, !text.isEmpty, isOnCurrentPage else {
                 hideToolbar()
+                removeSelectionOverlay()
                 return
             }
             showToolbar(for: selection, in: view)
+            updateSelectionOverlay(in: view)
+        }
+
+        /// 在选区上叠一层主题色高亮。PDFKit 在 macOS 上把用户选区画成系统蓝，
+        /// 且 `PDFSelection.color` 只影响手动绘制；这里按选区的行边界生成
+        /// 薰衣草覆盖层，让选中效果跟上主题。
+        @MainActor private func updateSelectionOverlay(in view: PDFView) {
+            removeSelectionOverlay()
+            guard let selection = view.currentSelection,
+                  !(selection.string?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true),
+                  let page = selection.pages.first,
+                  let document = view.document,
+                  let currentPage = view.currentPage,
+                  document.index(for: page) == document.index(for: currentPage) else { return }
+            for line in selection.selectionsByLine() {
+                guard let linePage = line.pages.first else { continue }
+                let rect = view.convert(line.bounds(for: linePage), from: linePage)
+                    .insetBy(dx: -1, dy: -1)
+                guard rect.intersects(view.visibleRect) else { continue }
+                let overlay = SelectionHighlightView(frame: rect)
+                selectionOverlayViews.append(overlay)
+                view.addSubview(overlay)
+            }
+        }
+
+        @MainActor private func removeSelectionOverlay() {
+            for overlay in selectionOverlayViews {
+                overlay.removeFromSuperview()
+            }
+            selectionOverlayViews.removeAll()
         }
 
         /// How far the current page has scrolled past the top of the viewport,
@@ -286,9 +320,11 @@ struct PDFReaderView: NSViewRepresentable {
             let text = selection?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if text.isEmpty {
                 hideToolbar()
+                removeSelectionOverlay()
             } else {
                 pinnedSelection = text
                 showToolbar(for: selection, in: view)
+                updateSelectionOverlay(in: view)
             }
         }
 
@@ -307,20 +343,21 @@ struct PDFReaderView: NSViewRepresentable {
             bar.layoutSubtreeIfNeeded()
             let size = bar.fittingSize
 
-            // Prefer anchoring just below the selection: while reading, the
-            // space under the selected line is usually text not yet read, so
-            // the bar covers nothing important. Fall back to above only when
-            // the selection sits too close to the page bottom to fit below.
-            // PDFView's subview space is non-flipped (y grows upward).
+            // Prefer anchoring just above the selection: the line above was
+            // already read, so the bar covers nothing the user is about to
+            // read. Fall back to below only when the selection sits too close
+            // to the page top to fit above. PDFView's subview space is
+            // non-flipped (y grows upward).
             let bounds = selection.bounds(for: page)
-            let gap: CGFloat = 8
+            let gap: CGFloat = 12
             let selectionTopInView = view.convert(NSPoint(x: bounds.minX, y: bounds.maxY), from: page).y
             let selectionBottomInView = view.convert(NSPoint(x: bounds.minX, y: bounds.minY), from: page).y
             let leftInView = view.convert(NSPoint(x: bounds.minX, y: bounds.minY), from: page).x
 
             let belowOriginY = selectionBottomInView - gap - size.height
             let aboveOriginY = selectionTopInView + gap
-            let originY: CGFloat = belowOriginY >= gap ? belowOriginY : aboveOriginY
+            let fitsAbove = aboveOriginY + size.height <= view.bounds.height - gap
+            let originY: CGFloat = fitsAbove ? aboveOriginY : belowOriginY
 
             var origin = NSPoint(x: leftInView, y: originY)
             origin.x = min(max(origin.x, gap), max(gap, view.bounds.width - size.width - gap))
@@ -398,14 +435,14 @@ final class SelectionToolbarView: NSView {
     init() {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = SatoriTheme.Radius.md
+        layer?.cornerRadius = 10
         layer?.cornerCurve = .continuous
         layer?.backgroundColor = SatoriThemeAppKit.paperRaised.cgColor
         layer?.borderWidth = 1
         layer?.borderColor = SatoriThemeAppKit.hairlineStrong.cgColor
         layer?.shadowColor = NSColor.black.cgColor
-        layer?.shadowOpacity = 0.28
-        layer?.shadowRadius = 16
+        layer?.shadowOpacity = 0.18
+        layer?.shadowRadius = 12
         layer?.shadowOffset = CGSize(width: 0, height: -4)
 
         let ask = makeButton(title: "问 AI", symbol: "sparkles", action: #selector(askTapped), prominent: true)
@@ -413,8 +450,8 @@ final class SelectionToolbarView: NSView {
         let copy = makeButton(title: "复制", symbol: "doc.on.doc", action: #selector(copyTapped), prominent: false)
         let stack = NSStackView(views: [ask, run, copy])
         stack.orientation = .horizontal
-        stack.spacing = 4
-        stack.edgeInsets = NSEdgeInsets(top: 5, left: 7, bottom: 5, right: 7)
+        stack.spacing = 2
+        stack.edgeInsets = NSEdgeInsets(top: 4, left: 5, bottom: 4, right: 5)
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         NSLayoutConstraint.activate([
@@ -469,6 +506,26 @@ final class SelectionToolbarView: NSView {
     @objc private func copyTapped() { onCopy?() }
 }
 
+/// 主题化选中高亮层：覆盖在 PDFKit 系统蓝色选区上的薰衣草圆角视图。
+/// 亮暗模式切换时随主题刷新。
+private final class SelectionHighlightView: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerRadius = 2
+        layer?.cornerCurve = .continuous
+        layer?.backgroundColor = SatoriThemeAppKit.selectionHighlight.cgColor
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        layer?.backgroundColor = SatoriThemeAppKit.selectionHighlight.cgColor
+    }
+}
+
 /// A custom-styled button for `SelectionToolbarView`. System bezels are
 /// skipped so background, text and icon colors render exactly as designed in
 /// both light and dark mode; hover and press give lightweight feedback.
@@ -492,7 +549,7 @@ private final class SelectionToolbarButton: NSButton {
         imagePosition = .imageLeading
         imageHugsTitle = true
         wantsLayer = true
-        layer?.cornerRadius = SatoriTheme.Radius.sm - 2
+        layer?.cornerRadius = 7
         layer?.cornerCurve = .continuous
         self.title = title
         // attributedTitle 只在这里设置一次。带 image 的 NSButton 反复设置
@@ -548,20 +605,25 @@ private final class SelectionToolbarButton: NSButton {
     /// Re-applies background, border, text and icon colors from the theme.
     private func updateStyle() {
         guard let layer else { return }
-        let foreground: NSColor
         if prominent {
             let base = hovered ? SatoriThemeAppKit.accentButtonHover : SatoriThemeAppKit.accentButton
             let face = pressed ? (base.blended(withFraction: 0.10, of: .black) ?? base) : base
             layer.backgroundColor = face.cgColor
             layer.borderWidth = 0
-            foreground = SatoriThemeAppKit.onAccent
+            contentTintColor = SatoriThemeAppKit.onAccent
         } else {
-            let tinted = hovered || pressed
-            layer.backgroundColor = (tinted ? SatoriThemeAppKit.accentWash : SatoriThemeAppKit.paperRaised).cgColor
-            layer.borderWidth = 1
-            layer.borderColor = SatoriThemeAppKit.hairlineStrong.cgColor
-            foreground = .labelColor
+            // 胶囊里的次级按钮：平时无底，悬停/按下用薰衣草淡色，图标跟着变强调色。
+            if pressed {
+                let pressedWash = SatoriThemeAppKit.accentWash.blended(withFraction: 0.30, of: .black)
+                    ?? SatoriThemeAppKit.accentWash
+                layer.backgroundColor = pressedWash.cgColor
+            } else if hovered {
+                layer.backgroundColor = SatoriThemeAppKit.accentWash.cgColor
+            } else {
+                layer.backgroundColor = NSColor.clear.cgColor
+            }
+            layer.borderWidth = 0
+            contentTintColor = hovered ? SatoriThemeAppKit.accent : NSColor.labelColor
         }
-        contentTintColor = foreground
     }
 }

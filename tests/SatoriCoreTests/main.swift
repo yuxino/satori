@@ -186,7 +186,8 @@ struct SatoriCoreTests {
                 expectedModelID: "qwen3.7-plus",
                 expectedImageCount: 1,
                 expectsWebSearch: false,
-                expectedHistoryTurnCount: 0
+                expectedHistoryTurnCount: 0,
+                expectsPageContent: false
             )
         ).explain(request: "解释扫描页", pageIndex: 4)
         precondition(imageResponse.text == "fixture explanation", "Expected scanned-page output text")
@@ -214,6 +215,65 @@ struct SatoriCoreTests {
         precondition(streamUpdates.first?.text == "fixture ", "Expected first streaming text delta")
         precondition(streamUpdates.last?.text == "fixture explanation", "Expected assembled streaming response")
         precondition(streamUpdates.last?.citations.first?.url.absoluteString == "https://example.com/source", "Expected final streaming citations")
+
+        // 不带页上下文的提问：请求里不得夹带「正在阅读第 N 页」的页面内容，
+        // 也不能把 nil 页面当成图片发送。
+        let bareQuestion = await QwenLearningAssistant(
+            apiKey: "fixture-key",
+            pageContent: nil,
+            transport: FixtureAssistantTransport(
+                expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
+                expectedModelID: "qwen3.8-max",
+                expectedImageCount: 0,
+                expectsWebSearch: false,
+                expectedHistoryTurnCount: 0,
+                expectsPageContent: false
+            )
+        ).explain(request: "解释一下这个概念", pageIndex: 3)
+        precondition(bareQuestion.text == "fixture explanation", "Expected no-context question to still answer")
+
+        // 上下文范围持久化：新枚举可编码往返，旧存档（缺字段）解码为 nil，
+        // 不能因为新增字段而让整本书的学习记录读不出来。
+        let scopes: [LearningContextScope] = [
+            .none,
+            .page,
+            .pageRange(start: 2, end: 5),
+            .wholeDocument
+        ]
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+        for scope in scopes {
+            let data = try encoder.encode(scope)
+            let decoded = try decoder.decode(LearningContextScope.self, from: data)
+            precondition(decoded == scope, "Expected context scope Codable round-trip")
+        }
+        let legacyTurnJSON = """
+        {
+          "id": "\(UUID().uuidString)",
+          "question": "旧问题",
+          "answer": "旧答案",
+          "pageIndex": 1,
+          "sourceKind": "currentPDF",
+          "citations": [],
+          "attachmentCount": 0,
+          "createdAt": 1750000000,
+          "completion": "completed"
+        }
+        """
+        let legacyTurn = try decoder.decode(LearningTurn.self, from: Data(legacyTurnJSON.utf8))
+        precondition(legacyTurn.contextScope == nil, "Expected legacy turns to decode without contextScope")
+        precondition(legacyTurn.responseDuration == nil, "Expected legacy turns to decode without responseDuration")
+        let timedTurn = LearningTurn(
+            question: "带耗时的问答",
+            answer: "回答",
+            pageIndex: 0,
+            sourceKind: .currentPDF,
+            contextScope: .pageRange(start: 1, end: 3),
+            responseDuration: 4.2
+        )
+        let timedRoundTrip = try decoder.decode(LearningTurn.self, from: encoder.encode(timedTurn))
+        precondition(timedRoundTrip.contextScope == .pageRange(start: 1, end: 3), "Expected context scope to persist")
+        precondition(abs((timedRoundTrip.responseDuration ?? -1) - 4.2) < 0.001, "Expected response duration to persist")
 
         // Glyph-positioned PDFs hand back CJK text with a space wedged between
         // every character ("返 回 正 整 数"). Those spaces are always artifacts
@@ -405,6 +465,7 @@ private struct FixtureAssistantTransport: AssistantTransport {
     let expectedImageCount: Int
     let expectsWebSearch: Bool
     let expectedHistoryTurnCount: Int
+    var expectsPageContent: Bool = true
 
     func send(_ request: URLRequest) async throws -> AssistantTransportResponse {
         try validate(request, expectsStreaming: false)
@@ -448,6 +509,10 @@ private struct FixtureAssistantTransport: AssistantTransport {
             precondition(assistantContent.first?["type"] as? String == "output_text", "Expected prior answer output content")
         }
         let content = try XCTUnwrap(input.last?["content"] as? [[String: Any]])
+        let pageText = content.filter { $0["type"] as? String == "input_text" }
+            .compactMap { $0["text"] as? String }
+            .first { $0.hasPrefix("用户正在阅读 PDF 第") }
+        precondition((pageText != nil) == expectsPageContent, "Expected page content presence to match scope")
         let images = content.filter { $0["type"] as? String == "input_image" }
         precondition(images.count == expectedImageCount, "Expected page and attachment image inputs")
         precondition(images.allSatisfy { ($0["image_url"] as? String)?.hasPrefix("data:image/jpeg;base64,") == true }, "Expected Base64 JPEG data URLs")
