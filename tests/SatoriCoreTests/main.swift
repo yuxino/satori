@@ -200,6 +200,8 @@ struct SatoriCoreTests {
         precondition(QwenLearningAssistant.responseTokenBudget(for: "简化，字太多") == 560, "Expected simplify requests to lower the output budget")
         precondition(QwenLearningAssistant.responseTokenBudget(for: "我刚开始读这一章，请给我阅读路线图") == 900, "Expected reading maps to keep enough room for structure")
         precondition(QwenLearningAssistant.responseTokenBudget(for: "解释这一页") == 1_400, "Expected ordinary explanations to keep the normal budget")
+        precondition(QwenLearningAssistant.responseTokenBudget(for: "解释我选中的这段内容", hasSelection: true) == 700, "Expected selected-passage explanations to stay compact by default")
+        precondition(QwenLearningAssistant.responseTokenBudget(for: "完整代码", hasSelection: true) == 1_400, "Expected explicit complete-code requests to keep enough room")
         precondition(
             ReadingFactAnswer.pageCountAnswer(
                 for: "这一章有多少页",
@@ -461,9 +463,9 @@ struct SatoriCoreTests {
                 expectsWebSearch: false,
                 expectedHistoryTurnCount: 0,
                 expectsSelectionText: true,
-                expectedMaxOutputTokens: 560
+                expectedMaxOutputTokens: 700
             )
-        ).explain(request: "用更简单的话解释", pageIndex: 2)
+        ).explain(request: "解释我选中的这段内容", pageIndex: 2)
         precondition(selectionResponse.text == "fixture explanation", "Expected selected-passage output text")
 
         let imageResponse = await QwenLearningAssistant(

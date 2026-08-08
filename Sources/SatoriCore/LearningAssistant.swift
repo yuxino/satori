@@ -241,7 +241,7 @@ public struct QwenLearningAssistant: LearningAssistant {
     /// Keep a compact follow-up compact at the transport level too. Prompting
     /// alone is not enough: a model can still spend the whole budget repeating
     /// the evidence/explanation template after the reader says “简化”.
-    public static func responseTokenBudget(for request: String) -> Int {
+    public static func responseTokenBudget(for request: String, hasSelection: Bool = false) -> Int {
         let normalized = request.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return 1_400 }
 
@@ -259,6 +259,10 @@ public struct QwenLearningAssistant: LearningAssistant {
         }
         if normalized.contains("微实验") || normalized.contains("30 秒") {
             return 650
+        }
+        if hasSelection,
+           !["完整代码", "逐行", "详细", "深入", "推导", "全部"].contains(where: normalized.contains) {
+            return 700
         }
         return 1_400
     }
@@ -527,7 +531,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         if let selectionText, !selectionText.isEmpty {
             content.append(.init(
                 type: "input_text",
-                text: "用户在 PDF 中选中的原文（这是本轮优先解释的对象）：\n「\(String(selectionText.prefix(4_000)))」",
+                text: "用户在 PDF 中选中的原文（这是本轮优先解释的对象）：\n「\(String(selectionText.prefix(4_000)))」\n\n选中内容默认先用一句话说明它在解决什么，再用不超过 3 点解释关键术语或步骤；除非用户明确要求完整代码、逐行解释、深入推导或全部细节，不要逐句翻译或大段复述。",
                 imageURL: nil
             ))
         }
@@ -560,7 +564,7 @@ public struct QwenLearningAssistant: LearningAssistant {
             tools: allowsWebSearch ? [.init(type: "web_search")] : nil,
             store: false,
             stream: streamsResponse,
-            maxOutputTokens: Self.responseTokenBudget(for: question)
+            maxOutputTokens: Self.responseTokenBudget(for: question, hasSelection: selectionText?.isEmpty == false)
         )
     }
 
