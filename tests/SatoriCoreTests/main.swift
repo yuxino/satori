@@ -248,6 +248,26 @@ struct SatoriCoreTests {
         ).explain(request: "解释一下这个概念", pageIndex: 3)
         precondition(bareQuestion.text == "fixture explanation", "Expected no-context question to still answer")
 
+        // 主动验证后的下一条消息必须明确告诉模型：这是用户在作答，
+        // 需要判断理解是否成立并指出关键修正，而不是把回答当成普通追问。
+        let verificationResponse = await QwenLearningAssistant(
+            apiKey: "fixture-key",
+            pageContent: .text("fixture page text"),
+            isVerificationResponse: true,
+            conversationContext: [
+                .init(question: "验证一下", answer: "请说说这个概念在实际中怎么用。")
+            ],
+            transport: FixtureAssistantTransport(
+                expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
+                expectedModelID: "qwen3.8-max",
+                expectedImageCount: 0,
+                expectsWebSearch: false,
+                expectedHistoryTurnCount: 1,
+                expectsVerificationResponse: true
+            )
+        ).explain(request: "我觉得它是先保存状态，再根据状态决定下一步。", pageIndex: 2)
+        precondition(verificationResponse.text == "fixture explanation", "Expected verification response to use the normal answer path")
+
         // 上下文范围持久化：新枚举可编码往返，旧存档（缺字段）解码为 nil，
         // 不能因为新增字段而让整本书的学习记录读不出来。
         let scopes: [LearningContextScope] = [
@@ -521,6 +541,7 @@ private struct FixtureAssistantTransport: AssistantTransport {
     let expectedHistoryTurnCount: Int
     var expectsPageContent: Bool = true
     var expectsSelectionText: Bool = false
+    var expectsVerificationResponse: Bool = false
 
     func send(_ request: URLRequest) async throws -> AssistantTransportResponse {
         try validate(request, expectsStreaming: false)
@@ -575,6 +596,10 @@ private struct FixtureAssistantTransport: AssistantTransport {
         if expectsSelectionText {
             precondition(selectionText?.contains("文件系统在不同操作系统中有不同的结构") == true, "Expected selected passage to be preserved as a separate input")
         }
+        let verificationMarker = content.filter { $0["type"] as? String == "input_text" }
+            .compactMap { $0["text"] as? String }
+            .first { $0.hasPrefix("这是用户对上一轮“验证一下”情境的回答") }
+        precondition((verificationMarker != nil) == expectsVerificationResponse, "Expected verification response marker to match request")
         let images = content.filter { $0["type"] as? String == "input_image" }
         precondition(images.count == expectedImageCount, "Expected page and attachment image inputs")
         precondition(images.allSatisfy { ($0["image_url"] as? String)?.hasPrefix("data:image/jpeg;base64,") == true }, "Expected Base64 JPEG data URLs")

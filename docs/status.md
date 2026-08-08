@@ -40,12 +40,15 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Real-PDF reading pass hardening: a previous-page selection no longer hides the current-page entry; old anchors collapse to a low-interference “上次卡在第 N 页” cue; active answers label their target page and the composer reports the request's actual scope; completed answers remain discoverable when the reader crosses a page boundary.
 - Selection anchors now carry document identity, a capped normalized passage, and a page offset through the reader → assistant route. Returning from a historical answer or reopening a document can restore the actual PDF text selection, not only the page. Legacy turn archives normalize invalid page, attachment, and selection-offset values on decode.
 - The secondary answer menu now calls the opt-in comprehension check “验证一下”: it asks for a small situation first, so reading can stay comprehension-first instead of turning every page into a quiz.
+- Request feedback now separates “连接本机 Qwen 配置 / 读取 PDF / 等待首段回答 / 正在输出”, so a slow step is visible instead of looking like a frozen reader.
+- Page, multi-page, and whole-document extraction now use a small in-memory cache keyed by the PDF file signature, context scope, and model; repeated follow-ups on the same page no longer reopen and re-read the document.
+- Background Qwen configuration reads share one in-flight operation, avoid prompting from the reading loop, and fail fast after 8 seconds if macOS Keychain Services is unresponsive. Settings keeps the explicit interactive save/recovery path, and API keys remain Keychain-only.
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 
 ## Next milestone
 
-Make the selected passage a first-class `SelectionAnchor` in the core request/turn model, including a stable local text/rect representation for PDFs whose text extraction differs from the visible glyphs. Then reduce first-token latency for page understanding and add opt-in micro experiments for concepts that genuinely benefit from manipulation; do not turn the reader into a general code execution surface. OCR-based editable table-of-contents extraction remains useful for scanned PDFs without outlines (`lang.pdf`, `software.pdf`), but it follows the comprehension loop rather than leading it.
+Finish the unlocked end-to-end `system.pdf` reading pass: real answer, “验证一下” follow-up, return to the anchored passage, and a page transition. Measure first-token latency only after the Keychain connection is healthy; the current investigation found that the earlier apparent PDF delay was actually a blocked Keychain read. Then add opt-in micro experiments for concepts that genuinely benefit from manipulation; do not turn the reader into a general code execution surface. OCR-based editable table-of-contents extraction remains useful for scanned PDFs without outlines (`lang.pdf`, `software.pdf`), but it follows the comprehension loop rather than leading it.
 
 ## Open questions
 

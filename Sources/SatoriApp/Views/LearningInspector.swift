@@ -53,6 +53,15 @@ struct LearningInspector: View {
         var id: String { rawValue }
     }
 
+    /// 一轮回答的准备阶段；把本地取材和模型首字等待分开，用户才知道
+    /// 是 Satori 还在读 PDF，还是 Qwen 已收到请求但尚未开始输出。
+    private enum RequestPhase: Equatable {
+        case loadingConfiguration
+        case preparing
+        case waitingForFirstToken
+        case streaming
+    }
+
     let documentID: UUID
     let pageIndex: Int
     let pageCount: Int
@@ -121,6 +130,11 @@ struct LearningInspector: View {
     @State private var attachmentStatus = ""
     /// 这一轮回答开始的时间；用于「过程」脚注里显示耗时。
     @State private var streamStartDate: Date?
+    @State private var requestPhase: RequestPhase = .preparing
+    /// 验证提示回答完成后，下一次输入应被理解为用户自己的回答；
+    /// 它只存在于当前阅读现场，不把 Satori 变成强制测验系统。
+    @State private var pendingVerification = false
+    @State private var draftIsVerification = false
     @FocusState private var isQuestionFocused: Bool
     @State private var requestTask: Task<Void, Never>?
     @State private var showsClearConfirmation = false
@@ -1272,7 +1286,8 @@ struct LearningInspector: View {
                         pageOverride: turn.pageIndex,
                         scope: turn.contextScope ?? .page,
                         selectionText: turn.selectionText,
-                        selectionOffset: turn.selectionOffset
+                        selectionOffset: turn.selectionOffset,
+                        verification: true
                     )
                 }
                 Divider()
@@ -1605,6 +1620,9 @@ struct LearningInspector: View {
     }
 
     private var composerPlaceholder: String {
+        if pendingVerification {
+            return "用自己的话回答上面的情境…"
+        }
         if turns.isEmpty {
             return "想问什么？可以附上图片…"
         }
@@ -1616,6 +1634,9 @@ struct LearningInspector: View {
 
     private var composerHint: String {
         let web = allowsWebSearch ? "、联网" : ""
+        if pendingVerification, !isThinking {
+            return "先用自己的话回答上面的情境 · Enter 发送 · Shift+Enter 换行 · 参考：最近对话、附件\(web)"
+        }
         let scopeText: String
         if isThinking, !draftQuestion.isEmpty {
             scopeText = contextAnchorLabel(draftContextScope, pageIndex: draftPageIndex) ?? "不带上下文"
@@ -1634,6 +1655,17 @@ struct LearningInspector: View {
     }
 
     private var streamingStatusText: String {
+        if requestPhase == .loadingConfiguration {
+            return "正在连接本机 Qwen 配置…"
+        }
+        if requestPhase == .preparing {
+            return preparingStatusText
+        }
+        if requestPhase == .waitingForFirstToken {
+            return allowsWebSearch
+                ? "已送达 Qwen，正在联网并等待首段回答…"
+                : "已送达 Qwen，等待首段回答…"
+        }
         if allowsWebSearch { return "正在联网搜索资料并组织回答…" }
         if contextMode == .chapter {
             if case .pageRange = draftContextScope {
@@ -1648,6 +1680,15 @@ struct LearningInspector: View {
         }
     }
 
+    private var preparingStatusText: String {
+        switch draftContextScope {
+        case .none: "正在准备问题…"
+        case .page: "正在读取第 \(draftPageIndex + 1) 页…"
+        case .pageRange: "正在整理所选页面…"
+        case .wholeDocument: "正在整理全书内容…"
+        }
+    }
+
     @MainActor
     private func loadHistory() async {
         isLoadingHistory = true
@@ -1658,6 +1699,9 @@ struct LearningInspector: View {
         activeSelectionOffset = nil
         completedElsewherePage = nil
         recentCompletedPage = nil
+        pendingVerification = false
+        draftIsVerification = false
+        requestPhase = .preparing
         do {
             let loadedTurns = try await sessionStore.turns(for: documentID)
             guard !Task.isCancelled else { return }
@@ -1707,10 +1751,15 @@ struct LearningInspector: View {
         excludingTurnID: UUID? = nil,
         scope: LearningContextScope = .page,
         selectionText: String? = nil,
-        selectionOffset: Double? = nil
+        selectionOffset: Double? = nil,
+        verification: Bool = false
     ) {
         let request = (suppliedQuestion ?? question).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty, !isThinking else { return }
+
+        let isAnswerToVerification = pendingVerification && !verification
+        pendingVerification = false
+        draftIsVerification = verification
 
         // 输入框发送（suppliedQuestion == nil）优先沿用选区所在页；
         // 快捷提问、时间线重问各自带自己的上下文。
@@ -1798,14 +1847,16 @@ struct LearningInspector: View {
         response = LearningResponse(text: "", sourceKind: .currentPDF, pageIndex: targetPageIndex)
         isThinking = true
         streamStartDate = .now
+        requestPhase = .loadingConfiguration
         completedElsewherePage = nil
 
         requestTask = Task {
             // 配置读取很快（钥匙串结果有进程内缓存），放在前面，
             // 扫描页 OCR 需要配置；没配置就直接提示，不必白跑提取。
-            let configuration = await Task.detached(priority: .userInitiated) {
-                (config: QwenConfigurationStore.read(), prompt: QwenConfigurationStore.readCustomPrompt())
-            }.value
+            let configuration = (
+                config: await QwenConfigurationStore.readAsync(),
+                prompt: QwenConfigurationStore.readCustomPrompt()
+            )
             if Task.isCancelled { return }
             guard let config = configuration.config else {
                 hasQwenConfiguration = false
@@ -1814,13 +1865,16 @@ struct LearningInspector: View {
                 streamStartDate = nil
                 requestTask = nil
                 response = LearningResponse(
-                    text: "请先在设置中连接 Qwen。百炼 API Key 只会保存在这台 Mac 的钥匙串中。",
+                    text: QwenConfigurationStore.hasSavedConfigurationMarker()
+                        ? "本机钥匙串暂时没有响应，Satori 没有继续等待。请打开设置，重新保存一次 Qwen 连接后再试。API Key 只会保存在这台 Mac 的钥匙串中。"
+                        : "请先在设置中连接 Qwen。百炼 API Key 只会保存在这台 Mac 的钥匙串中。",
                     sourceKind: .inference,
                     pageIndex: targetPageIndex
                 )
                 return
             }
             hasQwenConfiguration = true
+            requestPhase = .preparing
 
             // 不带上下文时直接跳过 PDF 提取，提问零等待、请求也不夹带页面。
             // 需要上下文时，提取（含扫描页渲染 + Qwen OCR）放到后台任务，
@@ -1863,14 +1917,19 @@ struct LearningInspector: View {
                 modelID: config.modelID,
                 pageContent: pageContent,
                 selectionText: effectiveSelectionText,
+                isVerificationResponse: isAnswerToVerification,
                 additionalImagesJPEG: submittedAttachments.map(\.jpegData),
                 conversationContext: context,
                 allowsWebSearch: allowsWebSearch,
                 instructions: configuration.prompt
             )
             var latestResponse: LearningResponse?
+            requestPhase = .waitingForFirstToken
             for await update in assistant.streamExplain(request: request, pageIndex: targetPageIndex) {
                 if Task.isCancelled { return }
+                if !update.text.isEmpty, update.sourceKind != .inference {
+                    requestPhase = .streaming
+                }
                 latestResponse = update
                 response = update
             }
@@ -1935,6 +1994,9 @@ struct LearningInspector: View {
             draftSelectionText = nil
             draftSelectionOffset = nil
             activeAttachmentPreviews = []
+            pendingVerification = false
+            draftIsVerification = false
+            requestPhase = .preparing
             self.response = nil
             return
         }
@@ -1962,6 +2024,9 @@ struct LearningInspector: View {
         )
         turns.append(turn)
         recentCompletedPage = targetPage
+        pendingVerification = draftIsVerification
+        draftIsVerification = false
+        requestPhase = .preparing
         draftQuestion = ""
         draftAttachmentCount = 0
         draftContextScope = .none
@@ -2000,6 +2065,9 @@ struct LearningInspector: View {
         attachmentStatus = ""
         completedElsewherePage = nil
         recentCompletedPage = nil
+        pendingVerification = false
+        draftIsVerification = false
+        requestPhase = .preparing
         pendingSelectionPage = nil
         activeSelectionText = nil
         activeSelectionPage = nil
@@ -2094,9 +2162,7 @@ struct LearningInspector: View {
         guard markedAsConfigured, !isCheckingConfiguration else { return }
         isCheckingConfiguration = true
         Task {
-            let hasConfiguration = await Task.detached(priority: .utility) {
-                QwenConfigurationStore.read() != nil
-            }.value
+            let hasConfiguration = await QwenConfigurationStore.readAsync() != nil
             guard !Task.isCancelled else { return }
             hasQwenConfiguration = hasConfiguration
             isCheckingConfiguration = false

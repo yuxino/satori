@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 import Security
 import SatoriCore
 
@@ -9,6 +10,89 @@ extension Notification.Name {
 struct QwenConfiguration: Sendable {
     let apiKey: String
     let modelID: String
+}
+
+private enum ConfigurationReadOutcome {
+    case value(QwenConfiguration?)
+    case timeout
+}
+
+/// 让钥匙串读取和超时计时器真正解耦。结构化 TaskGroup 在退出时会等待
+/// 所有子任务；如果 Security.framework 卡住，单靠 group.cancelAll() 仍会
+/// 拖住界面，所以这里用一个小型锁保护的 continuation，只交付第一个结果。
+private final class ConfigurationReadRace: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<ConfigurationReadOutcome, Never>?
+    private var pending: ConfigurationReadOutcome?
+
+    func wait() async -> ConfigurationReadOutcome {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if let pending {
+                self.pending = nil
+                lock.unlock()
+                continuation.resume(returning: pending)
+            } else {
+                self.continuation = continuation
+                lock.unlock()
+            }
+        }
+    }
+
+    func finish(_ outcome: ConfigurationReadOutcome) {
+        lock.lock()
+        if let continuation {
+            self.continuation = nil
+            lock.unlock()
+            continuation.resume(returning: outcome)
+        } else {
+            // Both unstructured tasks can finish before `wait()` installs its
+            // continuation; preserve whichever result arrived first.
+            if pending == nil { pending = outcome }
+            lock.unlock()
+        }
+    }
+}
+
+/// 启动时配置检查和第一次提问可能同时发生。钥匙串读取在某些系统状态
+/// 下会等待授权或安全服务响应；共享 in-flight task，避免两个调用各自卡住
+/// 一次，也让后续请求直接命中 QwenConfigurationStore 的进程内缓存。
+private actor ConfigurationReadGate {
+    private var inFlight: Task<QwenConfiguration?, Never>?
+    private var unavailableUntil = Date.distantPast
+
+    func value() async -> QwenConfiguration? {
+        guard Date() >= unavailableUntil else { return nil }
+        if let inFlight {
+            return await inFlight.value
+        }
+        let task = Task.detached(priority: .utility) {
+            // 阅读流程不能在后台等待钥匙串弹出交互；需要用户确认时，
+            // 让设置页在明确的用户动作中读取/保存一次即可。
+            QwenConfigurationStore.read(allowInteraction: false)
+        }
+        inFlight = task
+        let race = ConfigurationReadRace()
+        Task.detached(priority: .utility) {
+            race.finish(.value(await task.value))
+        }
+        Task.detached(priority: .utility) {
+            try? await Task.sleep(for: .seconds(8))
+            race.finish(.timeout)
+        }
+        let outcome = await race.wait()
+        inFlight = nil
+        switch outcome {
+        case let .value(result):
+            return result
+        case .timeout:
+            // A stuck Keychain Services call must never hold the reading loop
+            // hostage. The detached operation may finish later, but new asks
+            // fail fast for a short cooldown and can direct the user to Settings.
+            unavailableUntil = Date().addingTimeInterval(30)
+            return nil
+        }
+    }
 }
 
 enum QwenModelOption: String, CaseIterable, Identifiable {
@@ -58,6 +142,11 @@ enum QwenConfigurationStore {
     /// `qwenConfigurationDidChange` 通知失效，重新读取。
     private static let cacheLock = NSLock()
     private nonisolated(unsafe) static var cachedAPIKey: String?
+    private static let configurationReadGate = ConfigurationReadGate()
+
+    static func readAsync() async -> QwenConfiguration? {
+        await configurationReadGate.value()
+    }
 
     private static func cachedAPIKeyValue() -> String? {
         cacheLock.lock()
@@ -81,7 +170,7 @@ enum QwenConfigurationStore {
         }
     }()
 
-    static func read() -> QwenConfiguration? {
+    static func read(allowInteraction: Bool = true) -> QwenConfiguration? {
         _ = configurationDidChangeObserver
         UserDefaults.standard.removeObject(forKey: legacyAPIHostDefaultsKey)
         if let cachedKey = cachedAPIKeyValue() {
@@ -90,11 +179,11 @@ enum QwenConfigurationStore {
         }
         do {
             let apiKey: String
-            if let savedKey = try readKeychainAPIKey() {
+            if let savedKey = try readKeychainAPIKey(allowInteraction: allowInteraction) {
                 apiKey = savedKey
                 try? removeTransitionalKeyFile()
-                ensureKeychainACL(apiKey: apiKey)
-            } else if let migratedKey = try migrateTransitionalKeyFile() {
+                ensureKeychainACL(apiKey: apiKey, allowInteraction: allowInteraction)
+            } else if let migratedKey = try migrateTransitionalKeyFile(allowInteraction: allowInteraction) {
                 apiKey = migratedKey
             } else {
                 UserDefaults.standard.set(false, forKey: configuredDefaultsKey)
@@ -186,10 +275,15 @@ enum QwenConfigurationStore {
         ]
     }
 
-    private static func readKeychainAPIKey() throws -> String? {
+    private static func readKeychainAPIKey(allowInteraction: Bool = true) throws -> String? {
         var query = keychainLookup
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
+        if !allowInteraction {
+            let context = LAContext()
+            context.interactionNotAllowed = true
+            query[kSecUseAuthenticationContext as String] = context
+        }
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         if status == errSecItemNotFound { return nil }
@@ -245,7 +339,7 @@ enum QwenConfigurationStore {
     /// （重新打包、换证书、从旧构建迁移过来），删除并用当前应用重建。
     /// 重建只发生在签名变化后的第一次读取（最多弹一次授权框），之后保持静默。
     /// 拿不到签名标识（未签名调试构建）时跳过，避免反复重建。
-    private static func ensureKeychainACL(apiKey: String) {
+    private static func ensureKeychainACL(apiKey: String, allowInteraction: Bool) {
         guard let current = currentAppRequirement() else { return }
         let stored = UserDefaults.standard.string(forKey: keychainACLRequirementDefaultsKey)
         guard stored != current else { return }
@@ -254,7 +348,7 @@ enum QwenConfigurationStore {
         guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else { return }
         do {
             try writeKeychainAPIKey(apiKey)
-            guard try readKeychainAPIKey() == apiKey else { return }
+            guard try readKeychainAPIKey(allowInteraction: allowInteraction) == apiKey else { return }
             UserDefaults.standard.set(current, forKey: keychainACLRequirementDefaultsKey)
         } catch {
             // 重建失败：保持现状，下次读取或保存连接时再试。
@@ -281,10 +375,10 @@ enum QwenConfigurationStore {
         UserDefaults.standard.set(current, forKey: keychainACLRequirementDefaultsKey)
     }
 
-    private static func migrateTransitionalKeyFile() throws -> String? {
+    private static func migrateTransitionalKeyFile(allowInteraction: Bool) throws -> String? {
         guard let apiKey = readTransitionalKeyFile() else { return nil }
         try writeKeychainAPIKey(apiKey)
-        guard try readKeychainAPIKey() == apiKey else {
+        guard try readKeychainAPIKey(allowInteraction: allowInteraction) == apiKey else {
             throw KeychainError.verificationFailed
         }
         try removeTransitionalKeyFile()

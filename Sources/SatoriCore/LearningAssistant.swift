@@ -207,6 +207,9 @@ public struct QwenLearningAssistant: LearningAssistant {
     /// 用户在 PDF 中主动选中的原文。它和问题分开传输，让模型明确
     /// 这段文字是本轮优先理解的对象，而不是普通聊天内容。
     private let selectionText: String?
+    /// 用户正在回答上一轮主动发起的轻量理解验证；让模型按“判断 + 关键修正”
+    /// 处理，而不是把这句话误当成一个新的普通问题。
+    private let isVerificationResponse: Bool
     private let additionalImagesJPEG: [Data]
     private let conversationContext: [LearningConversationContext]
     private let allowsWebSearch: Bool
@@ -219,6 +222,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         modelID: String = QwenLearningAssistant.defaultModelID,
         pageContent: LearningPageContent?,
         selectionText: String? = nil,
+        isVerificationResponse: Bool = false,
         additionalImagesJPEG: [Data] = [],
         conversationContext: [LearningConversationContext] = [],
         allowsWebSearch: Bool = false,
@@ -231,6 +235,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         self.modelID = normalizedModelID.isEmpty ? Self.defaultModelID : normalizedModelID
         self.pageContent = pageContent
         self.selectionText = selectionText?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.isVerificationResponse = isVerificationResponse
         self.additionalImagesJPEG = additionalImagesJPEG
         self.conversationContext = conversationContext
         self.allowsWebSearch = allowsWebSearch
@@ -464,6 +469,13 @@ public struct QwenLearningAssistant: LearningAssistant {
             content.append(.init(
                 type: "input_text",
                 text: "用户在 PDF 中选中的原文（这是本轮优先解释的对象）：\n「\(String(selectionText.prefix(4_000)))」",
+                imageURL: nil
+            ))
+        }
+        if isVerificationResponse {
+            content.append(.init(
+                type: "input_text",
+                text: "这是用户对上一轮“验证一下”情境的回答。请先判断用户是否抓住了核心，再给出原文依据和最关键的一处修正；不要重新出题，不要求死记硬背，也不要把整段答案重写成教程。",
                 imageURL: nil
             ))
         }

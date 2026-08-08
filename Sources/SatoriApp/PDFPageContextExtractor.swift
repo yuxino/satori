@@ -16,7 +16,40 @@ enum PDFPageContextExtractor {
         case wholeDocument
         /// 不带任何页上下文。
         case none
+
+        var cacheToken: String {
+            switch self {
+            case let .selection(text): "selection:\(text.hashValue)"
+            case let .page(index): "page:\(index)"
+            case let .pageRange(range): "range:\(range.lowerBound)-\(range.upperBound)"
+            case .wholeDocument: "whole"
+            case .none: "none"
+            }
+        }
     }
+
+    /// 页面提取是阅读追问的本地前置步骤。PDFKit 每次重新打开 294 页的
+    /// 文档会让用户误以为 Qwen 没响应；缓存已经提取的内容，让同一文档的
+    /// 追问、验证和“接上文”直接进入模型请求。文件签名变化时自然换 key，
+    /// 不会把替换后的 PDF 内容带进旧回答。
+    private actor ContentCache {
+        private var values: [String: LearningPageContent] = [:]
+        private let capacity = 24
+
+        func value(for key: String) -> LearningPageContent? {
+            values[key]
+        }
+
+        func insert(_ value: LearningPageContent, for key: String) {
+            if values.count >= capacity, values[key] == nil,
+               let oldestKey = values.keys.first {
+                values.removeValue(forKey: oldestKey)
+            }
+            values[key] = value
+        }
+    }
+
+    private static let contentCache = ContentCache()
 
     /// 提取页面内容。配置了 Qwen 时，扫描页优先走 Qwen OCR；
     /// 未配置或 Qwen 失败时回退本地 Vision OCR，最后退回高清页图。
@@ -30,15 +63,42 @@ enum PDFPageContextExtractor {
             let cleaned = ExtractedTextNormalizer.normalize(text)
             guard !cleaned.isEmpty else { return nil }
             return .text(String(cleaned.prefix(24_000)))
-        case let .page(pageIndex):
-            return await extractPage(from: url, pageIndex: pageIndex, qwenConfiguration: qwenConfiguration)
-        case let .pageRange(range):
-            return await extractPageRange(from: url, range: range, qwenConfiguration: qwenConfiguration)
-        case .wholeDocument:
-            return await extractWholeDocument(from: url)
         case .none:
             return nil
+        case .page, .pageRange, .wholeDocument:
+            let key = cacheKey(for: url, scope: scope, qwenConfiguration: qwenConfiguration)
+            if let cached = await contentCache.value(for: key) {
+                return cached
+            }
+
+            let extracted: LearningPageContent?
+            switch scope {
+            case let .page(pageIndex):
+                extracted = await extractPage(from: url, pageIndex: pageIndex, qwenConfiguration: qwenConfiguration)
+            case let .pageRange(range):
+                extracted = await extractPageRange(from: url, range: range, qwenConfiguration: qwenConfiguration)
+            case .wholeDocument:
+                extracted = await extractWholeDocument(from: url)
+            case .selection, .none:
+                extracted = nil
+            }
+            if let extracted {
+                await contentCache.insert(extracted, for: key)
+            }
+            return extracted
         }
+    }
+
+    private static func cacheKey(
+        for url: URL,
+        scope: Scope,
+        qwenConfiguration: QwenConfiguration?
+    ) -> String {
+        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        let modification = values?.contentModificationDate?.timeIntervalSince1970 ?? -1
+        let size = values?.fileSize ?? -1
+        let model = qwenConfiguration?.modelID ?? "local"
+        return "\(url.standardizedFileURL.path)|\(modification)|\(size)|\(scope.cacheToken)|\(model)"
     }
 
     /// 多页范围：并发取各页文字层，扫描页按需 Qwen OCR / 本地 Vision，
