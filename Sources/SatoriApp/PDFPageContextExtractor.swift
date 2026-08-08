@@ -277,13 +277,18 @@ enum PDFPageContextExtractor {
         }()
         let nearbySet = Set(nearbyPages)
         let allPages = Array(0..<document.pageCount)
-        // 整本书也必须先保证当前阅读位置附近在上下文里；否则前 6 万字符
-        // 会被书的开头吃完，用户在第 188 页提问时却拿不到眼前内容。
-        // 同时把附近页排到 OCR 队列前面，扫描版也优先识别当前页。
-        // The nearby pages are the only pages the reader is looking at now;
-        // give those scanned pages the better Qwen OCR path when a connection
-        // is available. The rest of a whole-book pass stays local and bounded
-        // so asking for a book overview never turns into dozens of OCR calls.
+        let representativePages = representativePageIndices(
+            in: document,
+            excluding: nearbySet
+        )
+        let representativeSet = Set(representativePages)
+        let remainingPages = allPages.filter {
+            !nearbySet.contains($0) && !representativeSet.contains($0)
+        }
+        // 整本书也必须先保证当前阅读位置附近和全书结构代表页在上下文里；
+        // 否则 6 万字符会被书的开头吃完，用户问“这本书难吗”时看不到后半本。
+        // 代表页优先取 PDF 目录的一级条目，再补全书均匀采样；剩余页面最后
+        // 填充，保持上下文覆盖面，同时不让整本扫描版触发无限 OCR。
         let nearbyResults = await extractPagesConcurrently(
             document: document,
             indices: nearbyPages,
@@ -292,23 +297,41 @@ enum PDFPageContextExtractor {
             ocrBudget: nil,
             concurrency: 3
         )
-        let remainingResults = await extractPagesConcurrently(
+        let wholeBookOCRBudget = OCRBudget(40)
+        let representativeResults = await extractPagesConcurrently(
             document: document,
-            indices: allPages.filter { !nearbySet.contains($0) },
+            indices: representativePages,
             qwenConfiguration: nil,
             useQwenOCR: false,
-            ocrBudget: OCRBudget(40),
+            ocrBudget: wholeBookOCRBudget,
             concurrency: 3
         )
-        let pages = nearbyResults + remainingResults
+        let remainingResults = await extractPagesConcurrently(
+            document: document,
+            indices: remainingPages,
+            qwenConfiguration: nil,
+            useQwenOCR: false,
+            ocrBudget: wholeBookOCRBudget,
+            concurrency: 3
+        )
+        let pages = nearbyResults + representativeResults + remainingResults
 
         let orderedPages = nearbyPages.compactMap { index in
             pages.first { $0.pageIndex == index }
-        } + pages.filter { !nearbySet.contains($0.pageIndex) }
+        } + representativePages.compactMap { index in
+            pages.first { $0.pageIndex == index }
+        } + pages.filter {
+            !nearbySet.contains($0.pageIndex) && !representativeSet.contains($0.pageIndex)
+        }
 
         var assembled = nearbyPages.isEmpty ? "" : "【当前阅读位置附近】\n"
+        var insertedRepresentativeHeader = false
         for (pageIndex, text) in orderedPages {
             guard !text.isEmpty else { continue }
+            if !nearbySet.contains(pageIndex), representativeSet.contains(pageIndex), !insertedRepresentativeHeader {
+                assembled += "【全书结构代表页】\n"
+                insertedRepresentativeHeader = true
+            }
             assembled += "【第 \(pageIndex + 1) 页】\n\(text)\n\n"
             if assembled.count >= limit { break }
         }
@@ -316,6 +339,43 @@ enum PDFPageContextExtractor {
         let trimmed = assembled.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         return .text(String(trimmed.prefix(limit)))
+    }
+
+    /// Pick pages that let a bounded whole-book context see the book's shape:
+    /// opening pages, the last page, evenly spaced samples, and PDF-outline
+    /// destinations. The current reading neighborhood is supplied separately
+    /// and excluded here so it can use the stronger OCR path.
+    private static func representativePageIndices(
+        in document: PDFDocument,
+        excluding excluded: Set<Int>
+    ) -> [Int] {
+        guard document.pageCount > 0 else { return [] }
+        var selected = Set<Int>()
+        let pageCount = document.pageCount
+        for index in 0..<min(pageCount, 3) {
+            selected.insert(index)
+        }
+        selected.insert(pageCount - 1)
+
+        let stride = max(1, pageCount / 12)
+        var sampled = 0
+        while sampled < pageCount {
+            selected.insert(sampled)
+            sampled += stride
+        }
+
+        if let root = document.outlineRoot {
+            for index in 0..<root.numberOfChildren {
+                guard let child = root.child(at: index),
+                      let page = child.destination?.page else { continue }
+                let pageIndex = document.index(for: page)
+                if pageIndex >= 0 { selected.insert(pageIndex) }
+            }
+        }
+
+        return selected
+            .filter { !excluded.contains($0) }
+            .sorted()
     }
 
     // MARK: - 并发提取
