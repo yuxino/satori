@@ -600,6 +600,11 @@ private final class SelectionHighlightView: NSView {
         super.viewDidChangeEffectiveAppearance()
         layer?.backgroundColor = SatoriThemeAppKit.selectionHighlight.cgColor
     }
+
+    /// The highlight is purely visual. Let PDFKit continue receiving mouse
+    /// drags and clicks so a reader can immediately replace the selection
+    /// without first dismissing an invisible interaction layer.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 /// A custom-styled button for `SelectionToolbarView`. System bezels are
