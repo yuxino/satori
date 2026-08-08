@@ -2083,10 +2083,32 @@ struct LearningInspector: View {
         )
     }
 
+    /// 有编号章节时只把“第 N 章 / Chapter N”作为学习章节，排除书名页、
+    /// 前言和目录等一级目录；没有编号章节的课程目录回退结构则保留全部一级项。
+    private var hasNumberedChapterOutline: Bool {
+        chapters.contains { chapter in
+            chapter.depth == 0 && isNumberedChapterTitle(chapter.title)
+        }
+    }
+
+    private func isNumberedChapterTitle(_ title: String) -> Bool {
+        title.range(
+            of: #"^第\s*[0-9一二三四五六七八九十百]+\s*章"#,
+            options: .regularExpression
+        ) != nil || title.range(
+            of: #"(?i)^chapter\s+\d+"#,
+            options: .regularExpression
+        ) != nil
+    }
+
     /// `currentChapter` 可能指向“本节/习题”等叶子节点；“这一章”这类问题
-    /// 需要回到最近的一级条目，才能覆盖整章而不是只报当前小节的页数。
+    /// 需要回到最近的学习章节，才能覆盖整章而不是只报当前小节的页数。
     private var currentTopLevelChapter: BookChapter? {
-        chapters.last { $0.depth == 0 && $0.pageIndex <= pageIndex }
+        chapters.last {
+            $0.depth == 0
+                && $0.pageIndex <= pageIndex
+                && (!hasNumberedChapterOutline || isNumberedChapterTitle($0.title))
+        }
     }
 
     /// 发送失败（未配置 / 页提取失败 / 回答报错）时把贴的图还回输入框，
