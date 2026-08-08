@@ -1995,9 +1995,9 @@ struct LearningInspector: View {
         let range: ClosedRange<Int>?
         if normalized.contains("本书") || normalized.contains("全书") || normalized.contains("整本") {
             range = 0...(max(0, pageCount - 1))
-        } else if (normalized.contains("这一章") || normalized.contains("本章") || normalized.contains("章节")),
-                  let currentChapter,
-                  let chapterRange = BookChapter.pageRange(for: currentChapter, in: chapters, pageCount: pageCount) {
+        } else if (normalized.contains("这一章") || normalized.contains("本章")),
+                  let topLevelChapter = currentTopLevelChapter,
+                  let chapterRange = BookChapter.pageRange(for: topLevelChapter, in: chapters, pageCount: pageCount) {
             range = chapterRange
         } else {
             switch scope {
@@ -2015,9 +2015,15 @@ struct LearningInspector: View {
         guard let range else { return nil }
         let count = range.count
         if count == 1 {
-            return "当前范围是第 (range.lowerBound + 1) 页，共 1 页。"
+            return "当前范围是第 \(range.lowerBound + 1) 页，共 1 页。"
         }
-        return "当前范围是第 (range.lowerBound + 1)–(range.upperBound + 1) 页，共 (count) 页。"
+        return "当前范围是第 \(range.lowerBound + 1)–\(range.upperBound + 1) 页，共 \(count) 页。"
+    }
+
+    /// `currentChapter` 可能指向“本节/习题”等叶子节点；“这一章”这类问题
+    /// 需要回到最近的一级条目，才能覆盖整章而不是只报当前小节的页数。
+    private var currentTopLevelChapter: BookChapter? {
+        chapters.last { $0.depth == 0 && $0.pageIndex <= pageIndex }
     }
 
     /// 发送失败（未配置 / 页提取失败 / 回答报错）时把贴的图还回输入框，
