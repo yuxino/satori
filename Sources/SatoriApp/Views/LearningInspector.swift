@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 struct LearningInspector: View {
     /// The learning panel has three mutually exclusive spaces (⌘1-3): 问 is the
-    /// default ask space; 笔记 browses the book's saved Q&A by page; 运行 is the
+    /// default ask space; 回看 browses the book's saved Q&A by page; 运行 is the
     /// code scratchpad. Switching modes clears the previous mode's transient
     /// state so nothing leaks.
     enum InspectorMode: String, CaseIterable, Identifiable {
@@ -18,7 +18,7 @@ struct LearningInspector: View {
         var title: String {
             switch self {
             case .ask: "问"
-            case .notes: "笔记"
+            case .notes: "回看"
             case .run: "运行"
             }
         }
@@ -210,7 +210,7 @@ struct LearningInspector: View {
             allowsMultipleSelection: true,
             onCompletion: importImages
         )
-        .alert("清空这本书的学习记录？", isPresented: $showsClearConfirmation) {
+        .alert("清空这本书的问答记录？", isPresented: $showsClearConfirmation) {
             Button("取消", role: .cancel) {}
             Button("清空记录", role: .destructive, action: clearHistory)
         } message: {
@@ -339,7 +339,7 @@ struct LearningInspector: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
-    /// 问 / 笔记 / 运行 — one active space, ⌘1-3.
+    /// 问 / 回看 / 运行 — one active space, ⌘1-3.
     private var modePicker: some View {
         HStack(spacing: 2) {
             ForEach(InspectorMode.allCases) { item in
@@ -412,7 +412,7 @@ struct LearningInspector: View {
         isThinking && !draftQuestion.isEmpty
     }
 
-    /// 问 — 当前阅读页的理解现场 + 输入框。完整历史留在「笔记」，
+    /// 问 — 当前阅读页的理解现场 + 输入框。完整历史留在「回看」，
     /// 但发送请求仍会携带最近几轮问答，让跨页追问不丢上下文。
     private var askView: some View {
         VStack(spacing: 0) {
@@ -435,7 +435,7 @@ struct LearningInspector: View {
                             promptStarter
                         } else {
                             // 「问」只呈现当前页，避免翻到新页后被上一页的长回答
-                            // 占满视野；完整的跨页记录仍可在「笔记」里按页查看。
+                            // 占满视野；完整的跨页记录仍可在「回看」里按页查看。
                             ForEach(currentPageTurns) { turn in
                                 conversationTurnCard(turn)
                                     .id(turn.id)
@@ -738,7 +738,7 @@ struct LearningInspector: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 15))
                 .foregroundStyle(SatoriTheme.accent)
-            Text("回答已存入第 \(pageIndex + 1) 页笔记")
+            Text("回答已留在第 \(pageIndex + 1) 页")
                 .font(.callout.weight(.medium))
             Spacer()
             Button("去看看") {
@@ -787,7 +787,7 @@ struct LearningInspector: View {
                         Image(systemName: "exclamationmark.triangle")
                             .font(.system(size: 32))
                             .foregroundStyle(SatoriTheme.gold)
-                        Text("学习记录加载失败")
+                        Text("问答记录加载失败")
                             .font(.callout.weight(.medium))
                         Text(historyStatus)
                             .font(.caption)
@@ -801,9 +801,9 @@ struct LearningInspector: View {
                         Image(systemName: "book.pages")
                             .font(.system(size: 32))
                             .foregroundStyle(.tertiary)
-                        Text("还没有笔记")
+                        Text("还没有问答记录")
                             .font(.callout.weight(.medium))
-                        Text("去「问」里和 AI 讨论这一页，笔记会自动按页整理在这里。")
+                        Text("去「问」里和 AI 讨论这一页，问答会自动按页留在这里。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -1342,8 +1342,8 @@ struct LearningInspector: View {
             Button("复制", systemImage: "doc.on.doc") { copyToPasteboard(turn.answer) }
                 .buttonStyle(.borderless)
             Button("重试", systemImage: "arrow.clockwise") {
-                // 从「笔记」重试时先回到问答现场，否则请求虽然会发出，
-                // 用户却留在笔记列表里看不到流式回答，也不知道是否成功。
+                // 从「回看」重试时先回到问答现场，否则请求虽然会发出，
+                // 用户却留在历史列表里看不到流式回答，也不知道是否成功。
                 selectMode(.ask)
                 navigateToPage(
                     turn.pageIndex,
@@ -1853,7 +1853,7 @@ struct LearningInspector: View {
         } catch {
             guard !Task.isCancelled else { return }
             turns = []
-            historyStatus = "学习记录暂时无法读取；不影响继续阅读和提问。"
+            historyStatus = "问答记录暂时无法读取；不影响继续阅读和提问。"
         }
         isLoadingHistory = false
     }
@@ -1969,7 +1969,7 @@ struct LearningInspector: View {
         }()
         draftSelectionOffset = effectiveSelectionOffset
         if let effectiveSelectionText, !effectiveSelectionText.isEmpty {
-            // 由笔记里的「重试」重新进入选区问答时，恢复可见锚点，
+            // 由「回看」里的「重试」重新进入选区问答时，恢复可见锚点，
             // 让用户知道这次回答仍然围绕哪段原文，而不是只在请求里隐形带上它。
             activeSelectionText = effectiveSelectionText
             activeSelectionPage = targetPageIndex
@@ -2278,7 +2278,7 @@ struct LearningInspector: View {
             do {
                 try await sessionStore.clear(for: documentID)
             } catch {
-                historyStatus = "学习记录未能完全清空，请稍后再试。"
+                historyStatus = "问答记录未能完全清空，请稍后再试。"
             }
         }
     }
