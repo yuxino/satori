@@ -73,12 +73,28 @@ public struct LearningCitation: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+/// A page image that supplements a reliable text layer when a PDF page's
+/// meaning depends on a diagram, table, or other visual structure.
+public struct LearningPageImage: Sendable, Equatable {
+    public let pageIndex: Int
+    public let jpegData: Data
+
+    public init(pageIndex: Int, jpegData: Data) {
+        self.pageIndex = max(0, pageIndex)
+        self.jpegData = jpegData
+    }
+}
+
 public enum LearningPageContent: Sendable, Equatable {
     case text(String)
     case imageJPEG(Data)
     /// A mostly useful text layer with enough OCR damage that the page image
     /// should be sent too, so the model can verify names, numbers, and symbols.
     case textAndImage(String, Data)
+    /// A reliable text layer plus one or more page images for visual evidence.
+    /// This is used for short page bridges; long chapter maps remain text-only
+    /// so the first answer stays fast and within a small image budget.
+    case textAndImages(String, [LearningPageImage])
 }
 
 public struct AssistantTransportResponse: Sendable {
@@ -630,6 +646,35 @@ public struct QwenLearningAssistant: LearningAssistant {
                     imageURL: "data:image/jpeg;base64,\(data.base64EncodedString())"
                 )
             ]
+        case let .textAndImages(text, images)?:
+            guard !images.isEmpty else {
+                return [.init(
+                    type: "input_text",
+                    text: "用户正在阅读教材 PDF 第 \(pageNumber) 页。\n\n以下是可参考的 PDF 原文：\n\(text)",
+                    imageURL: nil
+                )]
+            }
+            let pageLabels = images.map { "第 \($0.pageIndex + 1) 页" }.joined(separator: "、")
+            var items: [InputContent] = [
+                .init(
+                    type: "input_text",
+                    text: "用户正在阅读教材 PDF（当前页第 \(pageNumber) 页）。\n\n以下是可参考的 PDF 原文（可能包含一页或多页，每段以【第 N 页】标注）：\n\(text)\n\n下面附上当前范围中含有图示或表格的页面图像（\(pageLabels)）。请把文字和对应页图像一起核对，尤其注意空间关系、箭头、数字、公式和表格列项。",
+                    imageURL: nil
+                )
+            ]
+            for image in images {
+                items.append(.init(
+                    type: "input_text",
+                    text: "这是教材 PDF 第 \(image.pageIndex + 1) 页的页面图像。",
+                    imageURL: nil
+                ))
+                items.append(.init(
+                    type: "input_image",
+                    text: nil,
+                    imageURL: "data:image/jpeg;base64,\(image.jpegData.base64EncodedString())"
+                ))
+            }
+            return items
         case nil:
             return []
         }
@@ -649,6 +694,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         let needsImage: Bool = {
             if case .imageJPEG? = pageContent { return true }
             if case .textAndImage? = pageContent { return true }
+            if case let .textAndImages(_, images)? = pageContent { return !images.isEmpty }
             return !imageBudget.images.isEmpty
         }()
         if needsImage && !capabilities.contains(.image) {

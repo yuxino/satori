@@ -452,6 +452,21 @@ struct SatoriCoreTests {
             !ReadingScopeInference.inheritsRecentScope(for: "这一页主要讲什么"),
             "Expected ordinary explanations not to inherit a stale scope"
         )
+        precondition(
+            ReadingVisualEvidence.requiresPageImage(currentText: "磁盘结构如图 6-2 所示"),
+            "Expected a page that names a figure to carry visual evidence"
+        )
+        precondition(
+            ReadingVisualEvidence.requiresPageImage(
+                currentText: "单张磁盘外表看起来就像一张唱片",
+                previousText: "磁盘的结构如图6-2所示。"
+            ),
+            "Expected a figure that starts on the next page to carry the next page image"
+        )
+        precondition(
+            !ReadingVisualEvidence.requiresPageImage(currentText: "文件系统负责存储、检索和更新"),
+            "Expected ordinary prose to stay text-only"
+        )
         let representativePages = ReadingSamplePlan.representativePageIndices(
             pageCount: 294,
             outlinePageIndices: [29, 31, 64, 92, 117, 145, 182, 228, 260],
@@ -525,6 +540,23 @@ struct SatoriCoreTests {
             )
         ).explain(request: "解释扫描页", pageIndex: 4)
         precondition(imageResponse.text == "fixture explanation", "Expected scanned-page output text")
+
+        let figurePageResponse = await QwenLearningAssistant(
+            apiKey: "fixture-key",
+            pageContent: .textAndImages(
+                "【第 187 页】磁盘由磁道、扇区和磁头定位。",
+                [.init(pageIndex: 186, jpegData: Data([0xFF, 0xD8, 0xFF]))]
+            ),
+            transport: FixtureAssistantTransport(
+                expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
+                expectedModelID: "qwen3.8-max",
+                expectedImageCount: 1,
+                expectsWebSearch: false,
+                expectedHistoryTurnCount: 0,
+                expectsPageContent: true
+            )
+        ).explain(request: "结合图示解释磁盘地址", pageIndex: 186)
+        precondition(figurePageResponse.text == "fixture explanation", "Expected figure-aware page content to reach the model")
 
         let degradedTextResponse = await QwenLearningAssistant(
             apiKey: "fixture-key",

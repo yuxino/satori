@@ -158,6 +158,38 @@ enum PDFPageContextExtractor {
 
         let trimmed = assembled.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
+        // A short bridge is allowed to carry a couple of visual pages. This
+        // catches textbook layouts where the preceding page says “见图 6-2”
+        // but the actual figure starts at the top of the next page. Chapter
+        // maps deliberately stay text-only to protect first-answer latency.
+        if range.count <= 4 {
+            let textByPage = Dictionary(uniqueKeysWithValues: pages)
+            var visualPages: [LearningPageImage] = []
+            for pageIndex in pages.map(\.pageIndex) {
+                let currentText = textByPage[pageIndex] ?? ""
+                let previousText: String
+                if let inRange = textByPage[pageIndex - 1] {
+                    previousText = inRange
+                } else if pageIndex > 0 {
+                    previousText = ExtractedTextNormalizer.normalize(
+                        document.page(at: pageIndex - 1)?.string ?? ""
+                    )
+                } else {
+                    previousText = ""
+                }
+                guard ReadingVisualEvidence.requiresPageImage(
+                          currentText: currentText,
+                          previousText: previousText
+                      ),
+                      let page = document.page(at: pageIndex),
+                      let jpeg = renderPageJPEG(page) else { continue }
+                visualPages.append(.init(pageIndex: pageIndex, jpegData: jpeg))
+                if visualPages.count == 2 { break }
+            }
+            if !visualPages.isEmpty {
+                return .textAndImages(trimmed, visualPages)
+            }
+        }
         return .text(String(trimmed.prefix(limit)))
     }
 
@@ -178,7 +210,21 @@ enum PDFPageContextExtractor {
         let needsVisualVerification = text.count < 40 || ExtractedTextNormalizer.likelyDegraded(text)
         if text.count >= 40, !needsVisualVerification {
             // 带页码标注返回，和整章/多页提取的格式一致，模型能明确知道是哪一页。
-            return .text("【第 \(pageIndex + 1) 页】\n" + String(text.prefix(24_000)))
+            let pageText = "【第 \(pageIndex + 1) 页】\n" + String(text.prefix(24_000))
+            let previousText = pageIndex > 0
+                ? ExtractedTextNormalizer.normalize(document.page(at: pageIndex - 1)?.string ?? "")
+                : ""
+            if ReadingVisualEvidence.requiresPageImage(
+                currentText: text,
+                previousText: previousText
+            ),
+               let jpeg = renderPageJPEG(page) {
+                return .textAndImages(
+                    pageText,
+                    [.init(pageIndex: pageIndex, jpegData: jpeg)]
+                )
+            }
+            return .text(pageText)
         }
 
         // 扫描版 / 疑似 OCR 损坏页：先 Qwen OCR（识别质量更好），失败再本地
