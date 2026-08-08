@@ -106,6 +106,9 @@ struct LearningInspector: View {
     @State private var configuredModelID: String?
     @State private var allowsWebSearch = false
     @State private var completedElsewherePage: Int?
+    /// 新翻到、还没有问答的页面只显示一次轻量入口；用户不想要时可收起，
+    /// 避免在已有对话旁边重复堆快捷功能。
+    @State private var dismissedPageEntryPage: Int?
     @State private var attachments: [LearningImageAttachment] = []
     /// 发送中的这一轮贴的图（用于对话里即时展示缩略图；归档后历史只记张数）。
     @State private var activeAttachmentPreviews: [NSImage] = []
@@ -191,6 +194,7 @@ struct LearningInspector: View {
         .onChange(of: pageIndex) { _, _ in
             // 用户翻页后，之前选中的上下文不再指向当前阅读位置。
             pendingSelectionPage = nil
+            dismissedPageEntryPage = nil
             // 章节选择自动同步阅读位置：翻到别的章节时取消手动选择，跟随当前章节。
             if let selectedChapterID,
                let selected = chapters.first(where: { $0.id == selectedChapterID }),
@@ -448,6 +452,10 @@ struct LearningInspector: View {
                 selectionAnchorBanner(text: activeSelectionText, pageIndex: activeSelectionPage)
             }
 
+            if showsPageEntry {
+                pageEntryPrompt
+            }
+
             Divider()
             composer
         }
@@ -492,6 +500,69 @@ struct LearningInspector: View {
             RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous)
                 .strokeBorder(SatoriTheme.accent.opacity(0.18), lineWidth: 1)
         )
+    }
+
+    /// 新页的第一个阅读动作：只在当前页还没有问答时出现，回答开始后自动退场。
+    /// 两个动作分别覆盖“先建立主线”和“把概念变成可观察的东西”，不把阅读
+    /// 变成任务清单，也不要求用户先整理笔记。
+    private var showsPageEntry: Bool {
+        guard !isLoadingHistory,
+              !isThinking,
+              activeSelectionText == nil,
+              dismissedPageEntryPage != pageIndex else { return false }
+        return !turns.contains { $0.pageIndex == pageIndex }
+    }
+
+    private var pageEntryPrompt: some View {
+        HStack(alignment: .center, spacing: SatoriTheme.Spacing.sm) {
+            Image(systemName: "arrow.down.right.circle")
+                .foregroundStyle(SatoriTheme.accent)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: "刚到第 \(pageIndex + 1) 页")
+                    .font(.caption.weight(.semibold))
+                Text("先抓主线，卡住了再追问。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 2)
+
+            Button("先讲主线", systemImage: "sparkles") {
+                askAssistant(
+                    "这一页最重要的一个意思是什么？请用三句话告诉我：我现在先读懂什么、它和前面怎么接上、哪些细节可以先放过。",
+                    pageOverride: pageIndex,
+                    scope: .page
+                )
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .tint(SatoriTheme.accent)
+
+            Button("试试看", systemImage: "testtube.2") {
+                askAssistant(
+                    "如果这一页的核心概念适合做一个 30 秒的小实验，请设计一个安全、简单、能观察到结果的实验；如果不适合，请给一个生活中的替代例子。",
+                    pageOverride: pageIndex,
+                    scope: .page
+                )
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("做个小实验或生活中的替代例子")
+
+            Button("收起", systemImage: "xmark") {
+                dismissedPageEntryPage = pageIndex
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("收起本页入口")
+        }
+        .padding(.horizontal, SatoriTheme.Spacing.md)
+        .padding(.vertical, SatoriTheme.Spacing.sm)
+        .background(SatoriTheme.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+        .padding(.horizontal, SatoriTheme.Spacing.md)
+        .padding(.bottom, SatoriTheme.Spacing.sm)
     }
 
     private func selectionPrompt(for intent: ReaderSelectionIntent) -> String {
@@ -1479,6 +1550,7 @@ struct LearningInspector: View {
         historyStatus = ""
         do {
             turns = try await sessionStore.turns(for: documentID)
+            dismissedPageEntryPage = nil
             // 打开面板默认看最新对话：锚定到底部，历史加载完自动贴底。
             scrollAnchorID = responseBottomID
             scrollRequest += 1
@@ -1775,6 +1847,7 @@ struct LearningInspector: View {
         attachmentStatus = ""
         completedElsewherePage = nil
         pendingSelectionPage = nil
+        dismissedPageEntryPage = nil
         Task {
             do {
                 try await sessionStore.clear(for: documentID)
