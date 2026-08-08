@@ -1871,7 +1871,7 @@ struct LearningInspector: View {
             streamStartDate = nil
             requestTask = nil
             requestPhase = .preparing
-            completeDraft(with: localResponse, completion: .completed, duration: 0)
+            completeDraft(with: localResponse, completion: .completed)
             return
         }
 
