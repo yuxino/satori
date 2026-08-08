@@ -10,6 +10,8 @@ import SatoriCore
 extension Notification.Name {
     static let satoriAskSelectionRequested = Notification.Name("satori.askSelectionRequested")
     static let satoriRunSelectionRequested = Notification.Name("satori.runSelectionRequested")
+    /// userInfo: documentID, url, pageIndex, jpegData (a cropped page region).
+    static let satoriPageRegionCaptured = Notification.Name("satori.pageRegionCaptured")
     /// userInfo: documentID, url (the PDF), position (ReadingPosition with page + offset).
     static let satoriReaderJumpRequested = Notification.Name("satori.readerJumpRequested")
 }
@@ -24,7 +26,9 @@ struct PDFReaderView: NSViewRepresentable {
     let url: URL
     let initialPosition: ReadingPosition
     @Binding var currentPageIndex: Int
+    @Binding var isRegionCaptureEnabled: Bool
     let onPositionChanged: (Int, Double) -> Void
+    var onPageRegionCaptured: ((Data, Int) -> Void)? = nil
 
     /// Selection toolbar callbacks, in addition to the notification channel:
     /// (selectedText, pageIndex). Defaults keep existing call sites working.
@@ -35,6 +39,7 @@ struct PDFReaderView: NSViewRepresentable {
         Coordinator(
             documentID: documentID,
             currentPageIndex: $currentPageIndex,
+            onPageRegionCaptured: onPageRegionCaptured,
             onPositionChanged: onPositionChanged,
             onAskSelection: onAskSelection,
             onRunSelection: onRunSelection
@@ -64,6 +69,7 @@ struct PDFReaderView: NSViewRepresentable {
             }
         }
         context.coordinator.observe(view)
+        context.coordinator.setRegionCaptureEnabled(isRegionCaptureEnabled, in: view)
         context.coordinator.restoreInitialPosition(in: view)
         return view
     }
@@ -71,6 +77,8 @@ struct PDFReaderView: NSViewRepresentable {
     func updateNSView(_ view: PDFView, context: Context) {
         context.coordinator.onAskSelection = onAskSelection
         context.coordinator.onRunSelection = onRunSelection
+        context.coordinator.onPageRegionCaptured = onPageRegionCaptured
+        context.coordinator.setRegionCaptureEnabled(isRegionCaptureEnabled, in: view)
         guard let document = view.document, document.pageCount > 0 else { return }
         let targetIndex = min(max(currentPageIndex, 0), document.pageCount - 1)
         let visibleIndex = view.currentPage.map(document.index(for:))
@@ -95,6 +103,7 @@ struct PDFReaderView: NSViewRepresentable {
         private weak var observedView: PDFView?
         private let currentPageIndex: Binding<Int>
         private let onPositionChanged: (Int, Double) -> Void
+        var onPageRegionCaptured: ((Data, Int) -> Void)?
         var onAskSelection: ((String, Int) -> Void)?
         var onRunSelection: ((String, Int) -> Void)?
 
@@ -118,16 +127,19 @@ struct PDFReaderView: NSViewRepresentable {
         /// 最近一次上报的 (页, 偏移)，用于滤掉同一位置导航触发的重复上报。
         private var lastReportedPageIndex: Int?
         private var lastReportedOffset: Double = -1
+        private var regionCaptureView: RegionCaptureView?
 
         init(
             documentID: UUID,
             currentPageIndex: Binding<Int>,
+            onPageRegionCaptured: ((Data, Int) -> Void)?,
             onPositionChanged: @escaping (Int, Double) -> Void,
             onAskSelection: ((String, Int) -> Void)?,
             onRunSelection: ((String, Int) -> Void)?
         ) {
             self.documentID = documentID
             self.currentPageIndex = currentPageIndex
+            self.onPageRegionCaptured = onPageRegionCaptured
             self.onPositionChanged = onPositionChanged
             self.onAskSelection = onAskSelection
             self.onRunSelection = onRunSelection
@@ -178,9 +190,89 @@ struct PDFReaderView: NSViewRepresentable {
             }
             offsetDebounce?.invalidate()
             offsetDebounce = nil
+            regionCaptureView?.removeFromSuperview()
+            regionCaptureView = nil
             toolbar?.removeFromSuperview()
             toolbar = nil
             observedView = nil
+        }
+
+        /// Scanned PDFs have no PDFKit text selection. A temporary drag layer
+        /// lets the reader isolate a diagram/code/formula region without
+        /// leaving Satori to take a separate screenshot and paste it back.
+        func setRegionCaptureEnabled(_ enabled: Bool, in view: PDFView) {
+            if enabled {
+                if regionCaptureView?.superview !== view {
+                    regionCaptureView?.removeFromSuperview()
+                    let capture = RegionCaptureView(frame: view.bounds)
+                    capture.autoresizingMask = [.width, .height]
+                    capture.onComplete = { [weak self, weak view] rect in
+                        guard let self, let view else { return }
+                        self.captureRegion(rect, in: view)
+                    }
+                    capture.onCancel = { [weak self] in
+                        self?.regionCaptureView?.removeFromSuperview()
+                        self?.regionCaptureView = nil
+                    }
+                    view.addSubview(capture)
+                    regionCaptureView = capture
+                }
+            } else if let regionCaptureView {
+                regionCaptureView.removeFromSuperview()
+                self.regionCaptureView = nil
+            }
+        }
+
+        private func captureRegion(_ viewRect: NSRect, in view: PDFView) {
+            defer {
+                regionCaptureView?.removeFromSuperview()
+                regionCaptureView = nil
+            }
+            guard let document = view.document,
+                  let page = view.currentPage else { return }
+            let pageRectInView = view.convert(page.bounds(for: .mediaBox), from: page)
+            let clipped = viewRect.intersection(pageRectInView)
+            guard clipped.width >= 24, clipped.height >= 24 else { return }
+            let pageRect = view.convert(clipped, to: page)
+            guard let jpeg = Self.renderRegionJPEG(page: page, rect: pageRect) else { return }
+            let pageIndex = document.index(for: page)
+            guard pageIndex >= 0 else { return }
+            onPageRegionCaptured?(jpeg, pageIndex)
+        }
+
+        private static func renderRegionJPEG(page: PDFPage, rect: NSRect) -> Data? {
+            let bounds = page.bounds(for: .mediaBox).standardized
+            let clipped = rect.standardized.intersection(bounds)
+            guard clipped.width >= 1, clipped.height >= 1,
+                  bounds.width > 0, bounds.height > 0 else { return nil }
+
+            let longestSide: CGFloat = 2_200
+            let scale = longestSide / max(bounds.width, bounds.height)
+            let fullSize = NSSize(width: bounds.width * scale, height: bounds.height * scale)
+            let image = page.thumbnail(of: fullSize, for: .mediaBox)
+            var proposedRect = NSRect(origin: .zero, size: image.size)
+            guard let fullImage = image.cgImage(
+                forProposedRect: &proposedRect,
+                context: nil,
+                hints: nil
+            ) else { return nil }
+
+            let imageBounds = CGRect(
+                x: 0,
+                y: 0,
+                width: CGFloat(fullImage.width),
+                height: CGFloat(fullImage.height)
+            )
+            let cropRect = CGRect(
+                x: (clipped.minX - bounds.minX) / bounds.width * imageBounds.width,
+                y: (bounds.maxY - clipped.maxY) / bounds.height * imageBounds.height,
+                width: clipped.width / bounds.width * imageBounds.width,
+                height: clipped.height / bounds.height * imageBounds.height
+            ).integral.intersection(imageBounds)
+            guard cropRect.width >= 2, cropRect.height >= 2,
+                  let cropped = fullImage.cropping(to: cropRect) else { return nil }
+            let bitmap = NSBitmapImageRep(cgImage: cropped)
+            return bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.86])
         }
 
         func consumePendingJump() -> ReadingPosition? {
@@ -542,6 +634,66 @@ struct PDFReaderView: NSViewRepresentable {
         @MainActor private func hideToolbar() {
             toolbar?.removeFromSuperview()
         }
+    }
+}
+
+/// A temporary, non-persistent drag layer for isolating part of a scanned PDF
+/// page. It disappears as soon as the crop is delivered or cancelled.
+private final class RegionCaptureView: NSView {
+    var onComplete: ((NSRect) -> Void)?
+    var onCancel: (() -> Void)?
+
+    private var startPoint: NSPoint?
+    private var selectionRect: NSRect = .zero
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .crosshair)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        startPoint = convert(event.locationInWindow, from: nil)
+        selectionRect = .zero
+        needsDisplay = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let startPoint else { return }
+        let current = convert(event.locationInWindow, from: nil)
+        selectionRect = NSRect(
+            x: min(startPoint.x, current.x),
+            y: min(startPoint.y, current.y),
+            width: abs(current.x - startPoint.x),
+            height: abs(current.y - startPoint.y)
+        )
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer {
+            startPoint = nil
+            selectionRect = .zero
+            needsDisplay = true
+        }
+        guard selectionRect.width >= 24, selectionRect.height >= 24 else { return }
+        onComplete?(selectionRect)
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        onCancel?()
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard !selectionRect.isEmpty else { return }
+        SatoriThemeAppKit.accentWash.withAlphaComponent(0.24).setFill()
+        NSBezierPath(rect: selectionRect).fill()
+        SatoriThemeAppKit.accent.setStroke()
+        let border = NSBezierPath(rect: selectionRect)
+        border.lineWidth = 2
+        border.stroke()
     }
 }
 

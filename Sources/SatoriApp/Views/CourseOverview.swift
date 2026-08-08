@@ -177,6 +177,9 @@ private struct DocumentWorkspace: View {
     @State private var panelHeight: CGFloat
     @State private var isDraggingDivider = false
     @State private var isDraggingHeightDivider = false
+    /// Scanned pages have no PDFKit text selection; this temporary mode lets
+    /// the reader drag a diagram/code/formula region into the next question.
+    @State private var isRegionCaptureEnabled = false
 
     init(
         course: CourseWorkspace,
@@ -422,6 +425,7 @@ private struct DocumentWorkspace: View {
                         normalizedPageOffset: currentOffset
                     ),
                     currentPageIndex: $currentPageIndex,
+                    isRegionCaptureEnabled: $isRegionCaptureEnabled,
                     onPositionChanged: { pageIndex, offset in
                         currentOffset = offset
                         store.updateReadingPosition(
@@ -443,6 +447,19 @@ private struct DocumentWorkspace: View {
                                 print("recordPageRead failed: \(error)")
                             }
                         }
+                    },
+                    onPageRegionCaptured: { jpegData, pageIndex in
+                        isRegionCaptureEnabled = false
+                        NotificationCenter.default.post(
+                            name: .satoriPageRegionCaptured,
+                            object: nil,
+                            userInfo: [
+                                "documentID": document.id,
+                                "url": url,
+                                "pageIndex": pageIndex,
+                                "jpegData": jpegData
+                            ]
+                        )
                     }
                 )
 
@@ -593,6 +610,19 @@ private struct DocumentWorkspace: View {
                 }
                 .help(showsInspector ? "隐藏理解面板" : "打开理解面板")
                 .tint(SatoriTheme.accent)
+            }
+
+            if document.contentKind == .scanned || document.contentKind == .mixed {
+                Button {
+                    isRegionCaptureEnabled.toggle()
+                } label: {
+                    Label(
+                        isRegionCaptureEnabled ? "取消框选" : "框选理解",
+                        systemImage: isRegionCaptureEnabled ? "xmark" : "viewfinder"
+                    )
+                }
+                .help(isRegionCaptureEnabled ? "取消框选（Esc）" : "拖住扫描页的一块区域，直接问 Satori")
+                .tint(isRegionCaptureEnabled ? SatoriTheme.gold : SatoriTheme.accent)
             }
 
             Button {

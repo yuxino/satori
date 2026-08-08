@@ -207,6 +207,9 @@ struct LearningInspector: View {
             router.pendingRunSelection = nil
             handleRunSelection(request)
         }
+        .onChange(of: router.pendingPageRegion?.id) { _, _ in
+            consumePendingRouterRequests()
+        }
         .fileImporter(
             isPresented: $isImportingImage,
             allowedContentTypes: [.image],
@@ -311,6 +314,47 @@ struct LearningInspector: View {
         if let request = router.pendingRunSelection {
             router.pendingRunSelection = nil
             handleRunSelection(request)
+        }
+        if let request = router.pendingPageRegion {
+            guard !router.isImmersiveReading else { return }
+            router.pendingPageRegion = nil
+            handlePageRegion(request)
+        }
+    }
+
+    private func handlePageRegion(_ request: ReaderPageRegionRequest) {
+        guard request.documentID == documentID,
+              request.url == nil || request.url == documentURL else { return }
+        guard attachments.count < 4 else {
+            attachmentStatus = "每次最多附加 4 张图片，请先发送或移除一张。"
+            return
+        }
+        guard let preview = NSImage(data: request.jpegData), preview.size.width > 0 else {
+            attachmentStatus = "框选区域暂时无法读取，请再框选一次。"
+            return
+        }
+
+        selectMode(.ask)
+        attachments.append(
+            LearningImageAttachment(
+                name: "第 \(request.pageIndex + 1) 页框选",
+                jpegData: request.jpegData,
+                preview: preview
+            )
+        )
+        pendingSelectionPage = request.pageIndex
+        attachmentStatus = "已框选第 \(request.pageIndex + 1) 页的一块区域。"
+
+        if question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isThinking {
+            question = "解释我刚框选的这部分内容，并说明它在这一页中起什么作用。"
+            DispatchQueue.main.async {
+                askAssistant()
+            }
+        } else {
+            question += question.isEmpty ? "结合我框选的这部分回答。" : "\n\n结合我刚框选的这部分回答。"
+            DispatchQueue.main.async {
+                isQuestionFocused = true
+            }
         }
     }
 

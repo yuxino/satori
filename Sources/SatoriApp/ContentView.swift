@@ -26,6 +26,17 @@ struct ReaderSelectionRequest: Equatable, Sendable {
     let intent: ReaderSelectionIntent
 }
 
+/// A cropped region from a scanned PDF page. It stays in memory only long
+/// enough to become the next question's attachment; it is never persisted as
+/// a note or a separate file.
+struct ReaderPageRegionRequest: Equatable, Sendable {
+    let id = UUID()
+    let documentID: UUID
+    let jpegData: Data
+    let pageIndex: Int
+    let url: URL?
+}
+
 /// ContentView-owned routing state for the reader ↔ panel channels (redesign
 /// 4.1 / 4.3). AppModel lives in SatoriApp.swift (read-only for this team), so
 /// the selection + layout channels live here instead, injected as an
@@ -41,6 +52,8 @@ final class ReaderSelectionRouter: ObservableObject {
     /// TODO(LearningInspector 施工队): consume `pendingRunSelection` and fill
     /// the run composer (or run directly) with the selected text.
     @Published var pendingRunSelection: ReaderSelectionRequest?
+    /// Same reading loop for scanned-page region crops.
+    @Published var pendingPageRegion: ReaderPageRegionRequest?
     /// True when the window is below the wide threshold (< 1240): the learning
     /// panel should float over the PDF instead of squeezing it.
     /// TODO(布局施工队): read `inspectorFloats` in DocumentWorkspace
@@ -113,6 +126,20 @@ struct ContentView: View {
                     position: note.userInfo?["position"] as? ReadingPosition,
                     url: note.userInfo?["url"] as? URL,
                     intent: .explain
+                )
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .satoriPageRegionCaptured)) { note in
+            guard let documentID = note.userInfo?["documentID"] as? UUID,
+                  let jpegData = note.userInfo?["jpegData"] as? Data,
+                  let pageIndex = note.userInfo?["pageIndex"] as? Int else { return }
+            let requestedURL = note.userInfo?["url"] as? URL
+            Task { @MainActor in
+                router.pendingPageRegion = ReaderPageRegionRequest(
+                    documentID: documentID,
+                    jpegData: jpegData,
+                    pageIndex: pageIndex,
+                    url: requestedURL
                 )
             }
         }
