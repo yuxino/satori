@@ -169,33 +169,26 @@ enum PDFPageContextExtractor {
 
         let text = ExtractedTextNormalizer.normalize(page.string ?? "")
         let needsVisualVerification = text.count < 40 || ExtractedTextNormalizer.likelyDegraded(text)
-        let hasSuspiciousTextLayer = text.count >= 40 && ExtractedTextNormalizer.likelyDegraded(text)
         if text.count >= 40, !needsVisualVerification {
             // 带页码标注返回，和整章/多页提取的格式一致，模型能明确知道是哪一页。
             return .text("【第 \(pageIndex + 1) 页】\n" + String(text.prefix(24_000)))
         }
 
         // 扫描版 / 疑似 OCR 损坏页：先 Qwen OCR（识别质量更好），失败再本地
-        // Vision；文字层已经足够长但疑似损坏时，保留文字并同时附上页面图像。
+        // Vision；扫描页即使 OCR 成功也保留原图，让回答模型能核对标题、公式、
+        // 符号和版式，不把一轮 OCR 当成唯一事实。
         guard let image = renderPageImage(page, maximumLongestSide: Self.ocrRenderLongestSide) else { return nil }
         if let qwenConfiguration,
            let jpeg = jpegData(from: image),
            let recognized = await QwenOCRService.recognizeText(in: jpeg, configuration: qwenConfiguration),
            recognized.count >= 40 {
-            if hasSuspiciousTextLayer {
-                // Qwen OCR can repair the text layer, but it is still a second
-                // interpretation of the page. Keep the rendered page beside
-                // it so the answering model can verify names, formulas, and
-                // symbols instead of trusting a single OCR pass.
-                return .textAndImage(String(recognized.prefix(24_000)), jpeg)
-            }
-            return .text(String(recognized.prefix(24_000)))
+            // Qwen OCR can repair the text layer, but it is still a second
+            // interpretation of the page. Keep the rendered page beside it
+            // for both genuinely scanned and suspicious pages.
+            return .textAndImage(String(recognized.prefix(24_000)), jpeg)
         }
         if let recognized = recognizeText(in: image),
            recognized.count >= 40 {
-            if text.count < 40 {
-                return .text(String(recognized.prefix(24_000)))
-            }
             if let jpeg = jpegData(from: image) {
                 return .textAndImage(String(recognized.prefix(24_000)), jpeg)
             }
@@ -251,14 +244,45 @@ enum PDFPageContextExtractor {
         } catch {
             return nil
         }
-        // Vision 的 boundingBox 原点在左下角：先按行（y 中心从高到低），
-        // 同行内再按 x 从左到右，还原真实的阅读顺序。
-        let observations = (request.results ?? []).sorted { lhs, rhs in
-            let dy = lhs.boundingBox.midY - rhs.boundingBox.midY
-            if abs(dy) > 0.02 { return dy > 0 }
-            return lhs.boundingBox.minX < rhs.boundingBox.minX
+        let observations = request.results ?? []
+
+        // Vision returns fragments, not logical lines. Rebuild lines first so
+        // punctuation and page numbers stay with the heading. A page is
+        // treated as two-column only when there are substantial,
+        // non-overlapping left/right columns; ordinary single-column pages
+        // often have long lines crossing the midpoint and must stay whole.
+        func lines(in column: [VNRecognizedTextObservation]) -> [String] {
+            let sorted = column.sorted { lhs, rhs in
+                let dy = lhs.boundingBox.midY - rhs.boundingBox.midY
+                return abs(dy) > 0.02 ? dy > 0 : lhs.boundingBox.minX < rhs.boundingBox.minX
+            }
+            var result: [String] = []
+            var currentY: CGFloat?
+            for observation in sorted {
+                guard let candidate = observation.topCandidates(1).first?.string,
+                      !candidate.isEmpty else { continue }
+                if let currentY, abs(observation.boundingBox.midY - currentY) <= 0.01,
+                   !result.isEmpty {
+                    result[result.count - 1] += " " + candidate
+                } else {
+                    result.append(candidate)
+                    currentY = observation.boundingBox.midY
+                }
+            }
+            return result
         }
-        let text = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+
+        let leftColumn = observations.filter { $0.boundingBox.maxX <= 0.5 }
+        let rightColumn = observations.filter { $0.boundingBox.minX >= 0.5 }
+        let isTwoColumn = leftColumn.count >= 8 && rightColumn.count >= 8
+        let text: String
+        if isTwoColumn {
+            let left = observations.filter { $0.boundingBox.midX < 0.5 }
+            let right = observations.filter { $0.boundingBox.midX >= 0.5 }
+            text = (lines(in: left) + lines(in: right)).joined(separator: "\n")
+        } else {
+            text = lines(in: observations).joined(separator: "\n")
+        }
         let normalized = ExtractedTextNormalizer.normalize(text)
         return normalized.isEmpty ? nil : normalized
     }
@@ -438,7 +462,11 @@ enum PDFPageContextExtractor {
            recognized.count >= 40 {
             text = ExtractedTextNormalizer.normalize(recognized)
         }
-        if text.count < 40,
+        // A long but damaged text layer still needs local OCR after Qwen OCR
+        // fails (or is unavailable). Previously this branch only ran for
+        // short pages, so broken scan text could be sent onward as confident-
+        // looking garbage.
+        if (text.count < 40 || ExtractedTextNormalizer.likelyDegraded(text)),
            let image = renderPageImage(page, maximumLongestSide: Self.ocrRenderLongestSide),
            let recognized = recognizeText(in: image),
            recognized.count >= 40 {

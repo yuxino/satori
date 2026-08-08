@@ -177,6 +177,14 @@ struct SatoriCoreTests {
             "Expected colloquial freshness questions to route to web search"
         )
         precondition(
+            QwenLearningAssistant.shouldAutoEnableWebSearch(for: "今日金价"),
+            "Expected explicit live-price questions to route to web search"
+        )
+        precondition(
+            !QwenLearningAssistant.shouldAutoEnableWebSearch(for: "这个价格公式怎么推出来的"),
+            "Expected ordinary textbook price questions to stay PDF-local"
+        )
+        precondition(
             ReadingFactAnswer.pageCountAnswer(
                 for: "这一章有多少页",
                 pageCount: 294,

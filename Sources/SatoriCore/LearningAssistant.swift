@@ -216,6 +216,15 @@ public struct QwenLearningAssistant: LearningAssistant {
             "找找", "找资料", "查资料", "查一下", "搜一下", "搜索", "给我找", "帮我找", "来源", "链接",
             "官方", "最新", "当前版本", "现在怎么样", "有没有过时", "过时了吗", "过时了么", "过时了没",
             "还适用", "现在还能用", "目前还能用",
+            // Readers often test the boundary with a short live-fact query
+            // after asking whether Satori can go online. Keep these phrases
+            // specific enough that a textbook question such as “价格公式”
+            // still stays PDF-local.
+            "今日金价", "今天金价", "实时金价", "金价", "黄金价格",
+            "今日汇率", "实时汇率", "当前汇率", "美元汇率",
+            "今日价格", "当前价格", "实时价格", "现在价格",
+            "天气预报", "实时天气", "今天星期几", "今天几号", "当前时间",
+            "最新新闻", "最新消息", "实时新闻",
             "look up", "search", "latest", "official", "source", "sources", "current version"
         ]
         return markers.contains { normalized.contains($0) }
