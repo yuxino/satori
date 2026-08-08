@@ -7,8 +7,15 @@ import Foundation
 public enum ReadingPagePurpose {
     private static let standaloneHeadings = [
         "习题", "思考题", "练习题", "课后题", "课后练习", "自测题", "实验题",
-        "题型举例", "单项选择题", "选择题", "填空题", "简答题", "综合题"
+        "题型举例", "单项选择题", "选择题", "填空题", "简答题", "综合题", "综合练习"
     ]
+
+    /// Used by the reading entrance when the PDF outline itself marks the
+    /// current node as an exercise section. Unlike `isExercisePage`, this
+    /// intentionally does not inspect prose or numbered questions.
+    public static func isExerciseHeading(_ text: String) -> Bool {
+        isStandaloneExerciseHeading(compact(text))
+    }
 
     /// Returns true for a page headed as an exercise section or for a
     /// continuation page with several question-shaped numbered items.

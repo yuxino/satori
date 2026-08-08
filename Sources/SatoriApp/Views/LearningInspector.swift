@@ -718,22 +718,34 @@ struct LearningInspector: View {
 
     private var pageEntryPrompt: some View {
         let chapterRange = chapterStartRange
+        let exerciseRange = exerciseStartRange
         return HStack(alignment: .center, spacing: SatoriTheme.Spacing.sm) {
             Image(systemName: "arrow.down.right.circle")
                 .foregroundStyle(SatoriTheme.accent)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: "刚到第 \(pageIndex + 1) 页")
+                Text(verbatim: exerciseRange == nil ? "刚到第 \(pageIndex + 1) 页" : "这里进入习题区")
                     .font(.caption.weight(.semibold))
-                Text(chapterRange == nil ? "先抓主线，卡住了再追问。" : "先看本章路线，卡住了再追问。")
+                Text(exerciseRange == nil
+                     ? (chapterRange == nil ? "先抓主线，卡住了再追问。" : "先看本章路线，卡住了再追问。")
+                     : "先看题型和起手顺序，卡住了再选一道题。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 2)
 
-            Button(chapterRange == nil ? "先讲主线" : "看本章路线", systemImage: "sparkles") {
-                if let chapterRange {
+            Button(exerciseRange == nil
+                   ? (chapterRange == nil ? "先讲主线" : "看本章路线")
+                   : "看题型地图", systemImage: "sparkles") {
+                if let exerciseRange {
+                    askAssistant(
+                        "这里进入了本章的习题区。请先给我一张题型地图：这些题分别在考什么、建议先做哪一类、哪些细节可以第二遍再看。最多 5 点，不要逐题解答，也不要把题目逐条复述。",
+                        pageOverride: pageIndex,
+                        scope: .pageRange(start: exerciseRange.lowerBound, end: exerciseRange.upperBound),
+                        readingMap: true
+                    )
+                } else if let chapterRange {
                     askAssistant(
                         "我刚开始读这一章。请先给我一张阅读路线图：这章要解决哪几个问题、概念怎样递进、哪些是主干、哪些细节可以第二遍再看。控制在 5 点以内，依据本章内容，不要逐页复述。",
                         pageOverride: pageIndex,
@@ -751,7 +763,9 @@ struct LearningInspector: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
             .tint(SatoriTheme.accent)
-            .help(chapterRange == nil ? "先抓住当前页的主线" : "先了解这一章的结构和阅读顺序")
+            .help(exerciseRange == nil
+                  ? (chapterRange == nil ? "先抓住当前页的主线" : "先了解这一章的结构和阅读顺序")
+                  : "先了解习题的题型和起手顺序")
 
             if pageIndex > 0 {
                 Button("接上文", systemImage: "arrow.left") {
@@ -808,6 +822,16 @@ struct LearningInspector: View {
     private var chapterStartRange: ClosedRange<Int>? {
         guard let chapter = currentTopLevelChapter,
               chapter.pageIndex == pageIndex else { return nil }
+        return BookChapter.pageRange(for: chapter, in: chapters, pageCount: pageCount)
+    }
+
+    /// An outline-marked exercise section is a useful transition point for a
+    /// student, but only show the entry on its first page. If the PDF has no
+    /// such outline node, normal page reading remains completely quiet.
+    private var exerciseStartRange: ClosedRange<Int>? {
+        guard let chapter = currentChapter,
+              chapter.pageIndex == pageIndex,
+              ReadingPagePurpose.isExerciseHeading(chapter.title) else { return nil }
         return BookChapter.pageRange(for: chapter, in: chapters, pageCount: pageCount)
     }
 

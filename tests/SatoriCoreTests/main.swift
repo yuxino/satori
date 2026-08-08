@@ -234,6 +234,15 @@ struct SatoriCoreTests {
             "Expected a headed exercise page to switch to exercise reading mode"
         )
         precondition(
+            ReadingPagePurpose.isExerciseHeading("习 题")
+                && ReadingPagePurpose.isExerciseHeading("单项选择题"),
+            "Expected outline exercise headings with OCR spaces to be recognized"
+        )
+        precondition(
+            !ReadingPagePurpose.isExerciseHeading("本书配有习题册和错题本"),
+            "Expected prose mentioning exercise books not to become an exercise-section entry"
+        )
+        precondition(
             ReadingPagePurpose.isExercisePage("9. 请设计一个目录结构。\n10. 假定磁盘块大小为 512 字节，计算访问次数。\n11. 说明文件共享方法。\n12. 为什么要控制权限？"),
             "Expected a continued exercise page to switch to exercise reading mode"
         )
