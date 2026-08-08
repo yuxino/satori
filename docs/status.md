@@ -85,6 +85,7 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Scanned-PDF navigation: when a scanned book has no native PDF outline, Satori now OCRs a bounded front-matter window, reads two-column tables of contents in column order, corrects the printed-page/PDF-page offset from the first real chapter heading, caches the result by file signature, and uses the recovered chapter map for navigation without sending the whole book to Qwen.
 - Chapter-language alignment: “第六章” and “第6章” now resolve to the same recovered chapter, so Chinese-numbered questions keep their chapter-wide context on scanned books too.
 - Scanned-page reading: local Vision OCR now detects actual two-column layouts instead of blindly splitting every page, keeps single-column body text in order, repairs long-but-damaged text layers, and keeps the scanned page image beside OCR text so Qwen can verify the result.
+- Scanned-book orientation: OCR table-of-contents entries now retain first-level sections and their printed-page mapping, so scanned books can show the same chapter + section breadcrumb as native-outline PDFs.
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 

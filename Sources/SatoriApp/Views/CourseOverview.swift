@@ -770,21 +770,39 @@ private enum ScannedOutlineExtractor {
     private struct CachedEntry: Codable {
         let title: String
         let pageIndex: Int
+        let depth: Int
+
+        init(title: String, pageIndex: Int, depth: Int = 0) {
+            self.title = title
+            self.pageIndex = pageIndex
+            self.depth = depth
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            title = try container.decode(String.self, forKey: .title)
+            pageIndex = try container.decode(Int.self, forKey: .pageIndex)
+            depth = try container.decodeIfPresent(Int.self, forKey: .depth) ?? 0
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case title, pageIndex, depth
+        }
     }
 
     static func entries(url: URL) -> [(title: String, pageIndex: Int, depth: Int)] {
         let cacheKey = cacheKey(for: url)
         if let cached = cachedEntries(for: cacheKey) {
-            return cached.map { ($0.title, $0.pageIndex, 0) }
+            return cached.map { ($0.title, $0.pageIndex, $0.depth) }
         }
 
         guard let document = PDFDocument(url: url), document.pageCount > 0 else { return [] }
         let tocEnd = min(document.pageCount, 20)
         let tocPages = recognizePages(document: document, indices: Array(0..<tocEnd))
-        let parsed = ScannedOutlineParser.parse(
+        let parsed = ScannedOutlineParser.parseHierarchy(
             lines: tocPages.flatMap { $0.text.split(whereSeparator: \.isNewline).map(String.init) }
         )
-        guard let first = parsed.first else { return [] }
+        guard let first = parsed.first(where: { $0.depth == 0 }) else { return [] }
 
         // The first numbered chapter is usually within the first 50 pages,
         // but keep a little headroom for long prefaces and exam outlines.
@@ -819,14 +837,21 @@ private enum ScannedOutlineExtractor {
         let mapped = parsed.compactMap { entry -> CachedEntry? in
             let pageIndex = entry.printedPage - 1 + offset
             guard (0..<document.pageCount).contains(pageIndex) else { return nil }
+            let title: String
+            if let sectionNumber = entry.sectionNumber {
+                title = "第\(sectionNumber)节 \(entry.title)"
+            } else {
+                title = "第\(entry.chapterNumber)章 \(entry.title)"
+            }
             return CachedEntry(
-                title: "第\(entry.chapterNumber)章 \(entry.title)",
-                pageIndex: pageIndex
+                title: title,
+                pageIndex: pageIndex,
+                depth: entry.depth
             )
         }
         guard !mapped.isEmpty else { return [] }
         save(mapped, for: cacheKey)
-        return mapped.map { ($0.title, $0.pageIndex, 0) }
+        return mapped.map { ($0.title, $0.pageIndex, $0.depth) }
     }
 
     private static func recognizePages(
@@ -905,7 +930,7 @@ private enum ScannedOutlineExtractor {
         let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
         let modification = values?.contentModificationDate?.timeIntervalSince1970 ?? -1
         let size = values?.fileSize ?? -1
-        return "satori.scanned-outline.\(url.standardizedFileURL.path)|\(modification)|\(size)"
+        return "satori.scanned-outline.v2|\(url.standardizedFileURL.path)|\(modification)|\(size)"
     }
 
     private static func cachedEntries(for key: String) -> [CachedEntry]? {

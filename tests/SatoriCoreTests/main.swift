@@ -422,6 +422,7 @@ struct SatoriCoreTests {
         precondition(
             ChapterNumberParser.number(in: "第六章") == 6
                 && ChapterNumberParser.number(in: "第6章 文件系统") == 6
+                && ChapterNumberParser.number(in: "第六节", unit: "节") == 6
                 && ChapterNumberParser.number(in: "第十二章") == 12,
             "Expected Arabic and Chinese chapter markers to resolve identically"
         )
@@ -438,6 +439,40 @@ struct SatoriCoreTests {
                 ScannedOutlineEntry(chapterNumber: 10, title: "文件与综合练习", printedPage: 308)
             ],
             "Expected scanned table-of-contents chapter lines to parse without sections"
+        )
+        let scannedHierarchy = ScannedOutlineParser.parseHierarchy(lines: [
+            "第一章 概述................25",
+            "第一节 函数的概念和模块化程序",
+            "设计•178",
+            "第二节 函数声明•185",
+            "第二章 C语言基础知识•200"
+        ])
+        precondition(
+            scannedHierarchy.contains {
+                $0.depth == 1
+                    && $0.chapterNumber == 1
+                    && $0.sectionNumber == 1
+                    && $0.title == "函数的概念和模块化程序设计"
+                    && $0.printedPage == 178
+            },
+            "Expected wrapped scanned section headings to keep chapter and page metadata"
+        )
+        let realLanguageTOC = ScannedOutlineParser.parseHierarchy(lines: [
+            "第一章 概述 ：25",
+            "第一节 计算机发展 ：25",
+            "第二节 计算机语言 •26",
+            "第三节 算法及其描述方法• ：27",
+            "第六章 函数 178",
+            "第一节 函数的概念和模块化程序",
+            "设计• 178",
+            "第二节 函数声明• •185"
+        ])
+        precondition(
+            realLanguageTOC.contains {
+                $0.depth == 1 && $0.chapterNumber == 6 && $0.sectionNumber == 2
+                    && $0.title == "函数声明" && $0.printedPage == 185
+            },
+            "Expected real language-textbook TOC OCR lines to preserve section order"
         )
         let noisyScannedOutline = ScannedOutlineParser.parse(lines: [
             "第一章 概述 ：25",

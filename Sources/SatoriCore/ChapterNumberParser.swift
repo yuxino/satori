@@ -10,10 +10,26 @@ public enum ChapterNumberParser {
             options: .regularExpression
         ) else { return nil }
 
+        return number(inMarker: String(text[range]), unit: "章")
+    }
+
+    /// Reads the same Chinese/Arabic number when the marker is a first-level
+    /// section such as “第一节”. Keeping it here avoids a second, subtly
+    /// different Chinese-number implementation in scanned-outline parsing.
+    public static func number(in text: String, unit: Character) -> Int? {
+        guard let range = text.range(
+            of: #"第[0-9一二三四五六七八九十百千万零〇两]+[章节]"#,
+            options: .regularExpression
+        ) else { return nil }
         let marker = String(text[range])
+        guard marker.last == unit else { return nil }
+        return number(inMarker: marker, unit: String(unit))
+    }
+
+    private static func number(inMarker marker: String, unit: String) -> Int? {
         let token = marker
             .replacingOccurrences(of: "第", with: "")
-            .replacingOccurrences(of: "章", with: "")
+            .replacingOccurrences(of: unit, with: "")
         if let arabic = Int(token) {
             return arabic > 0 ? arabic : nil
         }
