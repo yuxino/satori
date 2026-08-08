@@ -238,11 +238,13 @@ struct LearningInspector: View {
             // question—not an answer to an old prompt.
             pendingVerification = false
             verificationAnswerMode = false
-            // 章节选择自动同步阅读位置：翻到别的章节时取消手动选择，跟随当前章节。
+            // 章节选择自动同步阅读位置：只有离开当前顶层章才取消手动选择。
+            // 旧逻辑拿最深的小节比较，导致用户选了“第六章”后翻到
+            // “（2）磁盘”就被悄悄清掉，下一问又缩回小节范围。
             if let selectedChapterID,
                let selected = chapters.first(where: { $0.id == selectedChapterID }),
-               let current = currentChapter,
-               selected.id != current.id {
+               let selectedTopLevel = topLevelChapter(for: selected),
+               selectedTopLevel.id != currentTopLevelChapter?.id {
                 self.selectedChapterID = nil
             }
         }
@@ -1632,12 +1634,17 @@ struct LearningInspector: View {
         chapters.last { $0.pageIndex <= pageIndex }
     }
 
-    /// 实际使用的章节：用户选中的优先，否则跟随当前章节。
+    /// 实际使用的上下文节点：用户主动选中的章/节优先；没有主动选择时，
+    /// “章节”默认跟随当前顶层章，而不是当前页恰好落入的最后一个小节。
     private var activeChapter: BookChapter? {
         if let selectedChapterID, let chapter = chapters.first(where: { $0.id == selectedChapterID }) {
             return chapter
         }
-        return currentChapter
+        return currentTopLevelChapter
+    }
+
+    private func topLevelChapter(for chapter: BookChapter) -> BookChapter? {
+        chapters.last { $0.depth == 0 && $0.pageIndex <= chapter.pageIndex }
     }
 
     /// 切到「多页」时默认从当前页开始，再往前后扩展。
