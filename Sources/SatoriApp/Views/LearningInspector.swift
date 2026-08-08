@@ -658,7 +658,8 @@ struct LearningInspector: View {
                     askAssistant(
                         "我刚开始读这一章。请先给我一张阅读路线图：这章要解决哪几个问题、概念怎样递进、哪些是主干、哪些细节可以第二遍再看。控制在 5 点以内，依据本章内容，不要逐页复述。",
                         pageOverride: pageIndex,
-                        scope: .pageRange(start: chapterRange.lowerBound, end: chapterRange.upperBound)
+                        scope: .pageRange(start: chapterRange.lowerBound, end: chapterRange.upperBound),
+                        readingMap: true
                     )
                 } else {
                     askAssistant(
@@ -1944,7 +1945,8 @@ struct LearningInspector: View {
         scope: LearningContextScope = .page,
         selectionText: String? = nil,
         selectionOffset: Double? = nil,
-        verification: Bool = false
+        verification: Bool = false,
+        readingMap: Bool = false
     ) {
         let request = (suppliedQuestion ?? question).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty, !isThinking else { return }
@@ -2126,7 +2128,8 @@ struct LearningInspector: View {
                     switch effectiveScope {
                     case .none: .none
                     case .page: .page(targetPageIndex)
-                    case let .pageRange(start, end): .pageRange(start...end)
+                    case let .pageRange(start, end):
+                        readingMap ? .chapterMap(start...end) : .pageRange(start...end)
                     case .wholeDocument: .wholeDocument
                     }
                 }()

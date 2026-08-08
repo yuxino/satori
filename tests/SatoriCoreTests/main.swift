@@ -484,6 +484,13 @@ struct SatoriCoreTests {
         precondition(representativePages.contains(182), "Expected whole-book sampling to include a late chapter start")
         precondition(representativePages.contains(293), "Expected whole-book sampling to include the final page")
         precondition(!representativePages.contains(29), "Expected the reading neighborhood to stay in its stronger OCR pass")
+        let chapterMapPages = ReadingSamplePlan.representativePageIndices(
+            in: 182...227,
+            outlinePageIndices: [182, 189, 196, 206, 210, 211, 214, 218, 223, 225, 228]
+        )
+        precondition(chapterMapPages.contains(182) && chapterMapPages.contains(227), "Expected chapter maps to keep both boundaries")
+        precondition(chapterMapPages.contains(189) && chapterMapPages.contains(218), "Expected chapter maps to keep outline anchors inside the range")
+        precondition(chapterMapPages.count <= 16, "Expected chapter maps to respect the sampling budget")
 
         let apiResponse = await QwenLearningAssistant(
             apiKey: "fixture-key",

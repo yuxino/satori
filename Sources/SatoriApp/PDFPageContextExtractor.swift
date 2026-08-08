@@ -12,6 +12,9 @@ enum PDFPageContextExtractor {
         case page(Int)
         /// 连续多页（0 起、含两端）：逐页提取并拼接，扫描页走 OCR。
         case pageRange(ClosedRange<Int>)
+        /// 建立章节路线图：抽取章节首尾、均匀代表页和目录锚点，避免
+        /// 为了一张地图把几十页正文全部搬进同一次请求。
+        case chapterMap(ClosedRange<Int>)
         /// The whole book, as concatenated page text.
         case wholeDocument
         /// 不带任何页上下文。
@@ -22,6 +25,7 @@ enum PDFPageContextExtractor {
             case let .selection(text): "selection:\(text.hashValue)"
             case let .page(index): "page:\(index)"
             case let .pageRange(range): "range:\(range.lowerBound)-\(range.upperBound)"
+            case let .chapterMap(range): "chapterMap:\(range.lowerBound)-\(range.upperBound)"
             case .wholeDocument: "whole"
             case .none: "none"
             }
@@ -66,7 +70,7 @@ enum PDFPageContextExtractor {
             return .text(String(cleaned.prefix(24_000)))
         case .none:
             return nil
-        case .page, .pageRange, .wholeDocument:
+        case .page, .pageRange, .chapterMap, .wholeDocument:
             let key = cacheKey(
                 for: url,
                 scope: scope,
@@ -83,6 +87,8 @@ enum PDFPageContextExtractor {
                 extracted = await extractPage(from: url, pageIndex: pageIndex, qwenConfiguration: qwenConfiguration)
             case let .pageRange(range):
                 extracted = await extractPageRange(from: url, range: range, qwenConfiguration: qwenConfiguration)
+            case let .chapterMap(range):
+                extracted = await extractChapterMap(from: url, range: range)
             case .wholeDocument:
                 extracted = await extractWholeDocument(
                     from: url,
@@ -190,6 +196,50 @@ enum PDFPageContextExtractor {
                 return .textAndImages(String(trimmed.prefix(limit)), visualPages)
             }
         }
+        return .text(String(trimmed.prefix(limit)))
+    }
+
+    /// A chapter route should answer “这章怎么读” quickly. It only needs the
+    /// chapter's shape, not every paragraph: keep the first/last pages,
+    /// evenly spaced representatives, and PDF outline anchors. Long scanned
+    /// chapters deliberately use local OCR only; precise page questions still
+    /// use the normal page/range path and can opt into Qwen OCR.
+    private static func extractChapterMap(
+        from url: URL,
+        range: ClosedRange<Int>
+    ) async -> LearningPageContent? {
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess { url.stopAccessingSecurityScopedResource() }
+        }
+
+        guard let document = PDFDocument(url: url), document.pageCount > 0 else { return nil }
+        let clampedStart = max(0, range.lowerBound)
+        let clampedEnd = min(range.upperBound, document.pageCount - 1)
+        guard clampedStart <= clampedEnd else { return nil }
+        let boundedRange = clampedStart...clampedEnd
+        let indices = ReadingSamplePlan.representativePageIndices(
+            in: boundedRange,
+            outlinePageIndices: outlinePageIndices(in: document)
+        )
+        let pages = await extractPagesConcurrently(
+            document: document,
+            indices: indices,
+            qwenConfiguration: nil,
+            useQwenOCR: false,
+            ocrBudget: OCRBudget(20),
+            concurrency: 4
+        )
+
+        let limit = 30_000
+        var assembled = "【章节路线抽样页】\n"
+        for (pageIndex, text) in pages {
+            guard !text.isEmpty else { continue }
+            assembled += "【第 \(pageIndex + 1) 页】\n\(text)\n\n"
+            if assembled.count >= limit { break }
+        }
+        let trimmed = assembled.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != "【章节路线抽样页】" else { return nil }
         return .text(String(trimmed.prefix(limit)))
     }
 
@@ -429,15 +479,20 @@ enum PDFPageContextExtractor {
 
     private static func outlinePageIndices(in document: PDFDocument) -> [Int] {
         guard let root = document.outlineRoot else { return [] }
-        var pageIndices: [Int] = []
+        var pageIndices = Set<Int>()
 
-        for index in 0..<root.numberOfChildren {
-            guard let child = root.child(at: index),
-                  let page = child.destination?.page else { continue }
-            let pageIndex = document.index(for: page)
-            if pageIndex >= 0 { pageIndices.append(pageIndex) }
+        func visit(_ outline: PDFOutline) {
+            for index in 0..<outline.numberOfChildren {
+                guard let child = outline.child(at: index) else { continue }
+                if let page = child.destination?.page {
+                    let pageIndex = document.index(for: page)
+                    if pageIndex >= 0 { pageIndices.insert(pageIndex) }
+                }
+                visit(child)
+            }
         }
-        return pageIndices
+        visit(root)
+        return pageIndices.sorted()
     }
 
     // MARK: - 并发提取
