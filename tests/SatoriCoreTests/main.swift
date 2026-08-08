@@ -381,6 +381,14 @@ struct SatoriCoreTests {
             noisyScannedOutline.count == 4 && noisyScannedOutline[0].title == "概述",
             "Expected OCR punctuation and spaces to stay parseable"
         )
+        let softwareScannedOutline = ScannedOutlineParser.parse(lines: [
+            "第六章 软件维护 184",
+            "第七章 ：软件项目管理 201"
+        ])
+        precondition(
+            softwareScannedOutline.map(\.title) == ["软件维护", "软件项目管理"],
+            "Expected real software-textbook OCR punctuation to be trimmed"
+        )
         precondition(
             !ReadingScopeInference.inheritsRecentScope(for: "这一页主要讲什么"),
             "Expected ordinary explanations not to inherit a stale scope"
