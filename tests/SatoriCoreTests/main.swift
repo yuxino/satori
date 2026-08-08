@@ -1105,7 +1105,11 @@ private struct FixtureAssistantTransport: AssistantTransport {
             .first { $0.hasPrefix("用户在 PDF 中选中的原文") }
         precondition((selectionText != nil) == expectsSelectionText, "Expected selected passage presence to match request")
         if expectsSelectionText {
-            precondition(selectionText?.contains("文件系统在不同操作系统中有不同的结构") == true, "Expected selected passage to be preserved as a separate input")
+            precondition(
+                selectionText?.contains("文件系统在不同操作系统中有不同的结构") == true
+                    && selectionText?.contains("不要用常识补齐") == true,
+                "Expected selected passage guidance to reject guessed OCR code completions"
+            )
         }
         let verificationMarker = content.filter { $0["type"] as? String == "input_text" }
             .compactMap { $0["text"] as? String }

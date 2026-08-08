@@ -575,7 +575,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         if let selectionText, !selectionText.isEmpty {
             content.append(.init(
                 type: "input_text",
-                text: "用户在 PDF 中选中的原文（这是本轮优先解释的对象）：\n「\(String(selectionText.prefix(4_000)))」\n\n选中内容默认先用一句话说明它在解决什么，再用不超过 3 点解释关键术语或步骤；除非用户明确要求完整代码、逐行解释、深入推导或全部细节，不要逐句翻译或大段复述。",
+                text: "用户在 PDF 中选中的原文（这是本轮优先解释的对象）：\n「\(String(selectionText.prefix(4_000)))」\n\n选区文字层可能有 OCR 空格、错字、断行或缺失字符；如果同时提供页面图像，必须先核对图像。默认先用一句话说明它在解决什么，再用不超过 3 点解释关键术语或步骤；除非用户明确要求完整代码、逐行解释、深入推导或全部细节，不要逐句翻译或大段复述。用户要求“完整代码/完整公式”时，只有页面图像能逐项核对所有 token 才能整理完整版本；看不清或原文缺失时不要用常识补齐、不要写“大致如下”，应明确指出不确定的行和需要补看的页面。",
                 imageURL: nil
             ))
         }
