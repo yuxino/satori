@@ -339,6 +339,14 @@ struct LearningInspector: View {
         }
 
         selectMode(.ask)
+        // A visual crop is a new reading anchor. Do not silently carry a
+        // stale native-text selection from the same page into this request;
+        // otherwise a mixed PDF can make the answer explain two unrelated
+        // objects at once. The user can still name the old passage in the
+        // composer if they intentionally want a comparison.
+        activeSelectionText = nil
+        activeSelectionPage = nil
+        activeSelectionOffset = nil
         attachments.append(
             LearningImageAttachment(
                 name: "第 \(request.pageIndex + 1) 页框选",
