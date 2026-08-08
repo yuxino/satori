@@ -72,14 +72,16 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
     /// 用户发起本轮问答时主动选中的原文；旧版本存档没有该字段。
     /// 保存它是为了让「重试」和回看笔记时仍然围绕同一段内容回答。
     public var selectionText: String?
-    /// 选中原文时的页内阅读偏移（0…1）；旧版本存档没有该字段。
-    /// 让「回到原文」和重试能够回到句子附近，而不是只回到页首。
+    /// 旧版选区记录的页内阅读偏移（0…1）；保留它以兼容已有存档。
     public var selectionOffset: Double?
+    /// 新版记录的选中文字垂直中心（0…1）：0 是页首，1 是页尾。
+    /// 与旧版视口偏移分开，避免升级后把旧的页首位置误当成原文位置。
+    public var selectionAnchorOffset: Double?
 
     private enum CodingKeys: String, CodingKey {
         case id, question, answer, pageIndex, sourceKind, citations, attachmentCount
         case createdAt, completion, contextScope, responseDuration
-        case selectionText, selectionOffset
+        case selectionText, selectionOffset, selectionAnchorOffset
     }
 
     public init(
@@ -95,7 +97,8 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
         contextScope: LearningContextScope? = nil,
         responseDuration: TimeInterval? = nil,
         selectionText: String? = nil,
-        selectionOffset: Double? = nil
+        selectionOffset: Double? = nil,
+        selectionAnchorOffset: Double? = nil
     ) {
         self.id = id
         self.question = question
@@ -110,6 +113,7 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
         self.responseDuration = responseDuration
         self.selectionText = selectionText?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.selectionOffset = selectionOffset.map { min(max($0, 0), 1) }
+        self.selectionAnchorOffset = selectionAnchorOffset.map { min(max($0, 0), 1) }
     }
 
     /// Decode through the same normalization as newly-created turns. This is
@@ -130,7 +134,8 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
             contextScope: try container.decodeIfPresent(LearningContextScope.self, forKey: .contextScope),
             responseDuration: try container.decodeIfPresent(TimeInterval.self, forKey: .responseDuration),
             selectionText: try container.decodeIfPresent(String.self, forKey: .selectionText),
-            selectionOffset: try container.decodeIfPresent(Double.self, forKey: .selectionOffset)
+            selectionOffset: try container.decodeIfPresent(Double.self, forKey: .selectionOffset),
+            selectionAnchorOffset: try container.decodeIfPresent(Double.self, forKey: .selectionAnchorOffset)
         )
     }
 
@@ -149,6 +154,7 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
         try container.encodeIfPresent(responseDuration, forKey: .responseDuration)
         try container.encodeIfPresent(selectionText, forKey: .selectionText)
         try container.encodeIfPresent(selectionOffset, forKey: .selectionOffset)
+        try container.encodeIfPresent(selectionAnchorOffset, forKey: .selectionAnchorOffset)
     }
 }
 

@@ -157,12 +157,14 @@ struct PDFReaderView: NSViewRepresentable {
                 let requestedDocumentID = note.userInfo?["documentID"] as? UUID
                 let requestedURL = note.userInfo?["url"] as? URL
                 let selectionText = note.userInfo?["selectionText"] as? String
+                let selectionOffsetIsExact = note.userInfo?["selectionOffsetIsExact"] as? Bool ?? false
                 Task { @MainActor [weak self] in
                     self?.handleJumpRequest(
                         position: position,
                         requestedDocumentID: requestedDocumentID,
                         requestedURL: requestedURL,
-                        selectionText: selectionText
+                        selectionText: selectionText,
+                        selectionOffsetIsExact: selectionOffsetIsExact
                     )
                 }
             }
@@ -294,7 +296,8 @@ struct PDFReaderView: NSViewRepresentable {
             position: ReadingPosition?,
             requestedDocumentID: UUID?,
             requestedURL: URL?,
-            selectionText: String?
+            selectionText: String?,
+            selectionOffsetIsExact: Bool
         ) {
             guard let position, let view = observedView else { return }
             if let requestedDocumentID, requestedDocumentID != documentID {
@@ -311,28 +314,74 @@ struct PDFReaderView: NSViewRepresentable {
                 // 搜索恢复真正的选区，让“回到原文”不再要求用户二次寻找句子。
                 DispatchQueue.main.async { [weak self, weak view] in
                     guard let self, let view else { return }
-                    self.restoreSelection(selectionText, pageIndex: position.pageIndex, in: view)
+                    self.restoreSelection(
+                        selectionText,
+                        pageIndex: position.pageIndex,
+                        normalizedOffset: position.normalizedPageOffset,
+                        offsetIsExact: selectionOffsetIsExact,
+                        in: view
+                    )
                 }
             }
         }
 
-        @MainActor private func restoreSelection(_ text: String, pageIndex: Int, in view: PDFView) {
+        @MainActor private func restoreSelection(
+            _ text: String,
+            pageIndex: Int,
+            normalizedOffset: Double?,
+            offsetIsExact: Bool,
+            in view: PDFView
+        ) {
             guard let document = view.document else { return }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return }
             let firstLine = trimmed.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).first.map(String.init) ?? trimmed
             let queries = [trimmed, firstLine, String(firstLine.prefix(120))]
-            let selection = queries.lazy
-                .filter { !$0.isEmpty }
-                .flatMap { query in
-                    document.findString(query, withOptions: [.literal])
+            var matches: [PDFSelection] = []
+            for query in queries where !query.isEmpty {
+                for match in document.findString(query, withOptions: [.literal])
+                    where match.pages.contains(where: { document.index(for: $0) == pageIndex }) {
+                    // The full selection and its first-line fallback can find
+                    // the same occurrence. Keep one candidate per geometry so
+                    // the offset comparison below is deterministic.
+                    let isDuplicate = matches.contains { existing in
+                        guard let existingPage = existing.pages.first,
+                              let matchPage = match.pages.first,
+                              document.index(for: existingPage) == document.index(for: matchPage)
+                        else { return false }
+                        let existingBounds = existing.bounds(for: existingPage)
+                        let matchBounds = match.bounds(for: matchPage)
+                        return existingBounds.insetBy(dx: -0.5, dy: -0.5).intersects(matchBounds)
+                    }
+                    if !isDuplicate { matches.append(match) }
                 }
-                .first { match in
-                    match.pages.contains { document.index(for: $0) == pageIndex }
-                }
-            guard let selection else { return }
+            }
+            guard !matches.isEmpty else { return }
+
+            // A page can contain the same short phrase several times. The
+            // saved offset is the selected passage's vertical position, so use
+            // it to choose the nearest occurrence instead of the first match.
+            let selection = matches.min { lhs, rhs in
+                guard offsetIsExact,
+                      let expected = normalizedOffset,
+                      let lhsPage = lhs.pages.first,
+                      let rhsPage = rhs.pages.first else { return false }
+                return abs(selectionOffset(lhs, on: lhsPage) - expected)
+                    < abs(selectionOffset(rhs, on: rhsPage) - expected)
+            } ?? matches[0]
             view.setCurrentSelection(selection, animate: true)
             view.scrollSelectionToVisible(nil)
+        }
+
+        /// Offset of a selection's vertical center from the top of its page.
+        /// It deliberately shares ReadingPosition's 0…1 convention: 0 is the
+        /// page top and 1 is the page bottom.
+        private func selectionOffset(_ selection: PDFSelection, on page: PDFPage) -> Double {
+            let bounds = page.bounds(for: .mediaBox)
+            let selectedBounds = selection.bounds(for: page)
+            guard bounds.height > 0 else { return 0 }
+            let fromTop = bounds.maxY - selectedBounds.midY
+            return min(max(fromTop / bounds.height, 0), 1)
         }
 
         /// Positions the viewport so the page's `normalizedPageOffset` sits at
@@ -472,9 +521,12 @@ struct PDFReaderView: NSViewRepresentable {
             if let view = observedView, let document = view.document,
                let firstPage = view.currentSelection?.pages.first ?? view.currentPage {
                 pageIndex = document.index(for: firstPage)
+                let selectionOffset = view.currentSelection.map {
+                    self.selectionOffset($0, on: firstPage)
+                }
                 position = ReadingPosition(
                     pageIndex: pageIndex,
-                    normalizedPageOffset: visibleOffset(in: view, page: firstPage)
+                    normalizedPageOffset: selectionOffset ?? visibleOffset(in: view, page: firstPage)
                 )
             } else {
                 pageIndex = currentPageIndex.wrappedValue

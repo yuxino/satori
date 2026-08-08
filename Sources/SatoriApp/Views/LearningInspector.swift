@@ -410,7 +410,8 @@ struct LearningInspector: View {
             citations: response?.citations ?? [],
             attachmentCount: draftAttachmentCount,
             selectionText: draftSelectionText,
-            selectionOffset: draftSelectionOffset
+            selectionOffset: draftSelectionOffset,
+            selectionAnchorOffset: draftSelectionOffset
         )
     }
 
@@ -617,20 +618,10 @@ struct LearningInspector: View {
     }
 
     private func returnToSelection(pageIndex: Int, selectionText: String) {
-        let position = ReadingPosition(
-            pageIndex: pageIndex,
-            normalizedPageOffset: activeSelectionOffset ?? 0
-        )
-        onNavigateToPage(pageIndex)
-        NotificationCenter.default.post(
-            name: .satoriReaderJumpRequested,
-            object: nil,
-            userInfo: [
-                "documentID": documentID,
-                "url": documentURL,
-                "position": position,
-                "selectionText": selectionText
-            ]
+        navigateToPage(
+            pageIndex,
+            selectionText: selectionText,
+            selectionOffset: activeSelectionOffset
         )
     }
 
@@ -1048,7 +1039,7 @@ struct LearningInspector: View {
                 createdAt: turn.createdAt,
                 previews: isActive ? activeAttachmentPreviews : [],
                 selectionText: turn.selectionText,
-                selectionOffset: turn.selectionOffset
+                selectionOffset: turn.selectionAnchorOffset
             )
             answerCard(turn: turn, isActive: isActive)
         }
@@ -1256,7 +1247,7 @@ struct LearningInspector: View {
                             pageOverride: turn.pageIndex,
                             scope: turn.contextScope ?? .page,
                             selectionText: turn.selectionText,
-                            selectionOffset: turn.selectionOffset
+                            selectionOffset: turn.selectionAnchorOffset
                         )
                     }
                     .buttonStyle(.borderless)
@@ -1380,7 +1371,7 @@ struct LearningInspector: View {
                 navigateToPage(
                     turn.pageIndex,
                     selectionText: turn.selectionText,
-                    selectionOffset: turn.selectionOffset
+                    selectionOffset: turn.selectionAnchorOffset
                 )
                 askAssistant(
                     turn.question,
@@ -1388,7 +1379,7 @@ struct LearningInspector: View {
                     excludingTurnID: turn.id,
                     scope: turn.contextScope ?? .page,
                     selectionText: turn.selectionText,
-                    selectionOffset: turn.selectionOffset
+                    selectionOffset: turn.selectionAnchorOffset
                 )
             }
             .buttonStyle(.borderless)
@@ -1398,14 +1389,14 @@ struct LearningInspector: View {
                     navigateToPage(
                         turn.pageIndex,
                         selectionText: turn.selectionText,
-                        selectionOffset: turn.selectionOffset
+                        selectionOffset: turn.selectionAnchorOffset
                     )
                     askAssistant(
                         verificationPrompt,
                         pageOverride: turn.pageIndex,
                         scope: turn.contextScope ?? .page,
                         selectionText: turn.selectionText,
-                        selectionOffset: turn.selectionOffset,
+                        selectionOffset: turn.selectionAnchorOffset,
                         verification: true
                     )
                 }
@@ -1889,7 +1880,7 @@ struct LearningInspector: View {
             }) {
                 activeSelectionText = restoredSelection.selectionText
                 activeSelectionPage = restoredSelection.pageIndex
-                activeSelectionOffset = restoredSelection.selectionOffset
+                activeSelectionOffset = restoredSelection.selectionAnchorOffset
             }
             dismissedPageEntryPage = nil
             // 打开面板默认看最新对话：锚定到底部，历史加载完自动贴底。
@@ -1909,15 +1900,41 @@ struct LearningInspector: View {
         selectionText: String? = nil,
         selectionOffset: Double? = nil
     ) {
+        let trimmedSelection: String?
         if let selectionText {
             let trimmed = selectionText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
                 activeSelectionText = trimmed
                 activeSelectionPage = targetPageIndex
                 activeSelectionOffset = selectionOffset
+                trimmedSelection = trimmed
+            } else {
+                trimmedSelection = nil
             }
+        } else {
+            trimmedSelection = nil
         }
         onNavigateToPage(targetPageIndex)
+
+        // 历史气泡里的页码和“返回原文”都走同一条回跳链路：先切到目标页，
+        // 再由 PDFReaderView 恢复真正的 PDFSelection。旧存档没有精确选区
+        // 偏移时仍能找到原文，只是不拿旧的视口偏移去误选重复短语。
+        guard let trimmedSelection else { return }
+        let position = ReadingPosition(
+            pageIndex: targetPageIndex,
+            normalizedPageOffset: selectionOffset ?? 0
+        )
+        NotificationCenter.default.post(
+            name: .satoriReaderJumpRequested,
+            object: nil,
+            userInfo: [
+                "documentID": documentID,
+                "url": documentURL,
+                "position": position,
+                "selectionText": trimmedSelection,
+                "selectionOffsetIsExact": selectionOffset != nil
+            ]
+        )
     }
 
     private func askAssistant(
@@ -2286,7 +2303,8 @@ struct LearningInspector: View {
             contextScope: draftContextScope,
             responseDuration: duration,
             selectionText: draftSelectionText,
-            selectionOffset: draftSelectionOffset
+            selectionOffset: draftSelectionOffset,
+            selectionAnchorOffset: draftSelectionOffset
         )
         turns.append(turn)
         recentCompletedPage = targetPage
