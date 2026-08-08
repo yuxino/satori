@@ -209,6 +209,42 @@ struct SatoriCoreTests {
             ) == nil,
             "Expected ordinary understanding requests to stay on the model path"
         )
+        precondition(
+            ReadingScopeInference.scope(
+                for: "这一章在讲什么",
+                pageIndex: 187,
+                chapterRange: 182...224,
+                sectionRange: 186...188
+            ) == .pageRange(start: 182, end: 224),
+            "Expected chapter language to expand to the current top-level chapter"
+        )
+        precondition(
+            ReadingScopeInference.scope(
+                for: "第六章有哪些重点",
+                pageIndex: 187,
+                chapterRange: 182...224,
+                sectionRange: 186...188
+            ) == .pageRange(start: 182, end: 224),
+            "Expected numbered chapter language to expand naturally"
+        )
+        precondition(
+            ReadingScopeInference.scope(
+                for: "上一页和这一页怎么连起来",
+                pageIndex: 187,
+                chapterRange: 182...224,
+                sectionRange: 186...188
+            ) == .pageRange(start: 186, end: 187),
+            "Expected previous-page language to include the adjacent page"
+        )
+        precondition(
+            ReadingScopeInference.scope(
+                for: "这一页的磁盘地址是什么意思",
+                pageIndex: 187,
+                chapterRange: 182...224,
+                sectionRange: 186...188
+            ) == nil,
+            "Expected ordinary page questions to keep the default page scope"
+        )
 
         let apiResponse = await QwenLearningAssistant(
             apiKey: "fixture-key",

@@ -48,6 +48,7 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Deterministic page-count questions now resolve from the PDF/章节导航 locally, so “这一章有多少页” does not spend a Qwen request or wait for a first token.
 - Reading-first subtraction pass: the course sidebar no longer surfaces due-review counts or the streak/badge wall, and the composer no longer carries a permanent “运行代码” button. Review data and the secondary run space remain intact, but comprehension is now the primary visible action.
 - Selection context alignment: “接上文” now sends the previous page together with the selected passage's current page; when a user is already drafting a question, the visible context picker switches to that page range instead of keeping the broader scope hidden.
+- Natural-language scope inference: the default context is now “智能范围”—ordinary questions stay on the current page, while “这一章/第六章/这一节/整本书/上一页” requests expand to the smallest matching range. The explicit context picker still overrides inference, and the rules are covered by core tests.
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 

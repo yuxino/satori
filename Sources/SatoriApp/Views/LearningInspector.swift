@@ -41,9 +41,10 @@ struct LearningInspector: View {
     }
 
 
-    /// 提问时参考的上下文：默认绑定当前页，让用户在阅读现场直接提问；
+    /// 提问时参考的上下文：默认按问题措辞智能选择，普通问题回到当前页；
     /// 需要时仍可主动切换到章节、整本书或无上下文。
     enum ContextMode: String, CaseIterable, Identifiable {
+        case automatic
         case none
         case page
         case chapter
@@ -76,8 +77,10 @@ struct LearningInspector: View {
     @EnvironmentObject private var router: ReaderSelectionRouter
     @State private var mode: InspectorMode = .ask
     @State private var question = ""
-    /// 发送问题时给 AI 的上下文：默认带当前页，避免每次提问前先配置范围。
-    @State private var contextMode: ContextMode = .page
+    /// 发送问题时给 AI 的上下文：默认按问题措辞智能选择，避免每次提问前先配置范围。
+    /// 默认让 Satori 从问题措辞判断需要当前页、前后页还是章节；
+    /// 用户在菜单里选定具体范围后，自动判断就让位给明确选择。
+    @State private var contextMode: ContextMode = .automatic
     /// 「多页」范围（1 起，UI 显示用；发送时转成 0 起）。
     @State private var rangeStart = 1
     @State private var rangeEnd = 1
@@ -1412,6 +1415,7 @@ struct LearningInspector: View {
         HStack(spacing: SatoriTheme.Spacing.sm) {
             Menu {
                 Picker("参考上下文", selection: contextModeBinding) {
+                    Label("智能范围", systemImage: "wand.and.stars").tag(ContextMode.automatic)
                     Label("不带上下文", systemImage: "text.bubble").tag(ContextMode.none)
                     Label("当前页", systemImage: "doc.text").tag(ContextMode.page)
                     if !chapters.isEmpty {
@@ -1568,8 +1572,27 @@ struct LearningInspector: View {
         )
     }
 
+    /// 让自然语言决定默认取材范围，避免用户先学会配置菜单才能问
+    /// “这一章在讲什么”。只在「智能范围」下启用；用户明确选择范围后
+    /// 尊重选择，不暗中扩大请求。
+    private func inferredContextScope(for request: String, pageIndex: Int) -> LearningContextScope? {
+        let chapterRange = currentTopLevelChapter.flatMap {
+            BookChapter.pageRange(for: $0, in: chapters, pageCount: pageCount)
+        }
+        let sectionRange = activeChapter.flatMap {
+            BookChapter.pageRange(for: $0, in: chapters, pageCount: pageCount)
+        }
+        return ReadingScopeInference.scope(
+            for: request,
+            pageIndex: pageIndex,
+            chapterRange: chapterRange,
+            sectionRange: sectionRange
+        )
+    }
+
     private var contextModePickerTitle: String {
         switch contextMode {
+        case .automatic: "智能范围"
         case .none: "不带上下文"
         case .page: "当前页"
         case .chapter:
@@ -1587,6 +1610,7 @@ struct LearningInspector: View {
 
     private var contextModeSystemImage: String {
         switch contextMode {
+        case .automatic: "wand.and.stars"
         case .none: "text.bubble"
         case .page: "doc.text"
         case .chapter: "list.bullet.rectangle"
@@ -1653,6 +1677,7 @@ struct LearningInspector: View {
             scopeText = contextAnchorLabel(draftContextScope, pageIndex: draftPageIndex) ?? "不带上下文"
         } else {
             switch contextMode {
+            case .automatic: scopeText = "按问题自动选择"
             case .none: scopeText = "不带上下文"
             case .page: scopeText = "第 \(pageIndex + 1) 页"
             case .chapter:
@@ -1790,6 +1815,8 @@ struct LearningInspector: View {
         let effectiveScope: LearningContextScope
         if suppliedQuestion == nil {
             switch contextMode {
+            case .automatic:
+                effectiveScope = inferredContextScope(for: request, pageIndex: targetPageIndex) ?? .page
             case .none:
                 effectiveScope = .none
             case .page:
