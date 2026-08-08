@@ -688,6 +688,28 @@ struct SatoriCoreTests {
         precondition(streamUpdates.last?.text == "fixture explanation", "Expected assembled streaming response")
         precondition(streamUpdates.last?.citations.first?.url.absoluteString == "https://example.com/source", "Expected final streaming citations")
 
+        let longConversation = (0..<6).map { (index: Int) in
+            LearningConversationContext(
+                question: "第 \(index) 轮问题：" + String(repeating: "请解释这个概念。", count: 120),
+                answer: String(repeating: "这是上一轮很长的回答，包含原文依据和解释。", count: 420),
+                pageIndex: index
+            )
+        }
+        let boundedHistoryResponse = await QwenLearningAssistant(
+            apiKey: "fixture-key",
+            pageContent: .text("fixture page text"),
+            conversationContext: longConversation,
+            transport: FixtureAssistantTransport(
+                expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
+                expectedModelID: "qwen3.8-max",
+                expectedImageCount: 0,
+                expectsWebSearch: false,
+                expectedHistoryTurnCount: 3,
+                maximumRequestBodyBytes: 40_000
+            )
+        ).explain(request: "继续解释当前页", pageIndex: 6)
+        precondition(boundedHistoryResponse.text == "fixture explanation", "Expected long reading history to stay usable")
+
         // 不带页上下文的提问：请求里不得夹带「正在阅读第 N 页」的页面内容，
         // 也不能把 nil 页面当成图片发送。
         let bareQuestion = await QwenLearningAssistant(
@@ -1075,6 +1097,7 @@ private struct FixtureAssistantTransport: AssistantTransport {
     var expectsQuickClarification: Bool = false
     var expectsVisualEvidenceInstruction: Bool = false
     var expectedMaxOutputTokens: Int?
+    var maximumRequestBodyBytes: Int?
 
     func send(_ request: URLRequest) async throws -> AssistantTransportResponse {
         try validate(request, expectsStreaming: false)
@@ -1102,6 +1125,9 @@ private struct FixtureAssistantTransport: AssistantTransport {
         precondition(request.url?.absoluteString == expectedEndpoint, "Expected Responses endpoint")
         precondition(request.value(forHTTPHeaderField: "Authorization") == "Bearer fixture-key", "Expected bearer authentication")
         let body = try XCTUnwrap(request.httpBody)
+        if let maximumRequestBodyBytes {
+            precondition(body.count <= maximumRequestBodyBytes, "Expected conversation history to stay within the request budget")
+        }
         let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
         precondition(json["model"] as? String == expectedModelID, "Expected configured Qwen learning model")
         precondition(json["store"] as? Bool == false, "Expected response storage to be disabled")
