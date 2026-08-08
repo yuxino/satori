@@ -211,6 +211,16 @@ struct SatoriCoreTests {
         )
         precondition(QwenLearningAssistant.responseTokenBudget(for: "一句话说清楚") == 260, "Expected one-sentence answers to stay compact")
         precondition(QwenLearningAssistant.responseTokenBudget(for: "简化，字太多") == 560, "Expected simplify requests to lower the output budget")
+        precondition(
+            QwenLearningAssistant.isQuickClarificationRequest(for: "这啥意思？")
+                && QwenLearningAssistant.responseTokenBudget(for: "这啥意思？") == 520,
+            "Expected terse reading speed bumps to use a compact clarification path"
+        )
+        precondition(
+            !QwenLearningAssistant.isQuickClarificationRequest(for: "这是什么？请详细展开")
+                && QwenLearningAssistant.responseTokenBudget(for: "这是什么？请详细展开") == 1_400,
+            "Expected explicit depth requests to keep the normal answer budget"
+        )
         precondition(QwenLearningAssistant.responseTokenBudget(for: "我刚开始读这一章，请给我阅读路线图") == 900, "Expected reading maps to keep enough room for structure")
         precondition(QwenLearningAssistant.responseTokenBudget(for: "解释这一页") == 1_400, "Expected ordinary explanations to keep the normal budget")
         precondition(QwenLearningAssistant.responseTokenBudget(for: "解释我选中的这段内容", hasSelection: true) == 700, "Expected selected-passage explanations to stay compact by default")
@@ -482,6 +492,23 @@ struct SatoriCoreTests {
             )
         ).explain(request: "解释我选中的这段内容", pageIndex: 2)
         precondition(selectionResponse.text == "fixture explanation", "Expected selected-passage output text")
+
+        let quickClarificationResponse = await QwenLearningAssistant(
+            apiKey: "fixture-key",
+            pageContent: .text("fixture page text"),
+            selectionText: "文件系统在不同操作系统中有不同的结构",
+            transport: FixtureAssistantTransport(
+                expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
+                expectedModelID: "qwen3.8-max",
+                expectedImageCount: 0,
+                expectsWebSearch: false,
+                expectedHistoryTurnCount: 0,
+                expectsSelectionText: true,
+                expectsQuickClarification: true,
+                expectedMaxOutputTokens: 520
+            )
+        ).explain(request: "这啥意思？", pageIndex: 2)
+        precondition(quickClarificationResponse.text == "fixture explanation", "Expected terse clarification output path")
 
         let imageResponse = await QwenLearningAssistant(
             apiKey: "fixture-key",
@@ -858,6 +885,7 @@ private struct FixtureAssistantTransport: AssistantTransport {
     var expectsPageContent: Bool = true
     var expectsSelectionText: Bool = false
     var expectsVerificationResponse: Bool = false
+    var expectsQuickClarification: Bool = false
     var expectedMaxOutputTokens: Int?
 
     func send(_ request: URLRequest) async throws -> AssistantTransportResponse {
@@ -920,6 +948,10 @@ private struct FixtureAssistantTransport: AssistantTransport {
             .compactMap { $0["text"] as? String }
             .first { $0.hasPrefix("这是用户对上一轮“验证一下”情境的回答") }
         precondition((verificationMarker != nil) == expectsVerificationResponse, "Expected verification response marker to match request")
+        let quickClarificationMarker = content.filter { $0["type"] as? String == "input_text" }
+            .compactMap { $0["text"] as? String }
+            .first { $0.hasPrefix("这是阅读中的一个短卡点") }
+        precondition((quickClarificationMarker != nil) == expectsQuickClarification, "Expected terse clarification marker to match request")
         let images = content.filter { $0["type"] as? String == "input_image" }
         precondition(images.count == expectedImageCount, "Expected page and attachment image inputs")
         precondition(images.allSatisfy { ($0["image_url"] as? String)?.hasPrefix("data:image/jpeg;base64,") == true }, "Expected Base64 JPEG data URLs")

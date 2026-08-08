@@ -253,6 +253,9 @@ public struct QwenLearningAssistant: LearningAssistant {
         if normalized.contains("三句话") || normalized.contains("两三句话") {
             return 360
         }
+        if isQuickClarificationRequest(for: request) {
+            return 520
+        }
         if ["简要", "简化", "简短", "短一点", "字太多", "更简单", "简单点", "通俗点", "说人话", "先讲主线", "最重要的一个意思"].contains(where: normalized.contains) {
             return 560
         }
@@ -267,6 +270,28 @@ public struct QwenLearningAssistant: LearningAssistant {
             return 700
         }
         return 1_400
+    }
+
+    /// A reader often interrupts a page with a fragment rather than a polished
+    /// question: “这是什么？” / “什么意思？” / “这啥啊？”. These are not
+    /// requests for a full explanation template; they are a small speed bump in
+    /// the reading flow. Keep them compact even when a passage is selected, but
+    /// leave an explicit request for depth in the normal path.
+    public static func isQuickClarificationRequest(for request: String) -> Bool {
+        let normalized = request
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+        guard !normalized.isEmpty,
+              normalized.count <= 24,
+              !["详细", "深入", "展开", "完整", "逐句", "逐行", "推导"].contains(where: normalized.contains)
+        else { return false }
+
+        let markers = [
+            "什么意思", "啥意思", "这是什么", "这是什么东西", "这段是什么",
+            "这啥", "这说的啥", "这段在说啥", "怎么理解"
+        ]
+        return markers.contains { normalized.contains($0) }
     }
 
     private let apiKey: String
@@ -541,6 +566,13 @@ public struct QwenLearningAssistant: LearningAssistant {
             content.append(.init(
                 type: "input_text",
                 text: "这是用户对上一轮“验证一下”情境的回答。请先判断用户是否抓住了核心，再给出原文依据和最关键的一处修正；不要重新出题，不要求死记硬背，也不要把整段答案重写成教程。",
+                imageURL: nil
+            ))
+        }
+        if Self.isQuickClarificationRequest(for: question) {
+            content.append(.init(
+                type: "input_text",
+                text: "这是阅读中的一个短卡点。先直接用一句白话回答用户问的对象，不要先写“原文依据”“解释”等标题；最多三句短句，必要时给一个最小例子。当前页证据不足时直接说缺少什么。只有用户继续追问才展开，不要复述整页。",
                 imageURL: nil
             ))
         }
