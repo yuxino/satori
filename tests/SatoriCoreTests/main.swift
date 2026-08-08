@@ -331,6 +331,26 @@ struct SatoriCoreTests {
             ReadingScopeInference.inheritsRecentScope(for: "那有没有过时的内容"),
             "Expected freshness follow-ups to inherit the recent reading scope"
         )
+        precondition(
+            ReadingScopeInference.scope(
+                for: "下一页讲什么？",
+                pageIndex: 10,
+                chapterRange: 0...20,
+                sectionRange: 10...12,
+                pageCount: 40
+            ) == .pageRange(start: 10, end: 11),
+            "Expected forward-looking questions to include the next page"
+        )
+        precondition(
+            ReadingScopeInference.scope(
+                for: "然后呢",
+                pageIndex: 39,
+                chapterRange: 0...39,
+                sectionRange: nil,
+                pageCount: 40
+            ) == .pageRange(start: 39, end: 39),
+            "Expected next-page scope to stop at the end of a book"
+        )
         let scannedOutline = ScannedOutlineParser.parse(lines: [
             "第一章 概述................25",
             "第一节 计算机发展...........25",

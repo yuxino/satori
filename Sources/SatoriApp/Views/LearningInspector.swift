@@ -1658,7 +1658,8 @@ struct LearningInspector: View {
             for: request,
             pageIndex: pageIndex,
             chapterRange: chapterRange,
-            sectionRange: sectionRange
+            sectionRange: sectionRange,
+            pageCount: pageCount
         ) {
             return explicit
         }

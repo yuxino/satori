@@ -23,7 +23,8 @@ public enum ReadingScopeInference {
         for request: String,
         pageIndex: Int,
         chapterRange: ClosedRange<Int>?,
-        sectionRange: ClosedRange<Int>?
+        sectionRange: ClosedRange<Int>?,
+        pageCount: Int? = nil
     ) -> LearningContextScope? {
         let normalized = request
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -66,6 +67,15 @@ public enum ReadingScopeInference {
         ]
         if pageIndex > 0, previousPageMarkers.contains(where: normalized.contains) {
             return .pageRange(start: pageIndex - 1, end: pageIndex)
+        }
+
+        let nextPageMarkers = [
+            "下一页", "下页", "后面一页", "接下来", "往下讲", "往下看",
+            "然后呢", "后面呢", "后面的内容", "后续内容", "再往后"
+        ]
+        if nextPageMarkers.contains(where: normalized.contains) {
+            let nextPage = pageCount.map { min(max(pageIndex + 1, 0), max($0 - 1, 0)) } ?? pageIndex + 1
+            return .pageRange(start: min(pageIndex, nextPage), end: max(pageIndex, nextPage))
         }
 
         return nil
