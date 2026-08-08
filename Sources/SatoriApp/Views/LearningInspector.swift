@@ -577,8 +577,9 @@ struct LearningInspector: View {
     }
 
     /// 新页的第一个阅读动作：只在当前页还没有问答时出现，回答开始后自动退场。
-    /// 默认只给“先建立主线”和“接上前文”两个选择；实验入口放在选区工具条
-    /// 和回答的更多菜单里，避免刚翻页就把阅读变成任务清单。
+    /// 普通页面先给主线；章节首页先给本章路线，再保留“接上文”，让读者先
+    /// 建立地图再进入细节。实验入口放在选区工具条和回答的更多菜单里，避免
+    /// 刚翻页就把阅读变成任务清单。
     private var showsPageEntry: Bool {
         guard !isLoadingHistory,
               !isThinking,
@@ -588,30 +589,40 @@ struct LearningInspector: View {
     }
 
     private var pageEntryPrompt: some View {
-        HStack(alignment: .center, spacing: SatoriTheme.Spacing.sm) {
+        let chapterRange = chapterStartRange
+        return HStack(alignment: .center, spacing: SatoriTheme.Spacing.sm) {
             Image(systemName: "arrow.down.right.circle")
                 .foregroundStyle(SatoriTheme.accent)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: "刚到第 \(pageIndex + 1) 页")
                     .font(.caption.weight(.semibold))
-                Text("先抓主线，卡住了再追问。")
+                Text(chapterRange == nil ? "先抓主线，卡住了再追问。" : "先看本章路线，卡住了再追问。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 2)
 
-            Button("先讲主线", systemImage: "sparkles") {
-                askAssistant(
-                    "这一页最重要的一个意思是什么？请用三句话告诉我：我现在先读懂什么、它在解决什么问题、哪些细节可以先放过。只依据当前页，不要猜测未提供的前文。",
-                    pageOverride: pageIndex,
-                    scope: .page
-                )
+            Button(chapterRange == nil ? "先讲主线" : "看本章路线", systemImage: "sparkles") {
+                if let chapterRange {
+                    askAssistant(
+                        "我刚开始读这一章。请先给我一张阅读路线图：这章要解决哪几个问题、概念怎样递进、哪些是主干、哪些细节可以第二遍再看。控制在 5 点以内，依据本章内容，不要逐页复述。",
+                        pageOverride: pageIndex,
+                        scope: .pageRange(start: chapterRange.lowerBound, end: chapterRange.upperBound)
+                    )
+                } else {
+                    askAssistant(
+                        "这一页最重要的一个意思是什么？请用三句话告诉我：我现在先读懂什么、它在解决什么问题、哪些细节可以先放过。只依据当前页，不要猜测未提供的前文。",
+                        pageOverride: pageIndex,
+                        scope: .page
+                    )
+                }
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
             .tint(SatoriTheme.accent)
+            .help(chapterRange == nil ? "先抓住当前页的主线" : "先了解这一章的结构和阅读顺序")
 
             if pageIndex > 0 {
                 Button("接上文", systemImage: "arrow.left") {
@@ -661,6 +672,14 @@ struct LearningInspector: View {
             instruction = "请简要设计一个 30 秒内能完成的微实验，按“目的—操作—观察—对应概念”给出，最多 5 步。若能在电脑上安全验证，优先给不安装、不删除、不修改文件的只读命令；否则给纸笔或生活中的替代实验。如果不适合实验，先说明原因，再给一个可观察的替代例子。不要长篇复述原文。"
         }
         return instruction
+    }
+
+    /// 章节首页是读者最需要地图的地方；只对一级目录项生效，避免子节开头
+    /// 误触发整章提取。范围沿用目录边界，因此不会把下一章混进路线图。
+    private var chapterStartRange: ClosedRange<Int>? {
+        guard let chapter = currentTopLevelChapter,
+              chapter.pageIndex == pageIndex else { return nil }
+        return BookChapter.pageRange(for: chapter, in: chapters, pageCount: pageCount)
     }
 
     /// 不把阅读变成考试：只在用户主动选择时给一个小情境，先让他用自己的话

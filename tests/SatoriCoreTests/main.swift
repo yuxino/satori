@@ -173,6 +173,10 @@ struct SatoriCoreTests {
             "Expected normal page understanding to stay PDF-local"
         )
         precondition(
+            QwenLearningAssistant.shouldAutoEnableWebSearch(for: "这里面的知识过时了么"),
+            "Expected colloquial freshness questions to route to web search"
+        )
+        precondition(
             ReadingFactAnswer.pageCountAnswer(
                 for: "这一章有多少页",
                 pageCount: 294,
@@ -235,6 +239,15 @@ struct SatoriCoreTests {
                 sectionRange: 186...188
             ) == .wholeDocument,
             "Expected book-overview language to use the whole document"
+        )
+        precondition(
+            ReadingScopeInference.scope(
+                for: "这本书难吗？",
+                pageIndex: 30,
+                chapterRange: 0...28,
+                sectionRange: 20...28
+            ) == .wholeDocument,
+            "Expected book difficulty questions to use the whole document"
         )
         precondition(
             ReadingScopeInference.scope(

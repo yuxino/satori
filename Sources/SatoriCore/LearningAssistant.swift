@@ -209,7 +209,8 @@ public struct QwenLearningAssistant: LearningAssistant {
         guard !normalized.isEmpty else { return false }
         let markers = [
             "找找", "找资料", "查资料", "查一下", "搜一下", "搜索", "给我找", "帮我找", "来源", "链接",
-            "官方", "最新", "当前版本", "现在怎么样", "有没有过时", "过时了吗",
+            "官方", "最新", "当前版本", "现在怎么样", "有没有过时", "过时了吗", "过时了么", "过时了没",
+            "还适用", "现在还能用", "目前还能用",
             "look up", "search", "latest", "official", "source", "sources", "current version"
         ]
         return markers.contains { normalized.contains($0) }
