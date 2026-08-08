@@ -1930,7 +1930,7 @@ struct LearningInspector: View {
         }
 
         // 输入框发送跟着选择器走（默认智能范围）；快捷提问、重问各自带上下文。
-        let effectiveScope: LearningContextScope
+        var effectiveScope: LearningContextScope
         if suppliedQuestion == nil {
             switch contextMode {
             case .automatic:
@@ -1955,6 +1955,22 @@ struct LearningInspector: View {
             }
         } else {
             effectiveScope = scope
+        }
+
+        // Old archived turns may carry a range produced before chapter
+        // boundaries were corrected (for example, a sixth-chapter answer
+        // anchored to the end of chapter five). A retry must not blindly
+        // resurrect that scope: re-infer from the current outline when the
+        // saved range no longer contains the answer's target page, then fall
+        // back to the target page if the wording gives us no safer range.
+        if excludingTurnID != nil,
+           effectiveScope != .none,
+           !ReadingScopeInference.isRecentScopeRelevant(
+               effectiveScope,
+               turnPageIndex: targetPageIndex,
+               currentPageIndex: targetPageIndex
+           ) {
+            effectiveScope = inferredContextScope(for: request, pageIndex: targetPageIndex) ?? .page
         }
 
         let submittedAttachments = attachments
