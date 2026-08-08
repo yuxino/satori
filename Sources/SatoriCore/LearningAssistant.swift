@@ -202,6 +202,19 @@ public struct QwenLearningAssistant: LearningAssistant {
         }
     }
 
+    /// 明确的外部资料请求自动启用本轮联网；普通的页内理解保持本地 PDF 优先，
+    /// 不因为用户偶尔问一个现实世界的问题就把后续阅读都变成联网对话。
+    public static func shouldAutoEnableWebSearch(for request: String) -> Bool {
+        let normalized = request.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+        let markers = [
+            "找找", "找资料", "查资料", "查一下", "搜一下", "搜索", "给我找", "帮我找", "来源", "链接",
+            "官方", "最新", "当前版本", "现在怎么样", "有没有过时", "过时了吗",
+            "look up", "search", "latest", "official", "source", "sources", "current version"
+        ]
+        return markers.contains { normalized.contains($0) }
+    }
+
     private let apiKey: String
     private let apiHost: URL
     private let modelID: String

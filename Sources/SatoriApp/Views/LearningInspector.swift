@@ -116,6 +116,9 @@ struct LearningInspector: View {
     @State private var isCheckingConfiguration = false
     @State private var configuredModelID: String?
     @State private var allowsWebSearch = false
+    /// 本轮实际是否会联网；可能由用户开关触发，也可能由“找资料/查最新”等
+    /// 明确意图自动触发，但不会永久改变下一轮的开关状态。
+    @State private var requestUsesWebSearch = false
     @State private var completedElsewherePage: Int?
     /// 最近完成的一轮问答所属页；如果 PDF 在归档后才跨过页边界，
     /// 仍要给用户一次明确的落点提示，避免当前页过滤让回答像没发生过。
@@ -1041,7 +1044,7 @@ struct LearningInspector: View {
         if turn.attachmentCount > 0 {
             chips.append(.init(symbol: "paperclip", text: "附图 \(turn.attachmentCount) 张"))
         }
-        if isActive, allowsWebSearch {
+        if isActive, requestUsesWebSearch {
             chips.append(.init(symbol: "globe", text: "正在联网搜索…"))
         } else if !turn.citations.isEmpty {
             chips.append(.init(symbol: "globe", text: "联网搜索 · \(turn.citations.count) 个来源"))
@@ -1662,11 +1665,11 @@ struct LearningInspector: View {
             return preparingStatusText
         }
         if requestPhase == .waitingForFirstToken {
-            return allowsWebSearch
+            return requestUsesWebSearch
                 ? "已送达 Qwen，正在联网并等待首段回答…"
                 : "已送达 Qwen，等待首段回答…"
         }
-        if allowsWebSearch { return "正在联网搜索资料并组织回答…" }
+        if requestUsesWebSearch { return "正在联网搜索资料并组织回答…" }
         if contextMode == .chapter {
             if case .pageRange = draftContextScope {
                 return "正在通读章节内容找依据…"
@@ -1758,6 +1761,8 @@ struct LearningInspector: View {
         guard !request.isEmpty, !isThinking else { return }
 
         let isAnswerToVerification = pendingVerification && !verification
+        let usesWebSearch = allowsWebSearch
+            || (!verification && QwenLearningAssistant.shouldAutoEnableWebSearch(for: request))
         pendingVerification = false
         draftIsVerification = verification
 
@@ -1848,6 +1853,7 @@ struct LearningInspector: View {
         isThinking = true
         streamStartDate = .now
         requestPhase = .loadingConfiguration
+        requestUsesWebSearch = usesWebSearch
         completedElsewherePage = nil
 
         requestTask = Task {
@@ -1921,7 +1927,7 @@ struct LearningInspector: View {
                 isVerificationResponse: isAnswerToVerification,
                 additionalImagesJPEG: submittedAttachments.map(\.jpegData),
                 conversationContext: context,
-                allowsWebSearch: allowsWebSearch,
+                allowsWebSearch: usesWebSearch,
                 instructions: configuration.prompt
             )
             var latestResponse: LearningResponse?

@@ -160,6 +160,18 @@ struct SatoriCoreTests {
 
         let response = await UnconfiguredLearningAssistant().explain(request: "解释", pageIndex: 7)
         precondition(response.sourceKind == .inference, "Expected explicit source label")
+        precondition(
+            QwenLearningAssistant.shouldAutoEnableWebSearch(for: "openEuler 的资料给我找找"),
+            "Expected explicit material lookup to route to web search"
+        )
+        precondition(
+            QwenLearningAssistant.shouldAutoEnableWebSearch(for: "这个版本有没有过时"),
+            "Expected freshness question to route to web search"
+        )
+        precondition(
+            !QwenLearningAssistant.shouldAutoEnableWebSearch(for: "这一页最重要的一个意思是什么？"),
+            "Expected normal page understanding to stay PDF-local"
+        )
 
         let apiResponse = await QwenLearningAssistant(
             apiKey: "fixture-key",
