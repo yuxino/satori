@@ -366,6 +366,7 @@ private struct DocumentWorkspace: View {
             Divider()
             ZStack {
                 PDFReaderView(
+                    documentID: document.id,
                     url: url,
                     // 用实时位置而非持久化快照：窄/宽布局切换会重建 PDFReaderView，
                     // 此时持久化值可能落后于用户当前页，回退到旧页会丢进度。

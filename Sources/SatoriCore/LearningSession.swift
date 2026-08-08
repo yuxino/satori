@@ -76,6 +76,12 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
     /// 让「回到原文」和重试能够回到句子附近，而不是只回到页首。
     public var selectionOffset: Double?
 
+    private enum CodingKeys: String, CodingKey {
+        case id, question, answer, pageIndex, sourceKind, citations, attachmentCount
+        case createdAt, completion, contextScope, responseDuration
+        case selectionText, selectionOffset
+    }
+
     public init(
         id: UUID = UUID(),
         question: String,
@@ -104,6 +110,45 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
         self.responseDuration = responseDuration
         self.selectionText = selectionText?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.selectionOffset = selectionOffset.map { min(max($0, 0), 1) }
+    }
+
+    /// Decode through the same normalization as newly-created turns. This is
+    /// important for old or hand-edited archives: synthesized Codable would
+    /// bypass the page/offset clamps in the initializer.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decode(UUID.self, forKey: .id),
+            question: try container.decode(String.self, forKey: .question),
+            answer: try container.decode(String.self, forKey: .answer),
+            pageIndex: try container.decode(Int.self, forKey: .pageIndex),
+            sourceKind: try container.decode(LearningSourceKind.self, forKey: .sourceKind),
+            citations: try container.decode([LearningCitation].self, forKey: .citations),
+            attachmentCount: try container.decode(Int.self, forKey: .attachmentCount),
+            createdAt: try container.decode(Date.self, forKey: .createdAt),
+            completion: try container.decode(LearningTurnCompletion.self, forKey: .completion),
+            contextScope: try container.decodeIfPresent(LearningContextScope.self, forKey: .contextScope),
+            responseDuration: try container.decodeIfPresent(TimeInterval.self, forKey: .responseDuration),
+            selectionText: try container.decodeIfPresent(String.self, forKey: .selectionText),
+            selectionOffset: try container.decodeIfPresent(Double.self, forKey: .selectionOffset)
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(question, forKey: .question)
+        try container.encode(answer, forKey: .answer)
+        try container.encode(pageIndex, forKey: .pageIndex)
+        try container.encode(sourceKind, forKey: .sourceKind)
+        try container.encode(citations, forKey: .citations)
+        try container.encode(attachmentCount, forKey: .attachmentCount)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(completion, forKey: .completion)
+        try container.encodeIfPresent(contextScope, forKey: .contextScope)
+        try container.encodeIfPresent(responseDuration, forKey: .responseDuration)
+        try container.encodeIfPresent(selectionText, forKey: .selectionText)
+        try container.encodeIfPresent(selectionOffset, forKey: .selectionOffset)
     }
 }
 

@@ -108,6 +108,9 @@ struct LearningInspector: View {
     @State private var configuredModelID: String?
     @State private var allowsWebSearch = false
     @State private var completedElsewherePage: Int?
+    /// 最近完成的一轮问答所属页；如果 PDF 在归档后才跨过页边界，
+    /// 仍要给用户一次明确的落点提示，避免当前页过滤让回答像没发生过。
+    @State private var recentCompletedPage: Int?
     /// 新翻到、还没有问答的页面只显示一次轻量入口；用户不想要时可收起，
     /// 避免在已有对话旁边重复堆快捷功能。
     @State private var dismissedPageEntryPage: Int?
@@ -137,6 +140,7 @@ struct LearningInspector: View {
         "作者为什么要这样讲？",
         "给我一个具体例子"
     ]
+    private static let maxSelectionCharacters = 4_000
 
     var body: some View {
         VStack(spacing: 0) {
@@ -193,7 +197,11 @@ struct LearningInspector: View {
             Text("只会删除本机保存的 AI 问答，不会影响 PDF、阅读位置或百炼账户。")
         }
         .onDisappear { requestTask?.cancel() }
-        .onChange(of: pageIndex) { _, _ in
+        .onChange(of: pageIndex) { _, newPageIndex in
+            if let recentCompletedPage, recentCompletedPage != newPageIndex {
+                completedElsewherePage = recentCompletedPage
+                self.recentCompletedPage = nil
+            }
             // 用户翻页后，之前选中的上下文不再指向当前阅读位置。
             pendingSelectionPage = nil
             dismissedPageEntryPage = nil
@@ -208,8 +216,9 @@ struct LearningInspector: View {
     }
 
     private func handleSelection(_ request: ReaderSelectionRequest) {
-        let text = request.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty,
+        let text = normalizedSelectionText(request.text)
+        guard request.documentID == documentID,
+              !text.isEmpty,
               request.url == nil || request.url == documentURL else { return }
 
         selectMode(.ask)
@@ -235,6 +244,12 @@ struct LearningInspector: View {
                 isQuestionFocused = true
             }
         }
+    }
+
+    private func normalizedSelectionText(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > Self.maxSelectionCharacters else { return trimmed }
+        return String(trimmed.prefix(Self.maxSelectionCharacters - 1)) + "…"
     }
 
     private func consumePendingRouterRequests() {
@@ -468,24 +483,27 @@ struct LearningInspector: View {
     }
 
     private func selectionAnchorBanner(text: String, pageIndex: Int) -> some View {
-        HStack(alignment: .top, spacing: SatoriTheme.Spacing.sm) {
+        let isCurrentPage = pageIndex == self.pageIndex
+        return HStack(alignment: .top, spacing: SatoriTheme.Spacing.sm) {
             Image(systemName: "text.quote")
                 .foregroundStyle(SatoriTheme.accent)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text("原文选区 · 第 \(pageIndex + 1) 页")
+                    Text(isCurrentPage ? "原文选区 · 第 \(pageIndex + 1) 页" : "上次卡在第 \(pageIndex + 1) 页")
                         .font(.caption.weight(.semibold))
-                    Text("回答会围绕这段内容")
+                    Text(isCurrentPage ? "回答会围绕这段内容" : "可返回这段原文")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Text(text.trimmingCharacters(in: .whitespacesAndNewlines))
-                    .font(.callout)
-                    .lineLimit(3)
-                    .foregroundStyle(.primary.opacity(0.82))
-                Button("回到原文", systemImage: "arrow.up.right") {
-                    returnToSelection(pageIndex: pageIndex)
+                if isCurrentPage {
+                    Text(text.trimmingCharacters(in: .whitespacesAndNewlines))
+                        .font(.callout)
+                        .lineLimit(3)
+                        .foregroundStyle(.primary.opacity(0.82))
+                }
+                Button(isCurrentPage ? "回到原文" : "返回", systemImage: "arrow.up.right") {
+                    returnToSelection(pageIndex: pageIndex, selectionText: text)
                 }
                 .buttonStyle(.link)
                 .font(.caption.weight(.medium))
@@ -509,7 +527,7 @@ struct LearningInspector: View {
         )
     }
 
-    private func returnToSelection(pageIndex: Int) {
+    private func returnToSelection(pageIndex: Int, selectionText: String) {
         let position = ReadingPosition(
             pageIndex: pageIndex,
             normalizedPageOffset: activeSelectionOffset ?? 0
@@ -519,8 +537,10 @@ struct LearningInspector: View {
             name: .satoriReaderJumpRequested,
             object: nil,
             userInfo: [
+                "documentID": documentID,
                 "url": documentURL,
-                "position": position
+                "position": position,
+                "selectionText": selectionText
             ]
         )
     }
@@ -531,7 +551,7 @@ struct LearningInspector: View {
     private var showsPageEntry: Bool {
         guard !isLoadingHistory,
               !isThinking,
-              activeSelectionText == nil,
+              activeSelectionPage != pageIndex,
               dismissedPageEntryPage != pageIndex else { return false }
         return !turns.contains { $0.pageIndex == pageIndex }
     }
@@ -603,6 +623,12 @@ struct LearningInspector: View {
             instruction = "如果这个概念适合做一个 30 秒的小实验，请设计一个安全、简单的实验；如果不适合，先说明原因再给一个可观察的替代例子。"
         }
         return instruction
+    }
+
+    /// 不把阅读变成考试：只在用户主动选择时给一个小情境，先让他用自己的话
+    /// 作答，再沿着最近对话判断理解是否成立并指出最关键的修正。
+    private var verificationPrompt: String {
+        "请做一次轻量理解验证。不要复述答案，也不要直接给结论；只给我一个和刚才内容相关的具体小情境或问题，让我先用自己的话回答。等我下一条消息后，再判断我的理解是否正确，并指出最关键的一处修正。控制在两三句话。"
     }
 
     /// 回答完成时用户已经翻页：提示它存进了哪一页，不再"答完就消失"。
@@ -896,7 +922,9 @@ struct LearningInspector: View {
                 contextScope: turn.contextScope,
                 attachmentCount: turn.attachmentCount,
                 createdAt: turn.createdAt,
-                previews: isActive ? activeAttachmentPreviews : []
+                previews: isActive ? activeAttachmentPreviews : [],
+                selectionText: turn.selectionText,
+                selectionOffset: turn.selectionOffset
             )
             answerCard(turn: turn, isActive: isActive)
         }
@@ -909,7 +937,9 @@ struct LearningInspector: View {
         contextScope: LearningContextScope?,
         attachmentCount: Int,
         createdAt: Date,
-        previews: [NSImage]
+        previews: [NSImage],
+        selectionText: String?,
+        selectionOffset: Double?
     ) -> some View {
         HStack {
             Spacer(minLength: 48)
@@ -942,7 +972,13 @@ struct LearningInspector: View {
                         if contextScope == .some(.wholeDocument) {
                             Text(label)
                         } else {
-                            Button(label) { onNavigateToPage(pageIndex) }
+                            Button(label) {
+                                navigateToPage(
+                                    pageIndex,
+                                    selectionText: selectionText,
+                                    selectionOffset: selectionOffset
+                                )
+                            }
                                 .buttonStyle(.plain)
                         }
                     }
@@ -1047,7 +1083,8 @@ struct LearningInspector: View {
             answerHeader(
                 sourceKind: turn.sourceKind,
                 isStreaming: isStreaming,
-                completion: turn.completion
+                completion: turn.completion,
+                pageIndex: turn.pageIndex
             )
             if isStreaming, turn.answer.isEmpty {
                 HStack(spacing: SatoriTheme.Spacing.sm) {
@@ -1137,11 +1174,12 @@ struct LearningInspector: View {
     private func answerHeader(
         sourceKind: LearningSourceKind,
         isStreaming: Bool,
-        completion: LearningTurnCompletion
+        completion: LearningTurnCompletion,
+        pageIndex: Int
     ) -> some View {
         HStack {
             Label(
-                isStreaming ? "Qwen 正在回答" : sourceKind.localizedTitle,
+                isStreaming ? "Qwen 正在回答第 \(pageIndex + 1) 页" : sourceKind.localizedTitle,
                 systemImage: isStreaming ? "sparkles" : "checkmark.seal"
             )
             .font(.caption.weight(.semibold))
@@ -1206,7 +1244,11 @@ struct LearningInspector: View {
                 // 从「笔记」重试时先回到问答现场，否则请求虽然会发出，
                 // 用户却留在笔记列表里看不到流式回答，也不知道是否成功。
                 selectMode(.ask)
-                onNavigateToPage(turn.pageIndex)
+                navigateToPage(
+                    turn.pageIndex,
+                    selectionText: turn.selectionText,
+                    selectionOffset: turn.selectionOffset
+                )
                 askAssistant(
                     turn.question,
                     pageOverride: turn.pageIndex,
@@ -1218,11 +1260,15 @@ struct LearningInspector: View {
             }
             .buttonStyle(.borderless)
             Menu {
-                Button("试试看", systemImage: "testtube.2") {
+                Button("验证一下", systemImage: "checkmark.circle") {
                     selectMode(.ask)
-                    onNavigateToPage(turn.pageIndex)
+                    navigateToPage(
+                        turn.pageIndex,
+                        selectionText: turn.selectionText,
+                        selectionOffset: turn.selectionOffset
+                    )
                     askAssistant(
-                        selectionPrompt(for: .experiment),
+                        verificationPrompt,
                         pageOverride: turn.pageIndex,
                         scope: turn.contextScope ?? .page,
                         selectionText: turn.selectionText,
@@ -1571,15 +1617,20 @@ struct LearningInspector: View {
     private var composerHint: String {
         let web = allowsWebSearch ? "、联网" : ""
         let scopeText: String
-        switch contextMode {
-        case .none: scopeText = "不带上下文"
-        case .page: scopeText = "第 \(pageIndex + 1) 页"
-        case .chapter:
-            scopeText = activeChapter?.title ?? "章节"
-        case .pageRange: scopeText = "第 \(rangeStart)–\(rangeEnd) 页"
-        case .wholeDocument: scopeText = "整本书"
+        if isThinking, !draftQuestion.isEmpty {
+            scopeText = contextAnchorLabel(draftContextScope, pageIndex: draftPageIndex) ?? "不带上下文"
+        } else {
+            switch contextMode {
+            case .none: scopeText = "不带上下文"
+            case .page: scopeText = "第 \(pageIndex + 1) 页"
+            case .chapter:
+                scopeText = activeChapter?.title ?? "章节"
+            case .pageRange: scopeText = "第 \(rangeStart)–\(rangeEnd) 页"
+            case .wholeDocument: scopeText = "整本书"
+            }
         }
-        return "Enter 发送 · Shift+Enter 换行 · ⌘V 贴图 · 参考：\(scopeText)、最近对话、附件\(web)"
+        let prefix = isThinking && !draftQuestion.isEmpty ? "本轮参考" : "参考"
+        return "Enter 发送 · Shift+Enter 换行 · ⌘V 贴图 · \(prefix)：\(scopeText)、最近对话、附件\(web)"
     }
 
     private var streamingStatusText: String {
@@ -1601,13 +1652,21 @@ struct LearningInspector: View {
     private func loadHistory() async {
         isLoadingHistory = true
         historyStatus = ""
+        turns = []
+        activeSelectionText = nil
+        activeSelectionPage = nil
+        activeSelectionOffset = nil
+        completedElsewherePage = nil
+        recentCompletedPage = nil
         do {
-            turns = try await sessionStore.turns(for: documentID)
-            // 如果上次离开这本书时正围绕某段原文提问，恢复当前页上的
-            // 最近选区，让用户重开后仍能一键回到卡住的地方；不同页不强行
-            // 抢占阅读现场，等用户回到那一页时仍可从笔记进入。
+            let loadedTurns = try await sessionStore.turns(for: documentID)
+            guard !Task.isCancelled else { return }
+            turns = loadedTurns
+            // 如果上次离开这本书时正围绕某段原文提问，恢复最近的选区。
+            // 跨页也只显示成一行低干扰的「上次卡在第 N 页」，不抢当前页
+            // 的阅读入口，但让用户能一键回到真正卡住的位置。
             if let restoredSelection = turns.reversed().first(where: {
-                $0.pageIndex == pageIndex && $0.selectionText?.isEmpty == false
+                $0.selectionText?.isEmpty == false
             }) {
                 activeSelectionText = restoredSelection.selectionText
                 activeSelectionPage = restoredSelection.pageIndex
@@ -1618,10 +1677,28 @@ struct LearningInspector: View {
             scrollAnchorID = responseBottomID
             scrollRequest += 1
         } catch {
+            guard !Task.isCancelled else { return }
             turns = []
             historyStatus = "学习记录暂时无法读取；不影响继续阅读和提问。"
         }
         isLoadingHistory = false
+    }
+
+    /// 从历史问答回到原文时，恢复选区锚点；没有选区的普通页问答仍只跳到页码。
+    private func navigateToPage(
+        _ targetPageIndex: Int,
+        selectionText: String? = nil,
+        selectionOffset: Double? = nil
+    ) {
+        if let selectionText {
+            let trimmed = selectionText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                activeSelectionText = trimmed
+                activeSelectionPage = targetPageIndex
+                activeSelectionOffset = selectionOffset
+            }
+        }
+        onNavigateToPage(targetPageIndex)
     }
 
     private func askAssistant(
@@ -1698,9 +1775,11 @@ struct LearningInspector: View {
             return candidate
         }()
         draftSelectionText = effectiveSelectionText
+        let activeSelectionMatches = activeSelectionPage == targetPageIndex
+            && activeSelectionText?.trimmingCharacters(in: .whitespacesAndNewlines) == effectiveSelectionText
         let effectiveSelectionOffset: Double? = {
             guard effectiveSelectionText != nil else { return nil }
-            return selectionOffset ?? (activeSelectionPage == targetPageIndex ? activeSelectionOffset : nil)
+            return selectionOffset ?? (activeSelectionMatches ? activeSelectionOffset : nil)
         }()
         draftSelectionOffset = effectiveSelectionOffset
         if let effectiveSelectionText, !effectiveSelectionText.isEmpty {
@@ -1882,6 +1961,7 @@ struct LearningInspector: View {
             selectionOffset: draftSelectionOffset
         )
         turns.append(turn)
+        recentCompletedPage = targetPage
         draftQuestion = ""
         draftAttachmentCount = 0
         draftContextScope = .none
@@ -1919,6 +1999,7 @@ struct LearningInspector: View {
         attachments = []
         attachmentStatus = ""
         completedElsewherePage = nil
+        recentCompletedPage = nil
         pendingSelectionPage = nil
         activeSelectionText = nil
         activeSelectionPage = nil

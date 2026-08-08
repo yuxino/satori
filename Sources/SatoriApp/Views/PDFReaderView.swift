@@ -10,7 +10,7 @@ import SatoriCore
 extension Notification.Name {
     static let satoriAskSelectionRequested = Notification.Name("satori.askSelectionRequested")
     static let satoriRunSelectionRequested = Notification.Name("satori.runSelectionRequested")
-    /// userInfo: url (the PDF), position (ReadingPosition with page + offset).
+    /// userInfo: documentID, url (the PDF), position (ReadingPosition with page + offset).
     static let satoriReaderJumpRequested = Notification.Name("satori.readerJumpRequested")
 }
 
@@ -20,6 +20,7 @@ extension Notification.Name {
 /// reported as a real 0…1 offset instead of a constant 0, and jumps can be
 /// targeted at a (page, offset) pair via the satoriReaderJumpRequested channel.
 struct PDFReaderView: NSViewRepresentable {
+    let documentID: UUID
     let url: URL
     let initialPosition: ReadingPosition
     @Binding var currentPageIndex: Int
@@ -32,6 +33,7 @@ struct PDFReaderView: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
+            documentID: documentID,
             currentPageIndex: $currentPageIndex,
             onPositionChanged: onPositionChanged,
             onAskSelection: onAskSelection,
@@ -87,7 +89,9 @@ struct PDFReaderView: NSViewRepresentable {
         coordinator.stopObserving()
     }
 
+    @MainActor
     final class Coordinator: NSObject {
+        private let documentID: UUID
         private weak var observedView: PDFView?
         private let currentPageIndex: Binding<Int>
         private let onPositionChanged: (Int, Double) -> Void
@@ -116,11 +120,13 @@ struct PDFReaderView: NSViewRepresentable {
         private var lastReportedOffset: Double = -1
 
         init(
+            documentID: UUID,
             currentPageIndex: Binding<Int>,
             onPositionChanged: @escaping (Int, Double) -> Void,
             onAskSelection: ((String, Int) -> Void)?,
             onRunSelection: ((String, Int) -> Void)?
         ) {
+            self.documentID = documentID
             self.currentPageIndex = currentPageIndex
             self.onPositionChanged = onPositionChanged
             self.onAskSelection = onAskSelection
@@ -148,9 +154,16 @@ struct PDFReaderView: NSViewRepresentable {
                 // Extract Sendable payloads before crossing isolation; the
                 // Notification itself is not Sendable.
                 let position = note.userInfo?["position"] as? ReadingPosition
+                let requestedDocumentID = note.userInfo?["documentID"] as? UUID
                 let requestedURL = note.userInfo?["url"] as? URL
-                MainActor.assumeIsolated {
-                    self?.handleJumpRequest(position: position, requestedURL: requestedURL)
+                let selectionText = note.userInfo?["selectionText"] as? String
+                Task { @MainActor [weak self] in
+                    self?.handleJumpRequest(
+                        position: position,
+                        requestedDocumentID: requestedDocumentID,
+                        requestedURL: requestedURL,
+                        selectionText: selectionText
+                    )
                 }
             }
         }
@@ -264,6 +277,10 @@ struct PDFReaderView: NSViewRepresentable {
         /// viewport top. PDFView is non-flipped, so y grows upward.
         private func visibleOffset(in view: PDFView) -> Double {
             guard let page = view.currentPage else { return 0 }
+            return visibleOffset(in: view, page: page)
+        }
+
+        private func visibleOffset(in view: PDFView, page: PDFPage) -> Double {
             let pageRect = view.convert(page.bounds(for: .mediaBox), from: page)
             let viewport = view.visibleRect
             let pageHeight = max(pageRect.height, 1)
@@ -273,14 +290,49 @@ struct PDFReaderView: NSViewRepresentable {
 
         // MARK: Offset-aware jumps
 
-        @MainActor private func handleJumpRequest(position: ReadingPosition?, requestedURL: URL?) {
+        @MainActor private func handleJumpRequest(
+            position: ReadingPosition?,
+            requestedDocumentID: UUID?,
+            requestedURL: URL?,
+            selectionText: String?
+        ) {
             guard let position, let view = observedView else { return }
+            if let requestedDocumentID, requestedDocumentID != documentID {
+                return // Another document's jump; ignore.
+            }
             if let requestedURL, let documentURL = view.document?.documentURL,
                requestedURL.standardizedFileURL != documentURL.standardizedFileURL {
                 return // Another document's jump; ignore.
             }
             pendingJump = position
             jump(to: position, in: view)
+            if let selectionText {
+                // PDFDestination 只负责把视口送到附近；下一帧再用 PDFKit 的文本
+                // 搜索恢复真正的选区，让“回到原文”不再要求用户二次寻找句子。
+                DispatchQueue.main.async { [weak self, weak view] in
+                    guard let self, let view else { return }
+                    self.restoreSelection(selectionText, pageIndex: position.pageIndex, in: view)
+                }
+            }
+        }
+
+        @MainActor private func restoreSelection(_ text: String, pageIndex: Int, in view: PDFView) {
+            guard let document = view.document else { return }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            let firstLine = trimmed.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).first.map(String.init) ?? trimmed
+            let queries = [trimmed, firstLine, String(firstLine.prefix(120))]
+            let selection = queries.lazy
+                .filter { !$0.isEmpty }
+                .flatMap { query in
+                    document.findString(query, withOptions: [.literal])
+                }
+                .first { match in
+                    match.pages.contains { document.index(for: $0) == pageIndex }
+                }
+            guard let selection else { return }
+            view.setCurrentSelection(selection, animate: true)
+            view.scrollSelectionToVisible(nil)
         }
 
         /// Positions the viewport so the page's `normalizedPageOffset` sits at
@@ -399,6 +451,7 @@ struct PDFReaderView: NSViewRepresentable {
                     name: .satoriAskSelectionRequested,
                     object: nil,
                     userInfo: [
+                        "documentID": self?.documentID as Any,
                         "text": text,
                         "pageIndex": pageIndex,
                         "position": position,
@@ -421,7 +474,7 @@ struct PDFReaderView: NSViewRepresentable {
                 pageIndex = document.index(for: firstPage)
                 position = ReadingPosition(
                     pageIndex: pageIndex,
-                    normalizedPageOffset: visibleOffset(in: view)
+                    normalizedPageOffset: visibleOffset(in: view, page: firstPage)
                 )
             } else {
                 pageIndex = currentPageIndex.wrappedValue

@@ -306,6 +306,29 @@ struct SatoriCoreTests {
         )
         precondition(clampedTurn.selectionOffset == 1, "Expected selection offset to clamp to the page bottom")
 
+        let invalidPersistedTurnJSON = """
+        {
+          "id": "\(UUID().uuidString)",
+          "question": "越界位置",
+          "answer": "回答",
+          "pageIndex": -4,
+          "sourceKind": "currentPDF",
+          "citations": [],
+          "attachmentCount": -2,
+          "createdAt": 1750000000,
+          "completion": "completed",
+          "selectionText": "原文",
+          "selectionOffset": 2
+        }
+        """
+        let normalizedPersistedTurn = try decoder.decode(
+            LearningTurn.self,
+            from: Data(invalidPersistedTurnJSON.utf8)
+        )
+        precondition(normalizedPersistedTurn.pageIndex == 0, "Expected persisted page index to clamp")
+        precondition(normalizedPersistedTurn.attachmentCount == 0, "Expected persisted attachment count to clamp")
+        precondition(normalizedPersistedTurn.selectionOffset == 1, "Expected persisted selection offset to clamp")
+
         // Glyph-positioned PDFs hand back CJK text with a space wedged between
         // every character ("返 回 正 整 数"). Those spaces are always artifacts
         // and must be dropped before the text becomes preview or model input.

@@ -17,6 +17,7 @@ enum ReaderSelectionIntent: String, Equatable, Sendable {
 /// time the same passage is picked again.
 struct ReaderSelectionRequest: Equatable, Sendable {
     let id = UUID()
+    let documentID: UUID
     let text: String
     let pageIndex: Int
     /// 选中原文时的页内阅读位置；旧请求没有该值时仍可退回页首。
@@ -84,10 +85,12 @@ struct ContentView: View {
         }
         .environmentObject(router)
         .onReceive(NotificationCenter.default.publisher(for: .satoriAskSelectionRequested)) { note in
-            guard let text = note.userInfo?["text"] as? String,
+            guard let documentID = note.userInfo?["documentID"] as? UUID,
+                  let text = note.userInfo?["text"] as? String,
                   let pageIndex = note.userInfo?["pageIndex"] as? Int else { return }
             Task { @MainActor in
                 router.pendingAskSelection = ReaderSelectionRequest(
+                    documentID: documentID,
                     text: text,
                     pageIndex: pageIndex,
                     position: note.userInfo?["position"] as? ReadingPosition,
@@ -99,10 +102,12 @@ struct ContentView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .satoriRunSelectionRequested)) { note in
-            guard let text = note.userInfo?["text"] as? String,
+            guard let documentID = note.userInfo?["documentID"] as? UUID,
+                  let text = note.userInfo?["text"] as? String,
                   let pageIndex = note.userInfo?["pageIndex"] as? Int else { return }
             Task { @MainActor in
                 router.pendingRunSelection = ReaderSelectionRequest(
+                    documentID: documentID,
                     text: text,
                     pageIndex: pageIndex,
                     position: note.userInfo?["position"] as? ReadingPosition,

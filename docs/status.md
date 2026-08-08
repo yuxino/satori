@@ -37,12 +37,15 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - AI answers render flat on the paper surface (no card bubble, no gold emphasis); page extraction is parallelized (4-way for chapter/multi-page, 3-way local OCR for whole-book with the 40-page budget), and pasted/imported images are compressed on background tasks so large attachments don't block the UI
 - Flow-protected reading mode is available from the reading bar or ⌘⇧F; it temporarily hides course chrome and the learning inspector without losing the current document or page position. Manual questions now default to the current page context, with chapter/range/whole-document/none still available when the user needs a wider or narrower scope.
 - Selection-first understanding is now the primary reading loop: selecting text exposes 理解 / 接上文 / 举例 / 试试看 / 复制, the first four actions send an intent-aware question against the selected passage plus its current page, and the inspector keeps a visible source anchor with a one-click return to the original page. Code execution remains available from the secondary run space instead of competing with comprehension at the moment of selection.
+- Real-PDF reading pass hardening: a previous-page selection no longer hides the current-page entry; old anchors collapse to a low-interference “上次卡在第 N 页” cue; active answers label their target page and the composer reports the request's actual scope; completed answers remain discoverable when the reader crosses a page boundary.
+- Selection anchors now carry document identity, a capped normalized passage, and a page offset through the reader → assistant route. Returning from a historical answer or reopening a document can restore the actual PDF text selection, not only the page. Legacy turn archives normalize invalid page, attachment, and selection-offset values on decode.
+- The secondary answer menu now calls the opt-in comprehension check “验证一下”: it asks for a small situation first, so reading can stay comprehension-first instead of turning every page into a quiz.
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 
 ## Next milestone
 
-Make the selected passage a first-class `SelectionAnchor` in the core request/turn model, so answers can show precise local evidence and the anchor survives panel/layout changes. Then add opt-in micro experiments for concepts that genuinely benefit from manipulation; do not turn the reader into a general code execution surface. OCR-based editable table-of-contents extraction remains useful for scanned PDFs without outlines (`lang.pdf`, `software.pdf`), but it follows the comprehension loop rather than leading it.
+Make the selected passage a first-class `SelectionAnchor` in the core request/turn model, including a stable local text/rect representation for PDFs whose text extraction differs from the visible glyphs. Then reduce first-token latency for page understanding and add opt-in micro experiments for concepts that genuinely benefit from manipulation; do not turn the reader into a general code execution surface. OCR-based editable table-of-contents extraction remains useful for scanned PDFs without outlines (`lang.pdf`, `software.pdf`), but it follows the comprehension loop rather than leading it.
 
 ## Open questions
 
