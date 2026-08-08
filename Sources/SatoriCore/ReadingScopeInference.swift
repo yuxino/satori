@@ -66,7 +66,10 @@ public enum ReadingScopeInference {
         return [
             "多少页", "几页", "页数", "页码范围",
             "值得看", "值得学", "值得学习", "核心考点", "重点呢", "有什么重点",
-            "过时", "还适用", "适用吗", "现在还能", "需要更新"
+            "过时", "还适用", "适用吗", "现在还能", "需要更新",
+            // Natural conclusion checks after a chapter/book answer, such as
+            // “所以难度不高？” or “所以呢，核心考点？”.
+            "所以", "那呢", "那么呢", "这样的话", "难度", "对吗", "对么", "真的吗"
         ].contains(where: normalized.contains)
     }
 

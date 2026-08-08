@@ -439,6 +439,11 @@ struct SatoriCoreTests {
             "Expected freshness follow-ups to inherit the recent reading scope"
         )
         precondition(
+            ReadingScopeInference.inheritsRecentScope(for: "所以难度不高？")
+                && ReadingScopeInference.inheritsRecentScope(for: "所以呢，核心考点？"),
+            "Expected conclusion-style follow-ups to inherit the recent reading scope"
+        )
+        precondition(
             ReadingScopeInference.isRecentScopeRelevant(
                 .pageRange(start: 10, end: 20),
                 turnPageIndex: 12,
