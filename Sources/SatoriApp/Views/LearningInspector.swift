@@ -132,6 +132,9 @@ struct LearningInspector: View {
     @State private var attachments: [LearningImageAttachment] = []
     /// 发送中的这一轮贴的图（用于对话里即时展示缩略图；归档后历史只记张数）。
     @State private var activeAttachmentPreviews: [NSImage] = []
+    /// 输入框图片在请求期间的临时保管区。停止或取材失败时还给用户，
+    /// 避免扫描页框选后因为一次等待/失败就丢掉唯一的视觉证据。
+    @State private var submittedAttachmentsForActiveRequest: [LearningImageAttachment] = []
     @State private var isImportingImage = false
     @State private var attachmentStatus = ""
     /// 这一轮回答开始的时间；用于「过程」脚注里显示耗时。
@@ -2182,6 +2185,7 @@ struct LearningInspector: View {
         }
 
         let submittedAttachments = attachments
+        submittedAttachmentsForActiveRequest = submittedAttachments
         activeAttachmentPreviews = submittedAttachments.map(\.preview)
         let context = turns
             .filter { $0.id != excludingTurnID }
@@ -2407,6 +2411,7 @@ struct LearningInspector: View {
     /// 发送失败（未配置 / 页提取失败 / 回答报错）时把贴的图还回输入框，
     /// 避免图片悄悄丢失、重试时找不到图。
     private func restoreSubmittedAttachments(_ submitted: [LearningImageAttachment]) {
+        submittedAttachmentsForActiveRequest = []
         guard !submitted.isEmpty else {
             activeAttachmentPreviews = []
             return
@@ -2433,7 +2438,12 @@ struct LearningInspector: View {
         streamStartDate = nil
         guard let response, !response.text.isEmpty, response.sourceKind != .inference else {
             // 还没有真实回答（没产出文字或只有推断态）：直接清掉草稿，
-            // 不给时间线留一个「已停止」空壳卡。
+            // 不给时间线留一个「已停止」空壳卡；已提交的图片回到输入框。
+            if !submittedAttachmentsForActiveRequest.isEmpty {
+                attachments = submittedAttachmentsForActiveRequest
+                attachmentStatus = "已停止，图片已保留在输入框，可以修改问题后重试。"
+            }
+            submittedAttachmentsForActiveRequest = []
             draftQuestion = ""
             draftAttachmentCount = 0
             draftContextScope = .none
@@ -2483,6 +2493,7 @@ struct LearningInspector: View {
         draftSelectionText = nil
         draftSelectionOffset = nil
         activeAttachmentPreviews = []
+        submittedAttachmentsForActiveRequest = []
         response = nil
         persistTurns()
         // A completed Q&A counts as studying — feeds the 勤学好问 badge.
@@ -2511,6 +2522,7 @@ struct LearningInspector: View {
         draftSelectionText = nil
         response = nil
         activeAttachmentPreviews = []
+        submittedAttachmentsForActiveRequest = []
         attachments = []
         attachmentStatus = ""
         completedElsewherePage = nil
