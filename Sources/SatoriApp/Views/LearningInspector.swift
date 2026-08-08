@@ -1107,7 +1107,16 @@ struct LearningInspector: View {
         case .some(.page), nil:
             return "第 \(pageIndex + 1) 页"
         case let .some(.pageRange(start, end)):
-            return start == end ? "第 \(start + 1) 页" : "第 \(start + 1)–\(end + 1) 页"
+            let pageLabel = start == end ? "第 \(start + 1) 页" : "第 \(start + 1)–\(end + 1) 页"
+            if let chapter = chapters.first(where: { chapter in
+                guard chapter.depth == 0,
+                      let chapterRange = BookChapter.pageRange(for: chapter, in: chapters, pageCount: pageCount)
+                else { return false }
+                return chapterRange.lowerBound == start && chapterRange.upperBound == end
+            }) {
+                return "\(chapter.title) · \(pageLabel)"
+            }
+            return pageLabel
         case .some(.wholeDocument):
             return "整本书"
         }

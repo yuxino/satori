@@ -58,6 +58,7 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Freshness scope continuity: book/chapter questions such as “有没有过时的内容”“现在还适用吗” now keep the right book-level or recent chapter range while the one-turn web check supplies current evidence.
 - Confusing-textbook response: when a reader says the material is complex, verbose, or poorly connected, the default assistant prompt now asks for a candid reframe into主线、因果/步骤和可暂时跳过的细节 instead of repeating the textbook order.
 - Real-PDF feedback refinement: book-level questions such as “这本书难吗？” now use whole-book context, colloquial freshness questions such as “过时了么” now trigger one-turn web verification, and a numbered chapter's first page offers “看本章路线” before detail questions without treating front matter as a chapter.
+- Reading-map labels: when an answer used an exact top-level chapter range, its history chip now names the chapter as well as the page range (for example “第六章 · 第 183–228 页”), while temporary two-page bridges remain plain page ranges.
 - Verification friction pass: “验证一下” now shows an explicit, skippable state; moving to another page cancels the old verification, and selection/quick actions start a normal reading question instead of being misread as the user's answer. Closing the understanding panel also stops any running micro-experiment.
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
