@@ -47,7 +47,7 @@ struct CourseOverview: View {
                 selectedDocumentID = nil
             }
         } message: {
-            Text("它只会从这个学习项目中移除，电脑上的原始 PDF 不会被删除。")
+            Text("它只会从这个阅读空间中移除，电脑上的原始 PDF 不会被删除。")
         }
     }
 
@@ -62,9 +62,9 @@ struct CourseOverview: View {
                     .foregroundStyle(SatoriTheme.accent)
             }
             VStack(spacing: 8) {
-                Text("从一本教材开始")
+                Text("从一本书开始")
                     .font(.title2.weight(.semibold))
-                Text("导入 PDF 后，Satori 会记住阅读位置，并让理解助手围绕你正在看的页工作。")
+                Text("打开 PDF 后，Satori 会记住阅读位置，并让理解助手围绕你正在看的页工作。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -74,7 +74,7 @@ struct CourseOverview: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .tint(SatoriTheme.accent)
-            Text("支持文字版、扫描版与混合 PDF · 文件保留在本机")
+            Text("支持文字版、扫描版与混合 PDF · 原文件保留在本机")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -86,7 +86,7 @@ struct CourseOverview: View {
         ContentUnavailableView {
             Label("找不到 \(document.displayName)", systemImage: "doc.badge.ellipsis")
         } description: {
-            Text("原文件可能被移动或改名。可以重新选择这份教材，不会影响其他课程。")
+            Text("原文件可能被移动或改名。可以重新选择这本书，不会影响其他阅读空间。")
         } actions: {
             Button("重新选择 PDF") { choosePDF(replacing: document) }
                 .buttonStyle(.borderedProminent)
@@ -246,7 +246,7 @@ private struct DocumentWorkspace: View {
         return CGFloat(stored)
     }
 
-    /// 章节来源：优先 PDF 自带 outline；没有 outline 时回退到这门课学习目录里
+    /// 章节来源：优先 PDF 自带 outline；没有 outline 时回退到这个阅读空间的目录里
     /// 已关联页码的章节项；两者都没有则返回空（阅读栏不显示目录）。
     private static func makeChapters(
         entries: [(title: String, pageIndex: Int, depth: Int)],
@@ -580,7 +580,7 @@ private struct DocumentWorkspace: View {
 
     private var documentMenu: some View {
         Menu {
-            Section("这门课的 PDF") {
+            Section("这个阅读空间里的 PDF") {
                 ForEach(course.documents) { item in
                     Button {
                         onSelectDocument(item.id)
@@ -619,7 +619,7 @@ private struct DocumentWorkspace: View {
         }
         .menuStyle(.borderlessButton)
         .frame(maxWidth: 210, alignment: .leading)
-        .help("切换或管理这门课的 PDF")
+        .help("切换或管理这个阅读空间里的 PDF")
     }
 
     private func jumpToPage() {

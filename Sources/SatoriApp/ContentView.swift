@@ -69,7 +69,7 @@ struct ContentView: View {
                     CourseOverview(course: course)
                         .id(course.id)
                 } else {
-                    ContentUnavailableView("选择一门课程", systemImage: "books.vertical", description: Text("从左侧开始你的学习项目。"))
+                    ContentUnavailableView("选择一个阅读空间", systemImage: "books.vertical", description: Text("从左侧打开一本书，直接开始理解。"))
                 }
             }
             .navigationSplitViewStyle(.balanced)
@@ -159,14 +159,14 @@ struct ContentView: View {
 /// plan setter is widened), these methods can be simplified to mutate directly.
 @MainActor
 extension AppModel {
-    /// Creates a course (default title「新课程 N」) and selects it.
+    /// Creates a reading space (default title「阅读空间 N」) and selects it.
     @discardableResult
     func addCourse(title: String? = nil) async -> UUID? {
         let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         var updated = plan
         let course = CourseWorkspace(
-            title: trimmed.isEmpty ? "新课程 \(plan.courses.count + 1)" : trimmed,
-            subtitle: "自定义学习项目"
+            title: trimmed.isEmpty ? "阅读空间 \(plan.courses.count + 1)" : trimmed,
+            subtitle: "个人阅读"
         )
         updated.courses.append(course)
         do {

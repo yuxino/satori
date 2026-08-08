@@ -14,7 +14,7 @@ struct PlanSidebar: View {
 
     var body: some View {
         List(selection: $selection) {
-            Section(isCompact ? "" : "学习计划") {
+            Section(isCompact ? "" : "阅读空间") {
                 if store.plan.courses.isEmpty {
                     emptyStateRow
                 }
@@ -26,7 +26,7 @@ struct PlanSidebar: View {
                                 courseToRename = course
                                 renameText = course.title
                             }
-                            Button("删除课程", systemImage: "trash", role: .destructive) {
+                            Button("删除阅读空间", systemImage: "trash", role: .destructive) {
                                 courseToRemove = course
                             }
                         }
@@ -50,11 +50,11 @@ struct PlanSidebar: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             newCourseButton
         }
-        .alert("重命名课程", isPresented: Binding(
+        .alert("重命名阅读空间", isPresented: Binding(
             get: { courseToRename != nil },
             set: { if !$0 { courseToRename = nil } }
         )) {
-            TextField("课程名称", text: $renameText)
+            TextField("阅读空间名称", text: $renameText)
             Button("取消", role: .cancel) { courseToRename = nil }
             Button("保存") {
                 if let course = courseToRename {
@@ -65,9 +65,9 @@ struct PlanSidebar: View {
             }
             .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         } message: {
-            Text("修改后学习计划会同步更新。")
+            Text("修改后阅读空间会同步更新。")
         }
-        .alert("删除「\(courseToRemove?.title ?? "这门课程")」？", isPresented: Binding(
+        .alert("删除「\(courseToRemove?.title ?? "这个阅读空间")」？", isPresented: Binding(
             get: { courseToRemove != nil },
             set: { if !$0 { courseToRemove = nil } }
         )) {
@@ -80,9 +80,9 @@ struct PlanSidebar: View {
                 courseToRemove = nil
             }
         } message: {
-            Text("课程及其 PDF 引用、学习记录会一并移除；电脑上的原始 PDF 不会删除。")
+            Text("阅读空间及其 PDF 引用、学习记录会一并移除；电脑上的原始 PDF 不会删除。")
         }
-        .alert("学习计划加载失败", isPresented: Binding(
+        .alert("阅读空间加载失败", isPresented: Binding(
             get: { store.persistenceIssue != nil },
             set: { if !$0 { store.acknowledgePersistenceIssue() } }
         )) {
@@ -115,7 +115,7 @@ struct PlanSidebar: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
-    /// 空计划（用户删光课程）时的起步引导，避免列表区一片空白。
+    /// 空阅读空间列表时的起步引导，避免列表区一片空白。
     private var emptyStateRow: some View {
         Group {
             if isCompact {
@@ -124,15 +124,15 @@ struct PlanSidebar: View {
                     .foregroundStyle(SatoriTheme.accent)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
-                    .help("还没有课程：点下方 + 新建")
+                    .help("还没有阅读空间：点下方 + 新建")
             } else {
                 VStack(alignment: .leading, spacing: 5) {
                     Image(systemName: "books.vertical")
                         .font(.system(size: 20))
                         .foregroundStyle(SatoriTheme.accent)
-                    Text("还没有课程")
+                    Text("还没有阅读空间")
                         .font(.callout.weight(.medium))
-                    Text("点下方「新建课程」，导入第一本教材。")
+                    Text("点下方「新建阅读空间」，加入第一本书。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -205,7 +205,7 @@ struct PlanSidebar: View {
                 Image(systemName: "plus")
                     .frame(maxWidth: .infinity)
             } else {
-                Label("新建课程", systemImage: "plus")
+                Label("新建阅读空间", systemImage: "plus")
                     .frame(maxWidth: .infinity)
             }
         }
@@ -215,7 +215,7 @@ struct PlanSidebar: View {
         .padding(.vertical, 10)
         .background(.bar)
         .overlay(alignment: .bottom) { Divider() }
-        .help("新建课程")
+        .help("新建阅读空间")
     }
 }
 
@@ -239,7 +239,7 @@ private struct CourseRow: View {
     }
 
     private var pagesReadText: String {
-        guard let stats, !course.documents.isEmpty else { return "尚未导入教材" }
+        guard let stats, !course.documents.isEmpty else { return "尚未加入书籍" }
         var pagesRead = 0
         var totalPages = 0
         for document in course.documents {
@@ -247,7 +247,7 @@ private struct CourseRow: View {
             pagesRead += activity?.pagesRead.count ?? 0
             totalPages += max(document.pageCount, activity?.pageCount ?? 0)
         }
-        guard totalPages > 0 else { return "尚未导入教材" }
+        guard totalPages > 0 else { return "尚未加入书籍" }
         return "已读 \(pagesRead) / \(totalPages) 页"
     }
 
