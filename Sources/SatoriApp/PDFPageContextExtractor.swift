@@ -169,6 +169,7 @@ enum PDFPageContextExtractor {
 
         let text = ExtractedTextNormalizer.normalize(page.string ?? "")
         let needsVisualVerification = text.count < 40 || ExtractedTextNormalizer.likelyDegraded(text)
+        let hasSuspiciousTextLayer = text.count >= 40 && ExtractedTextNormalizer.likelyDegraded(text)
         if text.count >= 40, !needsVisualVerification {
             // 带页码标注返回，和整章/多页提取的格式一致，模型能明确知道是哪一页。
             return .text("【第 \(pageIndex + 1) 页】\n" + String(text.prefix(24_000)))
@@ -181,6 +182,13 @@ enum PDFPageContextExtractor {
            let jpeg = jpegData(from: image),
            let recognized = await QwenOCRService.recognizeText(in: jpeg, configuration: qwenConfiguration),
            recognized.count >= 40 {
+            if hasSuspiciousTextLayer {
+                // Qwen OCR can repair the text layer, but it is still a second
+                // interpretation of the page. Keep the rendered page beside
+                // it so the answering model can verify names, formulas, and
+                // symbols instead of trusting a single OCR pass.
+                return .textAndImage(String(recognized.prefix(24_000)), jpeg)
+            }
             return .text(String(recognized.prefix(24_000)))
         }
         if let recognized = recognizeText(in: image),
