@@ -172,6 +172,43 @@ struct SatoriCoreTests {
             !QwenLearningAssistant.shouldAutoEnableWebSearch(for: "这一页最重要的一个意思是什么？"),
             "Expected normal page understanding to stay PDF-local"
         )
+        precondition(
+            ReadingFactAnswer.pageCountAnswer(
+                for: "这一章有多少页",
+                pageCount: 294,
+                currentPageIndex: 187,
+                scope: .page,
+                chapterRange: 145...181
+            ) == "当前范围是第 146–182 页，共 37 页。",
+            "Expected chapter page count to use the full top-level chapter range"
+        )
+        precondition(
+            ReadingFactAnswer.pageCountAnswer(
+                for: "这本书有多少页",
+                pageCount: 294,
+                currentPageIndex: 187,
+                scope: .page
+            ) == "当前范围是第 1–294 页，共 294 页。",
+            "Expected whole-book page count to be answered locally"
+        )
+        precondition(
+            ReadingFactAnswer.pageCountAnswer(
+                for: "第几页到第几页",
+                pageCount: 294,
+                currentPageIndex: 187,
+                scope: .pageRange(start: 179, end: 181)
+            ) == "当前范围是第 180–182 页，共 3 页。",
+            "Expected selected page range count to be exact"
+        )
+        precondition(
+            ReadingFactAnswer.pageCountAnswer(
+                for: "这一页主要讲什么",
+                pageCount: 294,
+                currentPageIndex: 187,
+                scope: .page
+            ) == nil,
+            "Expected ordinary understanding requests to stay on the model path"
+        )
 
         let apiResponse = await QwenLearningAssistant(
             apiKey: "fixture-key",

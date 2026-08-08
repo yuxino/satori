@@ -1986,38 +1986,16 @@ struct LearningInspector: View {
 
     /// 从本地阅读状态回答“多少页”这类确定性问题，避免一次不必要的模型请求。
     private func localPageCountAnswer(for request: String, scope: LearningContextScope) -> String? {
-        let normalized = request
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        let asksPageCount = ["多少页", "几页", "页数", "页码范围"].contains { normalized.contains($0) }
-        guard asksPageCount else { return nil }
-
-        let range: ClosedRange<Int>?
-        if normalized.contains("本书") || normalized.contains("全书") || normalized.contains("整本") {
-            range = 0...(max(0, pageCount - 1))
-        } else if ["这一章", "这章", "本章", "这个章节", "该章节", "当前章节"].contains(where: normalized.contains),
-                  let topLevelChapter = currentTopLevelChapter,
-                  let chapterRange = BookChapter.pageRange(for: topLevelChapter, in: chapters, pageCount: pageCount) {
-            range = chapterRange
-        } else {
-            switch scope {
-            case .none:
-                range = nil
-            case .page:
-                range = pageIndex...pageIndex
-            case let .pageRange(start, end):
-                range = min(start, end)...max(start, end)
-            case .wholeDocument:
-                range = 0...(max(0, pageCount - 1))
-            }
+        let chapterRange = currentTopLevelChapter.flatMap {
+            BookChapter.pageRange(for: $0, in: chapters, pageCount: pageCount)
         }
-
-        guard let range else { return nil }
-        let count = range.count
-        if count == 1 {
-            return "当前范围是第 \(range.lowerBound + 1) 页，共 1 页。"
-        }
-        return "当前范围是第 \(range.lowerBound + 1)–\(range.upperBound + 1) 页，共 \(count) 页。"
+        return ReadingFactAnswer.pageCountAnswer(
+            for: request,
+            pageCount: pageCount,
+            currentPageIndex: pageIndex,
+            scope: scope,
+            chapterRange: chapterRange
+        )
     }
 
     /// `currentChapter` 可能指向“本节/习题”等叶子节点；“这一章”这类问题
