@@ -72,6 +72,9 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
     /// 用户发起本轮问答时主动选中的原文；旧版本存档没有该字段。
     /// 保存它是为了让「重试」和回看笔记时仍然围绕同一段内容回答。
     public var selectionText: String?
+    /// 选中原文时的页内阅读偏移（0…1）；旧版本存档没有该字段。
+    /// 让「回到原文」和重试能够回到句子附近，而不是只回到页首。
+    public var selectionOffset: Double?
 
     public init(
         id: UUID = UUID(),
@@ -85,7 +88,8 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
         completion: LearningTurnCompletion = .completed,
         contextScope: LearningContextScope? = nil,
         responseDuration: TimeInterval? = nil,
-        selectionText: String? = nil
+        selectionText: String? = nil,
+        selectionOffset: Double? = nil
     ) {
         self.id = id
         self.question = question
@@ -99,6 +103,7 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
         self.contextScope = contextScope
         self.responseDuration = responseDuration
         self.selectionText = selectionText?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.selectionOffset = selectionOffset.map { min(max($0, 0), 1) }
     }
 }
 

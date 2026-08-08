@@ -19,6 +19,8 @@ struct ReaderSelectionRequest: Equatable, Sendable {
     let id = UUID()
     let text: String
     let pageIndex: Int
+    /// 选中原文时的页内阅读位置；旧请求没有该值时仍可退回页首。
+    let position: ReadingPosition?
     let url: URL?
     let intent: ReaderSelectionIntent
 }
@@ -88,6 +90,7 @@ struct ContentView: View {
                 router.pendingAskSelection = ReaderSelectionRequest(
                     text: text,
                     pageIndex: pageIndex,
+                    position: note.userInfo?["position"] as? ReadingPosition,
                     url: note.userInfo?["url"] as? URL,
                     intent: ReaderSelectionIntent(
                         rawValue: note.userInfo?["intent"] as? String ?? ""
@@ -102,6 +105,7 @@ struct ContentView: View {
                 router.pendingRunSelection = ReaderSelectionRequest(
                     text: text,
                     pageIndex: pageIndex,
+                    position: note.userInfo?["position"] as? ReadingPosition,
                     url: note.userInfo?["url"] as? URL,
                     intent: .explain
                 )

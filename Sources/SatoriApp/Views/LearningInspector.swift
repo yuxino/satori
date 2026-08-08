@@ -81,6 +81,7 @@ struct LearningInspector: View {
     /// 在回答过程中保持可见，并提供一键返回原文。
     @State private var activeSelectionText: String?
     @State private var activeSelectionPage: Int?
+    @State private var activeSelectionOffset: Double?
     @State private var turns: [LearningTurn] = []
     @State private var draftQuestion = ""
     @State private var draftPageIndex = 0
@@ -88,6 +89,7 @@ struct LearningInspector: View {
     @State private var draftAttachmentCount = 0
     /// 当前草稿关联的选区；即使用户清掉可视锚点，重试也不能丢掉原文。
     @State private var draftSelectionText: String?
+    @State private var draftSelectionOffset: Double?
     @State private var response: LearningResponse?
     @State private var isThinking = false
     @State private var isLoadingHistory = true
@@ -214,6 +216,7 @@ struct LearningInspector: View {
         pendingSelectionPage = request.pageIndex
         activeSelectionText = text
         activeSelectionPage = request.pageIndex
+        activeSelectionOffset = request.position?.normalizedPageOffset
         let prompt = selectionPrompt(for: request.intent)
         if question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isThinking {
             DispatchQueue.main.async {
@@ -221,7 +224,8 @@ struct LearningInspector: View {
                     prompt,
                     pageOverride: request.pageIndex,
                     scope: .page,
-                    selectionText: text
+                    selectionText: text,
+                    selectionOffset: request.position?.normalizedPageOffset
                 )
             }
         } else {
@@ -343,7 +347,8 @@ struct LearningInspector: View {
             sourceKind: response?.sourceKind ?? .inference,
             citations: response?.citations ?? [],
             attachmentCount: draftAttachmentCount,
-            selectionText: draftSelectionText
+            selectionText: draftSelectionText,
+            selectionOffset: draftSelectionOffset
         )
     }
 
@@ -480,7 +485,7 @@ struct LearningInspector: View {
                     .lineLimit(3)
                     .foregroundStyle(.primary.opacity(0.82))
                 Button("回到原文", systemImage: "arrow.up.right") {
-                    onNavigateToPage(pageIndex)
+                    returnToSelection(pageIndex: pageIndex)
                 }
                 .buttonStyle(.link)
                 .font(.caption.weight(.medium))
@@ -489,6 +494,7 @@ struct LearningInspector: View {
             Button("清除选区锚点", systemImage: "xmark") {
                 activeSelectionText = nil
                 activeSelectionPage = nil
+                activeSelectionOffset = nil
             }
             .labelStyle(.iconOnly)
             .buttonStyle(.plain)
@@ -500,6 +506,22 @@ struct LearningInspector: View {
         .overlay(
             RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous)
                 .strokeBorder(SatoriTheme.accent.opacity(0.18), lineWidth: 1)
+        )
+    }
+
+    private func returnToSelection(pageIndex: Int) {
+        let position = ReadingPosition(
+            pageIndex: pageIndex,
+            normalizedPageOffset: activeSelectionOffset ?? 0
+        )
+        onNavigateToPage(pageIndex)
+        NotificationCenter.default.post(
+            name: .satoriReaderJumpRequested,
+            object: nil,
+            userInfo: [
+                "url": documentURL,
+                "position": position
+            ]
         )
     }
 
@@ -1063,7 +1085,8 @@ struct LearningInspector: View {
                             turn.question,
                             pageOverride: turn.pageIndex,
                             scope: turn.contextScope ?? .page,
-                            selectionText: turn.selectionText
+                            selectionText: turn.selectionText,
+                            selectionOffset: turn.selectionOffset
                         )
                     }
                     .buttonStyle(.borderless)
@@ -1189,7 +1212,8 @@ struct LearningInspector: View {
                     pageOverride: turn.pageIndex,
                     excludingTurnID: turn.id,
                     scope: turn.contextScope ?? .page,
-                    selectionText: turn.selectionText
+                    selectionText: turn.selectionText,
+                    selectionOffset: turn.selectionOffset
                 )
             }
             .buttonStyle(.borderless)
@@ -1201,7 +1225,8 @@ struct LearningInspector: View {
                         selectionPrompt(for: .experiment),
                         pageOverride: turn.pageIndex,
                         scope: turn.contextScope ?? .page,
-                        selectionText: turn.selectionText
+                        selectionText: turn.selectionText,
+                        selectionOffset: turn.selectionOffset
                     )
                 }
                 Divider()
@@ -1578,6 +1603,16 @@ struct LearningInspector: View {
         historyStatus = ""
         do {
             turns = try await sessionStore.turns(for: documentID)
+            // 如果上次离开这本书时正围绕某段原文提问，恢复当前页上的
+            // 最近选区，让用户重开后仍能一键回到卡住的地方；不同页不强行
+            // 抢占阅读现场，等用户回到那一页时仍可从笔记进入。
+            if let restoredSelection = turns.reversed().first(where: {
+                $0.pageIndex == pageIndex && $0.selectionText?.isEmpty == false
+            }) {
+                activeSelectionText = restoredSelection.selectionText
+                activeSelectionPage = restoredSelection.pageIndex
+                activeSelectionOffset = restoredSelection.selectionOffset
+            }
             dismissedPageEntryPage = nil
             // 打开面板默认看最新对话：锚定到底部，历史加载完自动贴底。
             scrollAnchorID = responseBottomID
@@ -1594,7 +1629,8 @@ struct LearningInspector: View {
         pageOverride: Int? = nil,
         excludingTurnID: UUID? = nil,
         scope: LearningContextScope = .page,
-        selectionText: String? = nil
+        selectionText: String? = nil,
+        selectionOffset: Double? = nil
     ) {
         let request = (suppliedQuestion ?? question).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty, !isThinking else { return }
@@ -1662,11 +1698,17 @@ struct LearningInspector: View {
             return candidate
         }()
         draftSelectionText = effectiveSelectionText
+        let effectiveSelectionOffset: Double? = {
+            guard effectiveSelectionText != nil else { return nil }
+            return selectionOffset ?? (activeSelectionPage == targetPageIndex ? activeSelectionOffset : nil)
+        }()
+        draftSelectionOffset = effectiveSelectionOffset
         if let effectiveSelectionText, !effectiveSelectionText.isEmpty {
             // 由笔记里的「重试」重新进入选区问答时，恢复可见锚点，
             // 让用户知道这次回答仍然围绕哪段原文，而不是只在请求里隐形带上它。
             activeSelectionText = effectiveSelectionText
             activeSelectionPage = targetPageIndex
+            activeSelectionOffset = effectiveSelectionOffset
         }
         // 锚定到底部：新消息出现后内容自然向上生长，平滑贴底跟随。
         scrollAnchorID = responseBottomID
@@ -1812,6 +1854,7 @@ struct LearningInspector: View {
             draftAttachmentCount = 0
             draftContextScope = .none
             draftSelectionText = nil
+            draftSelectionOffset = nil
             activeAttachmentPreviews = []
             self.response = nil
             return
@@ -1835,13 +1878,15 @@ struct LearningInspector: View {
             completion: completion,
             contextScope: draftContextScope,
             responseDuration: duration,
-            selectionText: draftSelectionText
+            selectionText: draftSelectionText,
+            selectionOffset: draftSelectionOffset
         )
         turns.append(turn)
         draftQuestion = ""
         draftAttachmentCount = 0
         draftContextScope = .none
         draftSelectionText = nil
+        draftSelectionOffset = nil
         activeAttachmentPreviews = []
         response = nil
         persistTurns()
@@ -1875,6 +1920,10 @@ struct LearningInspector: View {
         attachmentStatus = ""
         completedElsewherePage = nil
         pendingSelectionPage = nil
+        activeSelectionText = nil
+        activeSelectionPage = nil
+        activeSelectionOffset = nil
+        draftSelectionOffset = nil
         dismissedPageEntryPage = nil
         Task {
             do {

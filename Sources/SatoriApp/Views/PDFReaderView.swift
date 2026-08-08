@@ -383,7 +383,7 @@ struct PDFReaderView: NSViewRepresentable {
                 self?.deliverSelection(intent: .experiment)
             }
             bar.onCopy = { [weak self] in
-                self?.deliverPinnedSelection { text, _ in
+                self?.deliverPinnedSelection { text, _, _ in
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
                 }
@@ -393,7 +393,7 @@ struct PDFReaderView: NSViewRepresentable {
         }
 
         @MainActor private func deliverSelection(intent: ReaderSelectionIntent) {
-            deliverPinnedSelection { [weak self] text, pageIndex in
+            deliverPinnedSelection { [weak self] text, pageIndex, position in
                 self?.onAskSelection?(text, pageIndex)
                 NotificationCenter.default.post(
                     name: .satoriAskSelectionRequested,
@@ -401,6 +401,7 @@ struct PDFReaderView: NSViewRepresentable {
                     userInfo: [
                         "text": text,
                         "pageIndex": pageIndex,
+                        "position": position,
                         "url": self?.observedView?.document?.documentURL as Any,
                         "intent": intent.rawValue
                     ]
@@ -410,21 +411,27 @@ struct PDFReaderView: NSViewRepresentable {
 
         /// The page of the pinned selection (first selected page), falling
         /// back to the reader's current page when the selection is gone.
-        @MainActor private func deliverPinnedSelection(_ action: (String, Int) -> Void) {
+        @MainActor private func deliverPinnedSelection(_ action: (String, Int, ReadingPosition) -> Void) {
             let text = pinnedSelection
             // Capture the selection's page before the click clears it.
             let pageIndex: Int
+            let position: ReadingPosition
             if let view = observedView, let document = view.document,
                let firstPage = view.currentSelection?.pages.first ?? view.currentPage {
                 pageIndex = document.index(for: firstPage)
+                position = ReadingPosition(
+                    pageIndex: pageIndex,
+                    normalizedPageOffset: visibleOffset(in: view)
+                )
             } else {
                 pageIndex = currentPageIndex.wrappedValue
+                position = ReadingPosition(pageIndex: pageIndex)
             }
             guard !text.isEmpty else { return }
             // 不清除选区：像 Cursor 一样保留高亮，用户能看见自己问了什么，
             // 也能继续在同一段上补充操作。
             hideToolbar()
-            action(text, pageIndex)
+            action(text, pageIndex, position)
         }
 
         @MainActor private func hideToolbar() {
