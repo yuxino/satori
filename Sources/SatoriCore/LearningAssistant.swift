@@ -271,10 +271,10 @@ public struct QwenLearningAssistant: LearningAssistant {
             return 360
         }
         if isQuickClarificationRequest(for: request) {
-            return 520
+            return 360
         }
-        if ["简要", "简化", "简短", "短一点", "字太多", "更简单", "简单点", "通俗点", "说人话", "先讲主线", "最重要的一个意思"].contains(where: normalized.contains) {
-            return 560
+        if isCompactRequest(for: request) {
+            return 420
         }
         if ["阅读路线图", "阅读地图", "概念怎样递进", "看本章路线"].contains(where: normalized.contains) {
             return 900
@@ -309,6 +309,20 @@ public struct QwenLearningAssistant: LearningAssistant {
             "这啥", "这说的啥", "这段在说啥", "怎么理解"
         ]
         return markers.contains { normalized.contains($0) }
+    }
+
+    /// A reader asking to shorten an answer is trying to keep moving through
+    /// the book, not requesting another full explanation. Keep this separate
+    /// from the even shorter “这是什么？” speed bump so “简化” can still
+    /// retain one useful reason or example.
+    public static func isCompactRequest(for request: String) -> Bool {
+        let normalized = request
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return [
+            "简要", "简化", "简短", "短一点", "字太多", "更简单", "简单点",
+            "通俗点", "说人话", "先讲主线", "最重要的一个意思"
+        ].contains(where: normalized.contains)
     }
 
     private let apiKey: String
@@ -590,6 +604,13 @@ public struct QwenLearningAssistant: LearningAssistant {
             content.append(.init(
                 type: "input_text",
                 text: "这是阅读中的一个短卡点。先直接用一句白话回答用户问的对象，不要先写“原文依据”“解释”等标题；最多三句短句，必要时给一个最小例子。当前页证据不足时直接说缺少什么。只有用户继续追问才展开，不要复述整页。",
+                imageURL: nil
+            ))
+        }
+        if Self.isCompactRequest(for: question) {
+            content.append(.init(
+                type: "input_text",
+                text: "用户明确要求压缩回答，这是为了继续阅读。最多 3 个短点、约 180 个中文字符；只保留核心结论和一个必要的连接，不要写完整模板、补充推断或重复原文。",
                 imageURL: nil
             ))
         }

@@ -210,10 +210,14 @@ struct SatoriCoreTests {
             "Expected chapter maps and unconfigured readers to stay local"
         )
         precondition(QwenLearningAssistant.responseTokenBudget(for: "一句话说清楚") == 260, "Expected one-sentence answers to stay compact")
-        precondition(QwenLearningAssistant.responseTokenBudget(for: "简化，字太多") == 560, "Expected simplify requests to lower the output budget")
+        precondition(
+            QwenLearningAssistant.isCompactRequest(for: "简化，字太多")
+                && QwenLearningAssistant.responseTokenBudget(for: "简化，字太多") == 420,
+            "Expected simplify requests to use a genuinely short reading card"
+        )
         precondition(
             QwenLearningAssistant.isQuickClarificationRequest(for: "这啥意思？")
-                && QwenLearningAssistant.responseTokenBudget(for: "这啥意思？") == 520,
+                && QwenLearningAssistant.responseTokenBudget(for: "这啥意思？") == 360,
             "Expected terse reading speed bumps to use a compact clarification path"
         )
         precondition(
@@ -603,7 +607,7 @@ struct SatoriCoreTests {
                 expectedHistoryTurnCount: 0,
                 expectsSelectionText: true,
                 expectsQuickClarification: true,
-                expectedMaxOutputTokens: 520
+                expectedMaxOutputTokens: 360
             )
         ).explain(request: "这啥意思？", pageIndex: 2)
         precondition(quickClarificationResponse.text == "fixture explanation", "Expected terse clarification output path")

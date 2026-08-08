@@ -1486,6 +1486,21 @@ struct LearningInspector: View {
                         verification: true
                     )
                 }
+                Button("压缩成短版", systemImage: "text.badge.minus") {
+                    selectMode(.ask)
+                    navigateToPage(
+                        turn.pageIndex,
+                        selectionText: turn.selectionText,
+                        selectionOffset: turn.selectionAnchorOffset
+                    )
+                    askAssistant(
+                        "把你刚才的回答压缩成一眼能读的短版：最多 3 个短点，只保留核心结论和必要的一个连接，不要新增内容、不要重复大段原文。",
+                        pageOverride: turn.pageIndex,
+                        scope: turn.contextScope ?? .page,
+                        selectionText: turn.selectionText,
+                        selectionOffset: turn.selectionAnchorOffset
+                    )
+                }
                 Divider()
                 Button("删除这一轮", systemImage: "trash", role: .destructive) {
                     deleteTurn(turn.id)
