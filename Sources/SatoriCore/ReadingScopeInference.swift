@@ -12,7 +12,10 @@ public enum ReadingScopeInference {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         guard !normalized.isEmpty else { return false }
-        return ["多少页", "几页", "页数", "页码范围"].contains(where: normalized.contains)
+        return [
+            "多少页", "几页", "页数", "页码范围",
+            "值得看", "值得学", "值得学习", "核心考点", "重点呢", "有什么重点"
+        ].contains(where: normalized.contains)
     }
 
     public static func scope(

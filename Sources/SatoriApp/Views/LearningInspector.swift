@@ -1610,10 +1610,10 @@ struct LearningInspector: View {
             return explicit
         }
 
-        // A student naturally follows “这一章在说什么” with “有多少页”.
-        // Keep that terse follow-up attached to the last meaningful range;
-        // otherwise the deterministic answer would incorrectly report one
-        // current page and break the reading thread.
+        // A student naturally follows “这一章在说什么” with “有多少页” or
+        // “有什么值得看”. Keep terse follow-ups attached to the last
+        // meaningful range; otherwise the thread abruptly collapses to one
+        // current page and loses the chapter map.
         guard ReadingScopeInference.inheritsRecentScope(for: request) else { return nil }
         return turns.reversed().compactMap(\.contextScope).first { scope in
             if case .none = scope { return false }

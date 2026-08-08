@@ -281,6 +281,10 @@ struct SatoriCoreTests {
             "Expected terse page-count follow-ups to inherit the recent reading scope"
         )
         precondition(
+            ReadingScopeInference.inheritsRecentScope(for: "有什么值得看的"),
+            "Expected terse priority follow-ups to inherit the recent reading scope"
+        )
+        precondition(
             !ReadingScopeInference.inheritsRecentScope(for: "这一页主要讲什么"),
             "Expected ordinary explanations not to inherit a stale scope"
         )
