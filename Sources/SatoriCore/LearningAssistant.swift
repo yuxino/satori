@@ -325,6 +325,25 @@ public struct QwenLearningAssistant: LearningAssistant {
         ].contains(where: normalized.contains)
     }
 
+    /// Conversation history is a helpful bridge, not the main textbook.
+    /// Keep the newest turns first and cap their estimated serialized size so
+    /// long OCR selections or verbose answers cannot crowd the current page
+    /// evidence out of the request.
+    private static func boundedConversationContext(
+        _ context: [LearningConversationContext],
+        maximumCharacters: Int = 12_000
+    ) -> [LearningConversationContext] {
+        var selected: [LearningConversationContext] = []
+        var total = 0
+        for turn in context.suffix(6).reversed() {
+            let estimated = min(turn.question.count, 800) + min(turn.answer.count, 2_200) + 80
+            if !selected.isEmpty, total + estimated > maximumCharacters { continue }
+            selected.append(turn)
+            total += estimated
+        }
+        return selected.reversed()
+    }
+
     private let apiKey: String
     private let apiHost: URL
     private let modelID: String
@@ -525,7 +544,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
         let pageNumber = (pageIndex ?? 0) + 1
-        let learnedContext = conversationContext.suffix(4)
+        let learnedContext = Self.boundedConversationContext(conversationContext).suffix(4)
             .map(Self.serializedTurn)
             .joined(separator: "\n\n")
 
@@ -617,7 +636,8 @@ public struct QwenLearningAssistant: LearningAssistant {
         content.append(contentsOf: makeAttachmentItems(imageBudget.images))
         content.append(.init(type: "input_text", text: "我的问题：\(question)", imageURL: nil))
 
-        var input = conversationContext.suffix(6).flatMap { turn in
+        let recentContext = Self.boundedConversationContext(conversationContext)
+        var input = recentContext.flatMap { turn in
             [
                 InputMessage(role: "user", content: [
                     .init(type: "input_text", text: Self.serializedQuestion(turn), imageURL: nil)
@@ -805,17 +825,17 @@ public struct QwenLearningAssistant: LearningAssistant {
 
     /// 复习场景的单轮历史：问（依据第 N 页）：…\n答：…
     private static func serializedTurn(_ turn: LearningConversationContext) -> String {
-        "\(turnPrefix(turn))：\(turn.question.prefix(1_200))\n答：\(turn.answer.prefix(6_000))"
+        "\(turnPrefix(turn))：\(turn.question.prefix(800))\n答：\(turn.answer.prefix(2_200))"
     }
 
     /// 追问场景：历史以独立的 user/assistant 消息发送，文字与
     /// `serializedTurn` 保持一致（问（依据第 N 页）：… / 答：…）。
     private static func serializedQuestion(_ turn: LearningConversationContext) -> String {
-        "\(turnPrefix(turn))：\(turn.question.prefix(1_200))"
+        "\(turnPrefix(turn))：\(turn.question.prefix(800))"
     }
 
     private static func serializedAnswer(_ turn: LearningConversationContext) -> String {
-        "答：\(turn.answer.prefix(6_000))"
+        "答：\(turn.answer.prefix(2_200))"
     }
 
     // MARK: - 响应解析
