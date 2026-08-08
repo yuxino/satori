@@ -19,7 +19,7 @@ struct LearningInspector: View {
             switch self {
             case .ask: "问"
             case .notes: "回看"
-            case .run: "运行"
+            case .run: "实验"
             }
         }
 
@@ -27,7 +27,7 @@ struct LearningInspector: View {
             switch self {
             case .ask: "bubble.left.and.text.bubble.right"
             case .notes: "book.pages"
-            case .run: "play.rectangle"
+            case .run: "testtube.2"
             }
         }
 
