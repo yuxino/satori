@@ -193,6 +193,10 @@ struct SatoriCoreTests {
             "Expected textbook criticism to stay grounded in page evidence"
         )
         precondition(
+            QwenLearningAssistant.defaultLearningInstructions.contains("快速阅读地图"),
+            "Expected book and chapter overviews to produce a reading map"
+        )
+        precondition(
             ReadingFactAnswer.pageCountAnswer(
                 for: "这一章有多少页",
                 pageCount: 294,
