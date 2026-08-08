@@ -219,7 +219,14 @@ private struct CodeBlockView: View {
     }
 
     private var runnable: CodeRunner.Language? {
-        CodeRunner.Language.recognized(language)
+        guard let language = CodeRunner.Language.recognized(language),
+              CodeRunner.safety(for: content, language: language).isAllowed else { return nil }
+        return language
+    }
+
+    private var blockedRunReason: String? {
+        guard let language = CodeRunner.Language.recognized(language) else { return nil }
+        return CodeRunner.safety(for: content, language: language).message
     }
 
     var body: some View {
@@ -237,6 +244,12 @@ private struct CodeBlockView: View {
                         .controlSize(.mini)
                         .tint(SatoriTheme.accent)
                         .help("在本机运行这段代码")
+                }
+                if let blockedRunReason {
+                    Label("仅复制", systemImage: "lock.slash")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .help(blockedRunReason)
                 }
                 if isRunning {
                     HStack(spacing: 4) {

@@ -716,7 +716,7 @@ struct LearningInspector: View {
         case .example:
             instruction = "请给下面这段原文举一个具体、贴近日常或实际工作的例子，帮助我建立直觉。"
         case .experiment:
-            instruction = "请简要设计一个 30 秒内能完成的微实验，按“目的—操作—观察—对应概念”给出，最多 5 步。若能在电脑上安全验证，优先给不安装、不删除、不修改文件的只读命令；否则给纸笔或生活中的替代实验。如果不适合实验，先说明原因，再给一个可观察的替代例子。不要长篇复述原文。"
+            instruction = "请简要设计一个 30 秒内能完成的微实验，按“目的—操作—观察—对应概念”给出，最多 5 步。若需要代码，只给纯计算的 Python、C 或 C++ 小片段，不访问文件、不联网、不启动系统命令；不要给 Shell 命令。若不适合代码实验，就给纸笔、想象或生活中的可观察替代实验。如果不适合实验，先说明原因，再给替代例子。不要长篇复述原文。"
         }
         return instruction
     }
@@ -839,8 +839,8 @@ struct LearningInspector: View {
                         .buttonStyle(.borderless)
                         .foregroundStyle(.secondary)
 
-                        Picker("语言", selection: $runLanguage) {
-                            ForEach(CodeRunner.Language.allCases, id: \.self) { lang in
+                        Picker("实验语言", selection: $runLanguage) {
+                            ForEach(CodeRunner.experimentLanguages, id: \.self) { lang in
                                 Text(lang.rawValue).tag(lang)
                             }
                         }
@@ -870,12 +870,13 @@ struct LearningInspector: View {
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .tint(SatoriTheme.accent)
-                        .disabled(runCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isRunning)
+                        .disabled((runCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || !CodeRunner.safety(for: runCode, language: runLanguage).isAllowed) && !isRunning)
                     }
 
                     ZStack(alignment: .topLeading) {
                         if runCode.isEmpty {
-                            Text("把书里的代码粘贴到这里，运行一段小实验…")
+                            Text("把书里的纯计算代码粘贴到这里，运行一段小实验…")
                                 .font(.body)
                                 .foregroundStyle(.tertiary)
                                 .padding(.horizontal, SatoriTheme.Spacing.md + 1)
@@ -893,8 +894,16 @@ struct LearningInspector: View {
                                 return .handled
                             }
                     }
-                    .background(SatoriTheme.paperRaised, in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous).strokeBorder(SatoriTheme.hairline))
+                        .background(SatoriTheme.paperRaised, in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous).strokeBorder(SatoriTheme.hairline))
+
+                    if !runCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                       let safetyMessage = CodeRunner.safety(for: runCode, language: runLanguage).message {
+                        Label(safetyMessage, systemImage: "lock.slash")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     if let runOutput {
                         runOutputView(runOutput)

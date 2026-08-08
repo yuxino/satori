@@ -15,8 +15,27 @@ public struct CodeRunResult: Equatable, Sendable {
     }
 }
 
-/// Runs a small code snippet locally so a learning answer's example can be
-/// executed and inspected. Deliberately conservative:
+/// Experiments are intentionally narrower than a general-purpose terminal.
+/// The reader should be able to manipulate a concept from the book without
+/// giving an AI-generated snippet network access or a convenient path to the
+/// user's files and shell.
+public enum ExperimentSafety: Equatable, Sendable {
+    case allowed
+    case blocked(String)
+
+    public var isAllowed: Bool {
+        if case .allowed = self { return true }
+        return false
+    }
+
+    public var message: String? {
+        if case let .blocked(message) = self { return message }
+        return nil
+    }
+}
+
+/// Runs a small, pure-computation concept experiment locally so a learning
+/// answer's example can be executed and inspected. Deliberately conservative:
 ///   • each run works in its own temp directory,
 ///   • a wall-clock timeout guards against infinite loops (SIGTERM, then
 ///     SIGKILL if the process ignores it),
@@ -25,12 +44,19 @@ public struct CodeRunResult: Equatable, Sendable {
 ///   • compilation and execution are timed separately (compiles get a more
 ///     generous budget).
 ///
-/// The user chose "run directly on this machine", so snippets run with the
-/// user's own toolchain (python3 / clang / bash / swift). C is compiled then
-/// executed; interpreted languages run directly.
+/// Allowed snippets use the local Python/Clang toolchain, but the actual
+/// experiment is launched with no network and no writes to user directories.
 public enum CodeRunner {
     public static let defaultTimeout: TimeInterval = 8
     public static let defaultCompileTimeout: TimeInterval = 30
+    private static let restrictedSandboxProfile = """
+    (version 1)
+    (allow default)
+    (deny network*)
+    (deny file-write*)
+    (deny file-read* (subpath "/Users"))
+    (deny file-read* (subpath "/Volumes"))
+    """
 
     /// How long to wait after SIGTERM before escalating to SIGKILL.
     fileprivate static let killEscalationDelay: TimeInterval = 1.5
@@ -100,13 +126,66 @@ public enum CodeRunner {
         }
     }
 
+    /// Languages useful for small, local concept experiments. Shell and Swift
+    /// remain decodable for older callers, but are deliberately not offered as
+    /// experiment languages.
+    public static let experimentLanguages: [Language] = [.python, .c, .cpp]
+
+    /// Defense-in-depth gate for both the answer-card runner and the secondary
+    /// experiment space. A blocked snippet can still be copied out, but Satori
+    /// will not execute it locally.
+    public static func safety(for code: String, language: Language) -> ExperimentSafety {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return .blocked("实验内容不能为空。")
+        }
+        guard trimmed.count <= 20_000 else {
+            return .blocked("实验内容太长；请只保留当前概念需要的几行。")
+        }
+
+        switch language {
+        case .shell:
+            return .blocked("Shell 命令暂不作为 Satori 实验运行；可以复制到你自己的终端中执行。")
+        case .swift:
+            return .blocked("Swift 代码暂不作为 Satori 实验运行；先用 Python 或 C 做小实验。")
+        case .python:
+            let blockedPatterns = [
+                #"(?m)^\s*(import|from)\s+(os|pathlib|shutil|subprocess|socket|urllib|requests|ctypes|multiprocessing|importlib|pty)\b"#,
+                #"\b(__import__|open|eval|exec|compile|system|popen)\s*\("#
+            ]
+            if blockedPatterns.contains(where: { trimmed.range(of: $0, options: .regularExpression) != nil }) {
+                return .blocked("检测到文件、网络或动态执行接口；实验只能做纯计算。")
+            }
+        case .c, .cpp:
+            let blockedPatterns = [
+                #"\b(fopen|freopen|remove|unlink|rename|system|popen|fork|exec\w*|socket|connect|getaddrinfo|open|creat|mkdir|rmdir|chdir|getenv)\s*\("#,
+                #"https?://"#,
+                #"\bcurl\b"#,
+                #"\b(ifstream|ofstream|fstream)\b"#,
+                #"\b(std::filesystem|filesystem)\b"#
+            ]
+            if blockedPatterns.contains(where: { trimmed.range(of: $0, options: .regularExpression) != nil }) {
+                return .blocked("检测到文件、网络或进程接口；实验只能做纯计算。")
+            }
+        }
+
+        return .allowed
+    }
+
     public static func run(
         code: String,
         language: Language,
         configuration: Configuration = Configuration()
     ) async -> CodeRunResult {
-        // Host the snippet in its own directory so any file the code writes
-        // stays contained and we can compile C next to it.
+        if case let .blocked(message) = safety(for: code, language: language) {
+            return CodeRunResult(exitCode: 1, stdout: "", stderr: "实验未运行：\(message)", timedOut: false)
+        }
+        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/sandbox-exec") else {
+            return CodeRunResult(exitCode: 1, stdout: "", stderr: "实验未运行：本机没有可用的实验沙箱。", timedOut: false)
+        }
+
+        // Host source and compiler artifacts in their own temporary directory;
+        // the restricted execution phase cannot write there or elsewhere.
         let dir = FileManager.default.temporaryDirectory
             .appending(path: "satori-run-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -126,15 +205,36 @@ public enum CodeRunner {
             // name sits in the temp dir. Use a unique binary name too.
             let compileArgs = [sourceURL.path, "-o", binaryURL.path]
             // Compilation gets a more generous budget than the run itself.
-            let compile = await launch(executable, args: compileArgs, in: dir, configuration: configuration, timeout: configuration.compileTimeout)
+            let compile = await launch(
+                executable,
+                args: compileArgs,
+                in: dir,
+                configuration: configuration,
+                timeout: configuration.compileTimeout,
+                sandbox: .noNetwork
+            )
             guard compile.exitCode == 0 else {
                 return CodeRunResult(exitCode: compile.exitCode, stdout: "", stderr: compile.stderr.isEmpty ? "编译失败。" : compile.stderr, timedOut: compile.timedOut)
             }
             // Run the compiled binary directly — NOT `clang <binary>`, which
             // would make the linker consume the executable as an input.
-            return await launch(binaryURL.path, args: [], in: dir, configuration: configuration, timeout: configuration.timeout)
+            return await launch(
+                binaryURL.path,
+                args: [],
+                in: dir,
+                configuration: configuration,
+                timeout: configuration.timeout,
+                sandbox: .restricted
+            )
         case .python, .shell, .swift:
-            return await launch(executable, args: language.arguments + [sourceURL.path], in: dir, configuration: configuration, timeout: configuration.timeout)
+            return await launch(
+                executable,
+                args: language.arguments + [sourceURL.path],
+                in: dir,
+                configuration: configuration,
+                timeout: configuration.timeout,
+                sandbox: .restricted
+            )
         }
     }
 
@@ -148,16 +248,35 @@ public enum CodeRunner {
         }
     }
 
+    private enum SandboxMode {
+        case noNetwork
+        case restricted
+    }
+
     private static func launch(
         _ executable: String,
         args: [String],
         in directory: URL,
         configuration: Configuration,
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        sandbox: SandboxMode
     ) async -> CodeRunResult {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = args
+        // Compilation needs to write the temporary binary, so it uses the
+        // built-in no-network profile. The actual experiment additionally
+        // denies writes and access to the user's home/volumes.
+        if FileManager.default.isExecutableFile(atPath: "/usr/bin/sandbox-exec") {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
+            switch sandbox {
+            case .noNetwork:
+                process.arguments = ["-n", "no-network", executable] + args
+            case .restricted:
+                process.arguments = ["-p", restrictedSandboxProfile, executable] + args
+            }
+        } else {
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = args
+        }
         process.currentDirectoryURL = directory
 
         let outPipe = Pipe()

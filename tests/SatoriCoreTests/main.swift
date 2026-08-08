@@ -716,6 +716,28 @@ struct SatoriCoreTests {
             "Expected clean text to stay text-only"
         )
 
+        precondition(
+            CodeRunner.safety(for: "print(2 + 2)", language: .python) == .allowed,
+            "Expected pure Python experiments to remain runnable"
+        )
+        precondition(
+            !CodeRunner.safety(for: "import socket\\nprint('network')", language: .python).isAllowed,
+            "Expected Python network access to be blocked"
+        )
+        precondition(
+            !CodeRunner.safety(for: "open('outside', 'w').write('x')", language: .python).isAllowed,
+            "Expected Python file access to be blocked"
+        )
+        precondition(
+            !CodeRunner.safety(for: "system(\"rm -rf /\");", language: .c).isAllowed,
+            "Expected C system execution to be blocked"
+        )
+        precondition(
+            !CodeRunner.safety(for: "echo hello", language: .shell).isAllowed
+                && CodeRunner.experimentLanguages == [.python, .c, .cpp],
+            "Expected shell not to be offered as an experiment language"
+        )
+
         // Code runner: an answer's example snippet can be executed locally.
         let pythonRun = await CodeRunner.run(
             code: "print('hello from satori')",
@@ -724,6 +746,21 @@ struct SatoriCoreTests {
         precondition(pythonRun.exitCode == 0, "Expected python run to succeed")
         precondition(pythonRun.stdout.contains("hello from satori"), "Expected python stdout to be captured")
         precondition(pythonRun.timedOut == false, "Expected quick python run to not time out")
+
+        let blockedRun = await CodeRunner.run(
+            code: "import socket\\nprint('network')",
+            language: .python
+        )
+        precondition(blockedRun.exitCode != 0 && blockedRun.stderr.contains("实验未运行"), "Expected unsafe experiments to fail closed")
+
+        let sandboxedWriteAttempt = await CodeRunner.run(
+            code: "import tempfile\\nwith tempfile.NamedTemporaryFile() as handle:\\n    handle.write(b'x')",
+            language: .python
+        )
+        precondition(
+            sandboxedWriteAttempt.exitCode != 0 && !sandboxedWriteAttempt.timedOut,
+            "Expected the runtime sandbox to deny writes even when a snippet avoids the static gate"
+        )
 
         let cCode = """
         #include <stdio.h>
