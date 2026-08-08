@@ -225,6 +225,18 @@ struct SatoriCoreTests {
                 && QwenLearningAssistant.responseTokenBudget(for: "这是什么？请详细展开") == 1_400,
             "Expected explicit depth requests to keep the normal answer budget"
         )
+        precondition(
+            ReadingPagePurpose.isExercisePage("习题\n1. 什么是文件系统？\n2. 目录有什么作用？"),
+            "Expected a headed exercise page to switch to exercise reading mode"
+        )
+        precondition(
+            ReadingPagePurpose.isExercisePage("9. 请设计一个目录结构。\n10. 假定磁盘块大小为 512 字节，计算访问次数。\n11. 说明文件共享方法。\n12. 为什么要控制权限？"),
+            "Expected a continued exercise page to switch to exercise reading mode"
+        )
+        precondition(
+            !ReadingPagePurpose.isExercisePage("本书配有习题册和错题本，读者可以课后练习。"),
+            "Expected a passing mention of exercises in prose to stay ordinary"
+        )
         precondition(QwenLearningAssistant.responseTokenBudget(for: "我刚开始读这一章，请给我阅读路线图") == 900, "Expected reading maps to keep enough room for structure")
         precondition(QwenLearningAssistant.responseTokenBudget(for: "解释这一页") == 1_400, "Expected ordinary explanations to keep the normal budget")
         precondition(QwenLearningAssistant.responseTokenBudget(for: "解释我选中的这段内容", hasSelection: true) == 700, "Expected selected-passage explanations to stay compact by default")
@@ -664,6 +676,23 @@ struct SatoriCoreTests {
         ).explain(request: "核对这页的术语", pageIndex: 44)
         precondition(degradedTextResponse.text == "fixture explanation", "Expected damaged text to travel with a page image")
 
+        let exercisePageResponse = await QwenLearningAssistant(
+            apiKey: "fixture-key",
+            // Real system.pdf: PDF page 226 (printed page 219) starts the
+            // file-system exercise section; PDF page 227 continues it.
+            pageContent: .text("【第 226 页】\n习 题\n1. 什么是文件系统？\n2. 目录有什么作用？\n3. 假定磁盘块大小，计算访问次数。\n4. 请设计文件权限机制。"),
+            transport: FixtureAssistantTransport(
+                expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
+                expectedModelID: "qwen3.8-max",
+                expectedImageCount: 0,
+                expectsWebSearch: false,
+                expectedHistoryTurnCount: 0,
+                expectsExercisePage: true,
+                expectedMaxOutputTokens: 700
+            )
+        ).explain(request: "这一页主要讲什么？", pageIndex: 225)
+        precondition(exercisePageResponse.text == "fixture explanation", "Expected exercise pages to carry a reading-mode hint")
+
         let streamingAssistant = QwenLearningAssistant(
             apiKey: "fixture-key",
             pageContent: .text("fixture page text"),
@@ -1095,6 +1124,7 @@ private struct FixtureAssistantTransport: AssistantTransport {
     var expectsSelectionText: Bool = false
     var expectsVerificationResponse: Bool = false
     var expectsQuickClarification: Bool = false
+    var expectsExercisePage: Bool = false
     var expectsVisualEvidenceInstruction: Bool = false
     var expectedMaxOutputTokens: Int?
     var maximumRequestBodyBytes: Int?
@@ -1180,6 +1210,10 @@ private struct FixtureAssistantTransport: AssistantTransport {
             .compactMap { $0["text"] as? String }
             .first { $0.hasPrefix("这是阅读中的一个短卡点") }
         precondition((quickClarificationMarker != nil) == expectsQuickClarification, "Expected terse clarification marker to match request")
+        let exerciseMarker = content.filter { $0["type"] as? String == "input_text" }
+            .compactMap { $0["text"] as? String }
+            .first { $0.hasPrefix("这是教材的习题/题型页") }
+        precondition((exerciseMarker != nil) == expectsExercisePage, "Expected exercise pages to use the focused exercise reading stance")
         let images = content.filter { $0["type"] as? String == "input_image" }
         precondition(images.count == expectedImageCount, "Expected page and attachment image inputs")
         precondition(images.allSatisfy { ($0["image_url"] as? String)?.hasPrefix("data:image/jpeg;base64,") == true }, "Expected Base64 JPEG data URLs")

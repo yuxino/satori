@@ -602,6 +602,7 @@ public struct QwenLearningAssistant: LearningAssistant {
 
     private func makeRequest(question: String, pageIndex: Int?, streamsResponse: Bool, imageBudget: ImageBudgetResult) -> ResponsesRequest {
         let pageNumber = (pageIndex ?? 0) + 1
+        let exercisePageInstruction = exercisePageInstruction(pageNumber: pageNumber)
 
         var content: [InputContent] = []
         content.append(contentsOf: makePageContentItems(pageNumber: pageNumber))
@@ -618,6 +619,9 @@ public struct QwenLearningAssistant: LearningAssistant {
                 text: "这是用户对上一轮“验证一下”情境的回答。请先判断用户是否抓住了核心，再给出原文依据和最关键的一处修正；不要重新出题，不要求死记硬背，也不要把整段答案重写成教程。",
                 imageURL: nil
             ))
+        }
+        if let exercisePageInstruction {
+            content.append(.init(type: "input_text", text: exercisePageInstruction, imageURL: nil))
         }
         if Self.isQuickClarificationRequest(for: question) {
             content.append(.init(
@@ -649,6 +653,11 @@ public struct QwenLearningAssistant: LearningAssistant {
         }
         input.append(.init(role: "user", content: content))
 
+        let defaultOutputBudget = Self.responseTokenBudget(for: question, hasSelection: selectionText?.isEmpty == false)
+        let outputBudget = exercisePageInstruction != nil && Self.isPageOverviewRequest(for: question)
+            ? 700
+            : defaultOutputBudget
+
         return ResponsesRequest(
             model: modelID,
             instructions: instructions ?? Self.defaultLearningInstructions,
@@ -656,8 +665,65 @@ public struct QwenLearningAssistant: LearningAssistant {
             tools: allowsWebSearch ? [.init(type: "web_search")] : nil,
             store: false,
             stream: streamsResponse,
-            maxOutputTokens: Self.responseTokenBudget(for: question, hasSelection: selectionText?.isEmpty == false)
+            maxOutputTokens: outputBudget
         )
+    }
+
+    /// A page overview is an orientation request, not a request to solve the
+    /// entire exercise sheet. Keep this private to the request builder so a
+    /// named problem still receives the normal explanation budget.
+    private static func isPageOverviewRequest(for request: String) -> Bool {
+        let normalized = request
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+        return [
+            "这一页主要讲", "这页主要讲", "本页主要讲", "这一页讲了什么", "这页讲了什么",
+            "这一页的核心", "这页的核心", "这一页主要内容", "这页主要内容", "解释这一页",
+            "解释这页", "这是什么"
+        ].contains { normalized.contains($0) }
+    }
+
+    /// A page of exercises needs a different reading stance from a page of
+    /// exposition. Keep this local to the request so the rest of the book
+    /// remains quiet and the reader can still ask for a full solution when
+    /// they explicitly name a question.
+    private func exercisePageInstruction(pageNumber: Int) -> String? {
+        guard let text = currentPageText(for: pageNumber),
+              ReadingPagePurpose.isExercisePage(text) else { return nil }
+
+        return """
+        这是教材的习题/题型页，不要把整页题目逐题复述成一篇长答案。
+        - 如果用户问“这一页讲什么 / 这是什么 / 主要内容”，先用一句话说明这是练习区，再给不超过 3 类的题型地图，并告诉用户建议先做哪一类；不要逐题作答。
+        - 如果用户点名题号、选中某一道题或问“怎么做”，先说清题目要解决什么、会用到哪条原理，再给短而可执行的解题路径；不要跳过关键推理。
+        - 只有用户明确要答案时才给完整答案，并把“思路”和“结果”分开；题目文字或公式看不清时说明不确定，不要凭常识补题。
+        - 这是为了帮助用户快速理解和开始动手，不要把它变成强制测验，也不要要求用户先背诵。
+        """
+    }
+
+    /// Page-range and whole-book requests carry page labels. Restrict the
+    /// signal to the current page when possible; otherwise a distant exercise
+    /// page in a book overview must not change the stance of this question.
+    private func currentPageText(for pageNumber: Int) -> String? {
+        let rawText: String?
+        switch pageContent {
+        case let .text(text)?: rawText = text
+        case let .textAndImage(text, _)?: rawText = text
+        case let .textAndImages(text, _)?: rawText = text
+        case .imageJPEG, nil: rawText = nil
+        }
+        guard let rawText, !rawText.isEmpty else { return nil }
+
+        let marker = "【第 \(pageNumber) 页】"
+        guard let markerRange = rawText.range(of: marker) else {
+            // Single-page fixtures and selection-adjacent content may not
+            // carry a label, so use the supplied text as the page evidence.
+            return rawText
+        }
+        let start = markerRange.upperBound
+        let remainder = rawText[start...]
+        let end = remainder.range(of: "【第 ")?.lowerBound ?? remainder.endIndex
+        return String(remainder[..<end])
     }
 
     /// 页上下文内容；没有页上下文（不带上下文提问）时返回 nil，请求里不夹带页面。
