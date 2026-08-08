@@ -288,6 +288,14 @@ struct SatoriCoreTests {
             !ReadingScopeInference.inheritsRecentScope(for: "这一页主要讲什么"),
             "Expected ordinary explanations not to inherit a stale scope"
         )
+        let representativePages = ReadingSamplePlan.representativePageIndices(
+            pageCount: 294,
+            outlinePageIndices: [29, 31, 64, 92, 117, 145, 182, 228, 260],
+            excluding: Set([29, 30])
+        )
+        precondition(representativePages.contains(182), "Expected whole-book sampling to include a late chapter start")
+        precondition(representativePages.contains(293), "Expected whole-book sampling to include the final page")
+        precondition(!representativePages.contains(29), "Expected the reading neighborhood to stay in its stronger OCR pass")
 
         let apiResponse = await QwenLearningAssistant(
             apiKey: "fixture-key",

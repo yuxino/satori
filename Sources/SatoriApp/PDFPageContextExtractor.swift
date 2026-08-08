@@ -277,8 +277,9 @@ enum PDFPageContextExtractor {
         }()
         let nearbySet = Set(nearbyPages)
         let allPages = Array(0..<document.pageCount)
-        let representativePages = representativePageIndices(
-            in: document,
+        let representativePages = ReadingSamplePlan.representativePageIndices(
+            pageCount: document.pageCount,
+            outlinePageIndices: outlinePageIndices(in: document),
             excluding: nearbySet
         )
         let representativeSet = Set(representativePages)
@@ -341,41 +342,17 @@ enum PDFPageContextExtractor {
         return .text(String(trimmed.prefix(limit)))
     }
 
-    /// Pick pages that let a bounded whole-book context see the book's shape:
-    /// opening pages, the last page, evenly spaced samples, and PDF-outline
-    /// destinations. The current reading neighborhood is supplied separately
-    /// and excluded here so it can use the stronger OCR path.
-    private static func representativePageIndices(
-        in document: PDFDocument,
-        excluding excluded: Set<Int>
-    ) -> [Int] {
-        guard document.pageCount > 0 else { return [] }
-        var selected = Set<Int>()
-        let pageCount = document.pageCount
-        for index in 0..<min(pageCount, 3) {
-            selected.insert(index)
-        }
-        selected.insert(pageCount - 1)
+    private static func outlinePageIndices(in document: PDFDocument) -> [Int] {
+        guard let root = document.outlineRoot else { return [] }
+        var pageIndices: [Int] = []
 
-        let stride = max(1, pageCount / 12)
-        var sampled = 0
-        while sampled < pageCount {
-            selected.insert(sampled)
-            sampled += stride
+        for index in 0..<root.numberOfChildren {
+            guard let child = root.child(at: index),
+                  let page = child.destination?.page else { continue }
+            let pageIndex = document.index(for: page)
+            if pageIndex >= 0 { pageIndices.append(pageIndex) }
         }
-
-        if let root = document.outlineRoot {
-            for index in 0..<root.numberOfChildren {
-                guard let child = root.child(at: index),
-                      let page = child.destination?.page else { continue }
-                let pageIndex = document.index(for: page)
-                if pageIndex >= 0 { selected.insert(pageIndex) }
-            }
-        }
-
-        return selected
-            .filter { !excluded.contains($0) }
-            .sorted()
+        return pageIndices
     }
 
     // MARK: - 并发提取
