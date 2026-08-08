@@ -185,6 +185,14 @@ struct SatoriCoreTests {
             "Expected ordinary textbook price questions to stay PDF-local"
         )
         precondition(
+            QwenLearningAssistant.defaultLearningInstructions.contains("不要把教材里的旧信息冒充当前事实"),
+            "Expected live web answers to be separated from stale textbook facts"
+        )
+        precondition(
+            QwenLearningAssistant.defaultLearningInstructions.contains("不要无依据地推断作者意图"),
+            "Expected textbook criticism to stay grounded in page evidence"
+        )
+        precondition(
             ReadingFactAnswer.pageCountAnswer(
                 for: "这一章有多少页",
                 pageCount: 294,
