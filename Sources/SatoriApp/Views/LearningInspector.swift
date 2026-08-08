@@ -1995,7 +1995,7 @@ struct LearningInspector: View {
         let range: ClosedRange<Int>?
         if normalized.contains("本书") || normalized.contains("全书") || normalized.contains("整本") {
             range = 0...(max(0, pageCount - 1))
-        } else if (normalized.contains("这一章") || normalized.contains("本章")),
+        } else if ["这一章", "这章", "本章", "这个章节", "该章节", "当前章节"].contains(where: normalized.contains),
                   let topLevelChapter = currentTopLevelChapter,
                   let chapterRange = BookChapter.pageRange(for: topLevelChapter, in: chapters, pageCount: pageCount) {
             range = chapterRange
