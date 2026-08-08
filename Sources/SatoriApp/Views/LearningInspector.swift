@@ -625,16 +625,15 @@ struct LearningInspector: View {
         )
     }
 
-    /// 新页的第一个阅读动作：只在当前页还没有问答时出现，回答开始后自动退场。
-    /// 普通页面先给主线；章节首页先给本章路线，再保留“接上文”，让读者先
-    /// 建立地图再进入细节。实验入口放在选区工具条和回答的更多菜单里，避免
-    /// 刚翻页就把阅读变成任务清单。
+    /// 阅读入口只在打开书和进入新章时出现。正文连续翻页保持安静，避免
+    /// 每一页都变成一张待处理任务；选区工具条和输入框仍随时可用。
     private var showsPageEntry: Bool {
         guard !isLoadingHistory,
               !isThinking,
               activeSelectionPage != pageIndex,
               dismissedPageEntryPage != pageIndex else { return false }
-        return !turns.contains { $0.pageIndex == pageIndex }
+        guard !turns.contains(where: { $0.pageIndex == pageIndex }) else { return false }
+        return pageIndex == 0 || chapterStartRange != nil
     }
 
     private var pageEntryPrompt: some View {
