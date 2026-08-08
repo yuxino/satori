@@ -276,6 +276,14 @@ struct SatoriCoreTests {
             ) == nil,
             "Expected ordinary page questions to keep the default page scope"
         )
+        precondition(
+            ReadingScopeInference.inheritsRecentScope(for: "有多少页"),
+            "Expected terse page-count follow-ups to inherit the recent reading scope"
+        )
+        precondition(
+            !ReadingScopeInference.inheritsRecentScope(for: "这一页主要讲什么"),
+            "Expected ordinary explanations not to inherit a stale scope"
+        )
 
         let apiResponse = await QwenLearningAssistant(
             apiKey: "fixture-key",

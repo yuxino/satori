@@ -1601,12 +1601,24 @@ struct LearningInspector: View {
         let sectionRange = activeChapter.flatMap {
             BookChapter.pageRange(for: $0, in: chapters, pageCount: pageCount)
         }
-        return ReadingScopeInference.scope(
+        if let explicit = ReadingScopeInference.scope(
             for: request,
             pageIndex: pageIndex,
             chapterRange: chapterRange,
             sectionRange: sectionRange
-        )
+        ) {
+            return explicit
+        }
+
+        // A student naturally follows “这一章在说什么” with “有多少页”.
+        // Keep that terse follow-up attached to the last meaningful range;
+        // otherwise the deterministic answer would incorrectly report one
+        // current page and break the reading thread.
+        guard ReadingScopeInference.inheritsRecentScope(for: request) else { return nil }
+        return turns.reversed().compactMap(\.contextScope).first { scope in
+            if case .none = scope { return false }
+            return true
+        }
     }
 
     /// “这一章”跟随当前阅读位置；“第六章”则优先匹配目录中的明确章节，

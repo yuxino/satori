@@ -3,6 +3,18 @@ import Foundation
 /// Infers the smallest useful PDF scope from a natural-language reading request.
 /// The UI can still override this with an explicit context choice.
 public enum ReadingScopeInference {
+    /// Short metadata questions such as “有多少页” usually refer to the
+    /// range the reader just asked about. The UI uses this only when there is
+    /// a recent completed turn with a usable scope, so an isolated question
+    /// still falls back to the current page.
+    public static func inheritsRecentScope(for request: String) -> Bool {
+        let normalized = request
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !normalized.isEmpty else { return false }
+        return ["多少页", "几页", "页数", "页码范围"].contains(where: normalized.contains)
+    }
+
     public static func scope(
         for request: String,
         pageIndex: Int,
