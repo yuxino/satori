@@ -223,32 +223,12 @@ private struct CourseRow: View {
     let course: CourseWorkspace
     var isCompact = false
 
-    @State private var stats: LearningStats?
-
-    private var aggregateProgress: Double {
-        guard let stats, !course.documents.isEmpty else { return 0 }
-        var pagesRead = 0
-        var totalPages = 0
-        for document in course.documents {
-            let activity = stats.documentCounts[document.id]
-            pagesRead += activity?.pagesRead.count ?? 0
-            totalPages += max(document.pageCount, activity?.pageCount ?? 0)
+    private var documentSummary: String {
+        guard !course.documents.isEmpty else { return "还没有书" }
+        if course.documents.count == 1 {
+            return course.documents[0].displayName
         }
-        guard totalPages > 0 else { return 0 }
-        return min(Double(pagesRead) / Double(totalPages), 1)
-    }
-
-    private var pagesReadText: String {
-        guard let stats, !course.documents.isEmpty else { return "尚未加入书籍" }
-        var pagesRead = 0
-        var totalPages = 0
-        for document in course.documents {
-            let activity = stats.documentCounts[document.id]
-            pagesRead += activity?.pagesRead.count ?? 0
-            totalPages += max(document.pageCount, activity?.pageCount ?? 0)
-        }
-        guard totalPages > 0 else { return "尚未加入书籍" }
-        return "已读 \(pagesRead) / \(totalPages) 页"
+        return "\(course.documents.count) 本书"
     }
 
     var body: some View {
@@ -263,43 +243,18 @@ private struct CourseRow: View {
                         Text(course.title)
                             .font(.callout.weight(.medium))
                             .lineLimit(1)
-                        HStack(spacing: 6) {
-                            Text(pagesReadText)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
+                        Text(documentSummary)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                     Spacer(minLength: 0)
-                    if !course.documents.isEmpty {
-                        Text("\(Int(aggregateProgress * 100))%")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.tertiary)
-                    }
                 }
-            }
-            if !isCompact, !course.documents.isEmpty {
-                ProgressView(value: aggregateProgress)
-                    .tint(SatoriTheme.accent)
-                    .controlSize(.mini)
             }
         }
         .padding(.vertical, SatoriTheme.Spacing.xs + 2)
         .contentShape(Rectangle())
-        .help(isCompact ? "\(course.title) · \(Int(aggregateProgress * 100))%" : "")
-        .task(id: course.id) { await load() }
-        .onReceive(NotificationCenter.default.publisher(for: .learningStatsDidChange)) { _ in
-            Task { await load() }
-        }
-    }
-
-    /// Course-level progress uses LearningStatsStore's deduplicated
-    /// pages-read accounting, aggregated across ALL of the course's documents
-    /// (not just the last book). The primary course list stays reading-first;
-    /// review scheduling remains available to future, explicitly opened flows
-    /// instead of becoming a sidebar task badge.
-    private func load() async {
-        stats = try? await LearningStatsStore.shared.current()
+        .help(isCompact ? "\(course.title) · \(documentSummary)" : "")
     }
 }
 
