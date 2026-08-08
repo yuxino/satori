@@ -15,7 +15,11 @@ public enum ReadingScopeInference {
         guard !normalized.isEmpty else { return nil }
 
         let wholeBookMarkers = ["整本书", "全书", "整本教材", "全教材", "全篇"]
-        if wholeBookMarkers.contains(where: normalized.contains) {
+        let bookOverviewMarkers = ["本书", "这本书", "本教材", "这本教材"]
+        let overviewQuestionMarkers = ["讲什么", "主线", "结构", "概括", "重点", "目录", "章节"]
+        if wholeBookMarkers.contains(where: normalized.contains)
+            || (bookOverviewMarkers.contains(where: normalized.contains)
+                && overviewQuestionMarkers.contains(where: normalized.contains)) {
             return .wholeDocument
         }
 

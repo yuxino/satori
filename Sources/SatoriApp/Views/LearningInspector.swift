@@ -1559,7 +1559,7 @@ struct LearningInspector: View {
         Binding(
             get: { contextMode },
             set: { newMode in
-                if newMode == .chapter {
+                if newMode == .automatic || newMode == .chapter {
                     selectedChapterID = nil // 重新选择时默认跟随当前章节
                 }
                 if newMode == .pageRange {
@@ -1576,7 +1576,7 @@ struct LearningInspector: View {
     /// “这一章在讲什么”。只在「智能范围」下启用；用户明确选择范围后
     /// 尊重选择，不暗中扩大请求。
     private func inferredContextScope(for request: String, pageIndex: Int) -> LearningContextScope? {
-        let chapterRange = currentTopLevelChapter.flatMap {
+        let chapterRange = chapterForInference(for: request).flatMap {
             BookChapter.pageRange(for: $0, in: chapters, pageCount: pageCount)
         }
         let sectionRange = activeChapter.flatMap {
@@ -1588,6 +1588,25 @@ struct LearningInspector: View {
             chapterRange: chapterRange,
             sectionRange: sectionRange
         )
+    }
+
+    /// “这一章”跟随当前阅读位置；“第六章”则优先匹配目录中的明确章节，
+    /// 匹配不到时不猜另一章，交给调用方回到当前页范围。
+    private func chapterForInference(for request: String) -> BookChapter? {
+        let normalized = request
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let numberedChapterRange = normalized.range(
+            of: #"第[0-9一二三四五六七八九十百]+章"#,
+            options: .regularExpression
+        )
+        if let numberedChapterRange {
+            let marker = String(normalized[numberedChapterRange])
+            return chapters.first {
+                $0.depth == 0 && $0.title.lowercased().contains(marker)
+            }
+        }
+        return currentTopLevelChapter
     }
 
     private var contextModePickerTitle: String {

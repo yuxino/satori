@@ -229,6 +229,15 @@ struct SatoriCoreTests {
         )
         precondition(
             ReadingScopeInference.scope(
+                for: "这本书主要讲什么",
+                pageIndex: 187,
+                chapterRange: 182...224,
+                sectionRange: 186...188
+            ) == .wholeDocument,
+            "Expected book-overview language to use the whole document"
+        )
+        precondition(
+            ReadingScopeInference.scope(
                 for: "上一页和这一页怎么连起来",
                 pageIndex: 187,
                 chapterRange: 182...224,
