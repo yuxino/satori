@@ -351,7 +351,8 @@ struct LearningInspector: View {
         isThinking && !draftQuestion.isEmpty
     }
 
-    /// 问 — 这本书的对话流 + 输入框。所有问答连成一条对话，翻页不消失。
+    /// 问 — 当前阅读页的理解现场 + 输入框。完整历史留在「笔记」，
+    /// 但发送请求仍会携带最近几轮问答，让跨页追问不丢上下文。
     private var askView: some View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
@@ -372,9 +373,9 @@ struct LearningInspector: View {
                         } else if turns.isEmpty, activeTurn == nil {
                             promptStarter
                         } else {
-                            // 一条连续的对话流：历史问答 + 正在进行的这一轮。
-                            // 提问消息一发送就出现在列表里，回答紧跟其下流式输出。
-                            ForEach(turns) { turn in
+                            // 「问」只呈现当前页，避免翻到新页后被上一页的长回答
+                            // 占满视野；完整的跨页记录仍可在「笔记」里按页查看。
+                            ForEach(currentPageTurns) { turn in
                                 conversationTurnCard(turn)
                                     .id(turn.id)
                             }
@@ -503,8 +504,8 @@ struct LearningInspector: View {
     }
 
     /// 新页的第一个阅读动作：只在当前页还没有问答时出现，回答开始后自动退场。
-    /// 两个动作分别覆盖“先建立主线”和“把概念变成可观察的东西”，不把阅读
-    /// 变成任务清单，也不要求用户先整理笔记。
+    /// 默认只给“先建立主线”和“接上前文”两个选择；实验入口放在选区工具条
+    /// 和回答的更多菜单里，避免刚翻页就把阅读变成任务清单。
     private var showsPageEntry: Bool {
         guard !isLoadingHistory,
               !isThinking,
@@ -539,16 +540,18 @@ struct LearningInspector: View {
             .controlSize(.small)
             .tint(SatoriTheme.accent)
 
-            Button("试试看", systemImage: "testtube.2") {
-                askAssistant(
-                    "如果这一页的核心概念适合做一个 30 秒的小实验，请设计一个安全、简单、能观察到结果的实验；如果不适合，请给一个生活中的替代例子。",
-                    pageOverride: pageIndex,
-                    scope: .page
-                )
+            if pageIndex > 0 {
+                Button("接上文", systemImage: "arrow.left") {
+                    askAssistant(
+                        "把这一页和前一页接起来讲：前一页在解决什么，这一页新增了什么，哪些概念要连起来看？请用容易理解的话说明。",
+                        pageOverride: pageIndex,
+                        scope: .pageRange(start: pageIndex - 1, end: pageIndex)
+                    )
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("同时参考前一页和当前页")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .help("做个小实验或生活中的替代例子")
 
             Button("收起", systemImage: "xmark") {
                 dismissedPageEntryPage = pageIndex
@@ -827,6 +830,10 @@ struct LearningInspector: View {
             let lastB = grouped[rhs]?.last?.createdAt ?? .distantPast
             return lastA > lastB
         }.map { PageSection(pageIndex: $0, turns: grouped[$0] ?? []) }
+    }
+
+    private var currentPageTurns: [LearningTurn] {
+        turns.filter { $0.pageIndex == pageIndex }
     }
 
     private var promptStarter: some View {
@@ -1187,6 +1194,17 @@ struct LearningInspector: View {
             }
             .buttonStyle(.borderless)
             Menu {
+                Button("试试看", systemImage: "testtube.2") {
+                    selectMode(.ask)
+                    onNavigateToPage(turn.pageIndex)
+                    askAssistant(
+                        selectionPrompt(for: .experiment),
+                        pageOverride: turn.pageIndex,
+                        scope: turn.contextScope ?? .page,
+                        selectionText: turn.selectionText
+                    )
+                }
+                Divider()
                 Button("删除这一轮", systemImage: "trash", role: .destructive) {
                     deleteTurn(turn.id)
                 }
@@ -1208,7 +1226,7 @@ struct LearningInspector: View {
 
             ZStack(alignment: .topLeading) {
                 if question.isEmpty {
-                    Text(turns.isEmpty ? "想问什么？可以附上图片…" : "继续追问这里为什么、再举个例子…")
+                    Text(composerPlaceholder)
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, SatoriTheme.Spacing.md + 1)
                         .padding(.vertical, SatoriTheme.Spacing.md)
@@ -1513,6 +1531,16 @@ struct LearningInspector: View {
 
     private var canSend: Bool {
         !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isThinking
+    }
+
+    private var composerPlaceholder: String {
+        if turns.isEmpty {
+            return "想问什么？可以附上图片…"
+        }
+        if currentPageTurns.isEmpty {
+            return "从这一页开始问：它在讲什么、为什么、怎么用…"
+        }
+        return "继续追问这里为什么、再举个例子…"
     }
 
     private var composerHint: String {
