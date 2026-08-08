@@ -1687,9 +1687,12 @@ struct LearningInspector: View {
         )
         if let numberedChapterRange {
             let marker = String(normalized[numberedChapterRange])
-            return chapters.first {
-                $0.depth == 0 && $0.title.lowercased().contains(marker)
+            if let requestedNumber = ChapterNumberParser.number(in: marker) {
+                return chapters.first {
+                    $0.depth == 0 && ChapterNumberParser.number(in: $0.title) == requestedNumber
+                }
             }
+            return chapters.first { $0.depth == 0 && $0.title.lowercased().contains(marker) }
         }
         return currentTopLevelChapter
     }

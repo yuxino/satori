@@ -351,6 +351,12 @@ struct SatoriCoreTests {
             ) == .pageRange(start: 39, end: 39),
             "Expected next-page scope to stop at the end of a book"
         )
+        precondition(
+            ChapterNumberParser.number(in: "第六章") == 6
+                && ChapterNumberParser.number(in: "第6章 文件系统") == 6
+                && ChapterNumberParser.number(in: "第十二章") == 12,
+            "Expected Arabic and Chinese chapter markers to resolve identically"
+        )
         let scannedOutline = ScannedOutlineParser.parse(lines: [
             "第一章 概述................25",
             "第一节 计算机发展...........25",

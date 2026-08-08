@@ -30,10 +30,7 @@ public enum ScannedOutlineParser {
             ) else { continue }
 
             let chapterToken = String(compact[chapterRange])
-            let numberToken = chapterToken
-                .replacingOccurrences(of: "第", with: "")
-                .replacingOccurrences(of: "章", with: "")
-            guard let chapterNumber = parseNumber(numberToken), chapterNumber > 0,
+            guard let chapterNumber = ChapterNumberParser.number(in: chapterToken),
                   let pageRange = compact.range(of: #"[0-9]{1,4}$"#, options: .regularExpression),
                   let printedPage = Int(compact[pageRange]), printedPage > 0 else {
                 continue
@@ -70,25 +67,4 @@ public enum ScannedOutlineParser {
             .replacingOccurrences(of: "．", with: ".")
     }
 
-    private static func parseNumber(_ token: String) -> Int? {
-        if let arabic = Int(token) { return arabic }
-        let values: [Character: Int] = [
-            "零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
-            "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10, "百": 100
-        ]
-        var total = 0
-        var section = 0
-        var current = 0
-        for character in token {
-            guard let value = values[character] else { return nil }
-            if value == 10 || value == 100 {
-                section += (current == 0 ? 1 : current) * value
-                current = 0
-            } else {
-                current = value
-            }
-        }
-        total += section + current
-        return total > 0 ? total : nil
-    }
 }
