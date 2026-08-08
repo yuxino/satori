@@ -216,7 +216,13 @@ struct LearningInspector: View {
         } message: {
             Text("只会删除本机保存的 AI 问答，不会影响 PDF、阅读位置或百炼账户。")
         }
-        .onDisappear { requestTask?.cancel() }
+        .onDisappear {
+            requestTask?.cancel()
+            // Closing the panel or switching books must also stop a running
+            // micro-experiment. Otherwise the UI disappears while the local
+            // process keeps consuming resources in the background.
+            stopRunning()
+        }
         .onChange(of: pageIndex) { _, newPageIndex in
             if let recentCompletedPage, recentCompletedPage != newPageIndex {
                 completedElsewherePage = recentCompletedPage
@@ -225,6 +231,10 @@ struct LearningInspector: View {
             // 用户翻页后，之前选中的上下文不再指向当前阅读位置。
             pendingSelectionPage = nil
             dismissedPageEntryPage = nil
+            // A verification prompt belongs to the page that produced it.
+            // Once the reader moves on, the next question is a normal reading
+            // question—not an answer to an old prompt.
+            pendingVerification = false
             // 章节选择自动同步阅读位置：翻到别的章节时取消手动选择，跟随当前章节。
             if let selectedChapterID,
                let selected = chapters.first(where: { $0.id == selectedChapterID }),
@@ -504,6 +514,10 @@ struct LearningInspector: View {
                 selectionAnchorBanner(text: activeSelectionText, pageIndex: activeSelectionPage)
             }
 
+            if pendingVerification {
+                verificationBanner
+            }
+
             if showsPageEntry {
                 pageEntryPrompt
             }
@@ -556,6 +570,36 @@ struct LearningInspector: View {
             RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous)
                 .strokeBorder(SatoriTheme.accent.opacity(0.18), lineWidth: 1)
         )
+    }
+
+    /// Keep the optional verification explicit and escapable. Without this
+    /// affordance, the next ordinary question would silently be interpreted
+    /// as an answer to the generated scenario.
+    private var verificationBanner: some View {
+        HStack(alignment: .center, spacing: SatoriTheme.Spacing.sm) {
+            Image(systemName: "checkmark.circle")
+                .foregroundStyle(SatoriTheme.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("理解验证")
+                    .font(.caption.weight(.semibold))
+                Text("先用自己的话回答上面的情境；也可以直接继续提问。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 4)
+            Button("跳过，继续提问") {
+                pendingVerification = false
+                isQuestionFocused = true
+            }
+            .buttonStyle(.borderless)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(SatoriTheme.accent)
+        }
+        .padding(.horizontal, SatoriTheme.Spacing.md)
+        .padding(.vertical, SatoriTheme.Spacing.sm)
+        .background(SatoriTheme.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+        .padding(.horizontal, SatoriTheme.Spacing.md)
+        .padding(.bottom, SatoriTheme.Spacing.sm)
     }
 
     private func returnToSelection(pageIndex: Int, selectionText: String) {
@@ -1843,7 +1887,10 @@ struct LearningInspector: View {
         let request = (suppliedQuestion ?? question).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty, !isThinking else { return }
 
-        let isAnswerToVerification = pendingVerification && !verification
+        // Only a deliberate send from the composer answers the verification
+        // prompt. Selection actions and quick prompts are new reading actions
+        // and must not be mislabeled as the student's answer.
+        let isAnswerToVerification = pendingVerification && !verification && suppliedQuestion == nil
         let usesWebSearch = allowsWebSearch
             || (!verification && QwenLearningAssistant.shouldAutoEnableWebSearch(for: request))
         pendingVerification = false

@@ -53,6 +53,7 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Natural-language scope inference: the default context is now “智能范围”—ordinary questions stay on the current page, while “这一章/第六章/这一节/整本书/上一页” requests expand to the smallest matching range. The explicit context picker still overrides inference, and the rules are covered by core tests.
 - Conversational scope continuity: terse follow-ups such as “有多少页”“有什么值得看” inherit the most recent meaningful chapter/range scope, so a student can ask naturally after a chapter overview without being told the current page is the whole chapter.
 - Real-PDF feedback refinement: book-level questions such as “这本书难吗？” now use whole-book context, colloquial freshness questions such as “过时了么” now trigger one-turn web verification, and a numbered chapter's first page offers “看本章路线” before detail questions without treating front matter as a chapter.
+- Verification friction pass: “验证一下” now shows an explicit, skippable state; moving to another page cancels the old verification, and selection/quick actions start a normal reading question instead of being misread as the user's answer. Closing the understanding panel also stops any running micro-experiment.
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 
