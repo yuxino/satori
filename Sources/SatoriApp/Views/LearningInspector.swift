@@ -1856,6 +1856,25 @@ struct LearningInspector: View {
         requestUsesWebSearch = usesWebSearch
         completedElsewherePage = nil
 
+        // 页数是阅读器已经知道的事实，不值得交给模型再等一次；把这类
+        // 元信息问题即时回答，AI 留给真正需要解释和建立联系的请求。
+        if !verification,
+           !isAnswerToVerification,
+           let localAnswer = localPageCountAnswer(for: request, scope: effectiveScope) {
+            let localResponse = LearningResponse(
+                text: localAnswer,
+                sourceKind: .currentPDF,
+                pageIndex: targetPageIndex
+            )
+            response = localResponse
+            isThinking = false
+            streamStartDate = nil
+            requestTask = nil
+            requestPhase = .preparing
+            completeDraft(with: localResponse, completion: .completed, duration: 0)
+            return
+        }
+
         requestTask = Task {
             // 配置读取很快（钥匙串结果有进程内缓存），放在前面，
             // 扫描页 OCR 需要配置；没配置就直接提示，不必白跑提取。
@@ -1963,6 +1982,42 @@ struct LearningInspector: View {
                 completeDraft(with: latestResponse, completion: .completed, duration: responseDuration)
             }
         }
+    }
+
+    /// 从本地阅读状态回答“多少页”这类确定性问题，避免一次不必要的模型请求。
+    private func localPageCountAnswer(for request: String, scope: LearningContextScope) -> String? {
+        let normalized = request
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let asksPageCount = ["多少页", "几页", "页数", "页码范围"].contains { normalized.contains($0) }
+        guard asksPageCount else { return nil }
+
+        let range: ClosedRange<Int>?
+        if normalized.contains("本书") || normalized.contains("全书") || normalized.contains("整本") {
+            range = 0...(max(0, pageCount - 1))
+        } else if (normalized.contains("这一章") || normalized.contains("本章") || normalized.contains("章节")),
+                  let currentChapter,
+                  let chapterRange = BookChapter.pageRange(for: currentChapter, in: chapters, pageCount: pageCount) {
+            range = chapterRange
+        } else {
+            switch scope {
+            case .none:
+                range = nil
+            case .page:
+                range = pageIndex...pageIndex
+            case let .pageRange(start, end):
+                range = min(start, end)...max(start, end)
+            case .wholeDocument:
+                range = 0...(max(0, pageCount - 1))
+            }
+        }
+
+        guard let range else { return nil }
+        let count = range.count
+        if count == 1 {
+            return "当前范围是第 (range.lowerBound + 1) 页，共 1 页。"
+        }
+        return "当前范围是第 (range.lowerBound + 1)–(range.upperBound + 1) 页，共 (count) 页。"
     }
 
     /// 发送失败（未配置 / 页提取失败 / 回答报错）时把贴的图还回输入框，
