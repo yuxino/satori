@@ -587,7 +587,7 @@ struct LearningInspector: View {
 
             Button("先讲主线", systemImage: "sparkles") {
                 askAssistant(
-                    "这一页最重要的一个意思是什么？请用三句话告诉我：我现在先读懂什么、它和前面怎么接上、哪些细节可以先放过。",
+                    "这一页最重要的一个意思是什么？请用三句话告诉我：我现在先读懂什么、它在解决什么问题、哪些细节可以先放过。只依据当前页，不要猜测未提供的前文。",
                     pageOverride: pageIndex,
                     scope: .page
                 )
@@ -1895,7 +1895,8 @@ struct LearningInspector: View {
                     await PDFPageContextExtractor.extract(
                         from: documentURL,
                         scope: extractionScope,
-                        qwenConfiguration: config
+                        qwenConfiguration: config,
+                        anchorPage: targetPageIndex
                     )
                 }.value
             }

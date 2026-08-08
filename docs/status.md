@@ -43,6 +43,7 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Request feedback now separates “连接本机 Qwen 配置 / 读取 PDF / 等待首段回答 / 正在输出”, so a slow step is visible instead of looking like a frozen reader.
 - Page, multi-page, and whole-document extraction now use a small in-memory cache keyed by the PDF file signature, context scope, and model; repeated follow-ups on the same page no longer reopen and re-read the document.
 - Background Qwen configuration reads share one in-flight operation, avoid prompting from the reading loop, and fail fast after 8 seconds if macOS Keychain Services is unresponsive. Settings keeps the explicit interactive save/recovery path, and API keys remain Keychain-only.
+- The page-entry “先讲主线” prompt now asks only about evidence from the current page; “接上文” is the explicit two-page bridge. Whole-book context puts the current page ±2 pages first before filling the remaining input budget with the rest of the book, so late-book questions do not silently receive only the opening pages.
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 

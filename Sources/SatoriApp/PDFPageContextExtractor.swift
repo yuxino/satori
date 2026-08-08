@@ -56,7 +56,8 @@ enum PDFPageContextExtractor {
     static func extract(
         from url: URL,
         scope: Scope,
-        qwenConfiguration: QwenConfiguration? = nil
+        qwenConfiguration: QwenConfiguration? = nil,
+        anchorPage: Int? = nil
     ) async -> LearningPageContent? {
         switch scope {
         case let .selection(text):
@@ -66,7 +67,12 @@ enum PDFPageContextExtractor {
         case .none:
             return nil
         case .page, .pageRange, .wholeDocument:
-            let key = cacheKey(for: url, scope: scope, qwenConfiguration: qwenConfiguration)
+            let key = cacheKey(
+                for: url,
+                scope: scope,
+                qwenConfiguration: qwenConfiguration,
+                anchorPage: anchorPage
+            )
             if let cached = await contentCache.value(for: key) {
                 return cached
             }
@@ -78,7 +84,7 @@ enum PDFPageContextExtractor {
             case let .pageRange(range):
                 extracted = await extractPageRange(from: url, range: range, qwenConfiguration: qwenConfiguration)
             case .wholeDocument:
-                extracted = await extractWholeDocument(from: url)
+                extracted = await extractWholeDocument(from: url, anchorPage: anchorPage)
             case .selection, .none:
                 extracted = nil
             }
@@ -92,13 +98,15 @@ enum PDFPageContextExtractor {
     private static func cacheKey(
         for url: URL,
         scope: Scope,
-        qwenConfiguration: QwenConfiguration?
+        qwenConfiguration: QwenConfiguration?,
+        anchorPage: Int?
     ) -> String {
         let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
         let modification = values?.contentModificationDate?.timeIntervalSince1970 ?? -1
         let size = values?.fileSize ?? -1
         let model = qwenConfiguration?.modelID ?? "local"
-        return "\(url.standardizedFileURL.path)|\(modification)|\(size)|\(scope.cacheToken)|\(model)"
+        let anchor = anchorPage.map(String.init) ?? "none"
+        return "\(url.standardizedFileURL.path)|\(modification)|\(size)|\(scope.cacheToken)|\(anchor)|\(model)"
     }
 
     /// 多页范围：并发取各页文字层，扫描页按需 Qwen OCR / 本地 Vision，
@@ -232,7 +240,7 @@ enum PDFPageContextExtractor {
         return normalized.isEmpty ? nil : normalized
     }
 
-    private static func extractWholeDocument(from url: URL) async -> LearningPageContent? {
+    private static func extractWholeDocument(from url: URL, anchorPage: Int?) async -> LearningPageContent? {
         let didAccess = url.startAccessingSecurityScopedResource()
         defer {
             if didAccess { url.stopAccessingSecurityScopedResource() }
@@ -241,19 +249,34 @@ enum PDFPageContextExtractor {
         guard let document = PDFDocument(url: url), document.pageCount > 0 else { return nil }
 
         let limit = 60_000
-        // 扫描版全书 OCR 很耗时，最多识别前 40 页就够撑满上下文；
-        // 有文字层的页不 OCR；本地 Vision 3 路并发。
+        let nearbyPages: [Int] = {
+            guard let anchorPage else { return [] }
+            let clamped = min(max(anchorPage, 0), document.pageCount - 1)
+            let start = max(0, clamped - 2)
+            let end = min(document.pageCount - 1, clamped + 2)
+            return Array(start...end)
+        }()
+        let nearbySet = Set(nearbyPages)
+        let allPages = Array(0..<document.pageCount)
+        // 整本书也必须先保证当前阅读位置附近在上下文里；否则前 6 万字符
+        // 会被书的开头吃完，用户在第 188 页提问时却拿不到眼前内容。
+        // 同时把附近页排到 OCR 队列前面，扫描版也优先识别当前页。
+        let extractionOrder = nearbyPages + allPages.filter { !nearbySet.contains($0) }
         let pages = await extractPagesConcurrently(
             document: document,
-            indices: Array(0..<document.pageCount),
+            indices: extractionOrder,
             qwenConfiguration: nil,
             useQwenOCR: false,
             ocrBudget: OCRBudget(40),
             concurrency: 3
         )
 
-        var assembled = ""
-        for (pageIndex, text) in pages {
+        let orderedPages = nearbyPages.compactMap { index in
+            pages.first { $0.pageIndex == index }
+        } + pages.filter { !nearbySet.contains($0.pageIndex) }
+
+        var assembled = nearbyPages.isEmpty ? "" : "【当前阅读位置附近】\n"
+        for (pageIndex, text) in orderedPages {
             guard !text.isEmpty else { continue }
             assembled += "【第 \(pageIndex + 1) 页】\n\(text)\n\n"
             if assembled.count >= limit { break }
