@@ -196,6 +196,10 @@ struct SatoriCoreTests {
             QwenLearningAssistant.defaultLearningInstructions.contains("快速阅读地图"),
             "Expected book and chapter overviews to produce a reading map"
         )
+        precondition(QwenLearningAssistant.responseTokenBudget(for: "一句话说清楚") == 260, "Expected one-sentence answers to stay compact")
+        precondition(QwenLearningAssistant.responseTokenBudget(for: "简化，字太多") == 560, "Expected simplify requests to lower the output budget")
+        precondition(QwenLearningAssistant.responseTokenBudget(for: "我刚开始读这一章，请给我阅读路线图") == 900, "Expected reading maps to keep enough room for structure")
+        precondition(QwenLearningAssistant.responseTokenBudget(for: "解释这一页") == 1_400, "Expected ordinary explanations to keep the normal budget")
         precondition(
             ReadingFactAnswer.pageCountAnswer(
                 for: "这一章有多少页",
@@ -456,7 +460,8 @@ struct SatoriCoreTests {
                 expectedImageCount: 0,
                 expectsWebSearch: false,
                 expectedHistoryTurnCount: 0,
-                expectsSelectionText: true
+                expectsSelectionText: true,
+                expectedMaxOutputTokens: 560
             )
         ).explain(request: "用更简单的话解释", pageIndex: 2)
         precondition(selectionResponse.text == "fixture explanation", "Expected selected-passage output text")
@@ -836,6 +841,7 @@ private struct FixtureAssistantTransport: AssistantTransport {
     var expectsPageContent: Bool = true
     var expectsSelectionText: Bool = false
     var expectsVerificationResponse: Bool = false
+    var expectedMaxOutputTokens: Int?
 
     func send(_ request: URLRequest) async throws -> AssistantTransportResponse {
         try validate(request, expectsStreaming: false)
@@ -867,6 +873,9 @@ private struct FixtureAssistantTransport: AssistantTransport {
         precondition(json["model"] as? String == expectedModelID, "Expected configured Qwen learning model")
         precondition(json["store"] as? Bool == false, "Expected response storage to be disabled")
         precondition(json["stream"] as? Bool == expectsStreaming, "Expected configured streaming mode")
+        if let expectedMaxOutputTokens {
+            precondition(json["max_output_tokens"] as? Int == expectedMaxOutputTokens, "Expected question-specific output budget")
+        }
         let tools = json["tools"] as? [[String: String]]
         precondition((tools?.first?["type"] == "web_search") == expectsWebSearch, "Expected opt-in web search behavior")
 

@@ -238,6 +238,31 @@ public struct QwenLearningAssistant: LearningAssistant {
         return markers.contains { normalized.contains($0) }
     }
 
+    /// Keep a compact follow-up compact at the transport level too. Prompting
+    /// alone is not enough: a model can still spend the whole budget repeating
+    /// the evidence/explanation template after the reader says “简化”.
+    public static func responseTokenBudget(for request: String) -> Int {
+        let normalized = request.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return 1_400 }
+
+        if normalized.contains("一句话") {
+            return 260
+        }
+        if normalized.contains("三句话") || normalized.contains("两三句话") {
+            return 360
+        }
+        if ["简要", "简化", "简短", "短一点", "字太多", "更简单", "简单点", "通俗点", "说人话", "先讲主线", "最重要的一个意思"].contains(where: normalized.contains) {
+            return 560
+        }
+        if ["阅读路线图", "阅读地图", "概念怎样递进", "看本章路线"].contains(where: normalized.contains) {
+            return 900
+        }
+        if normalized.contains("微实验") || normalized.contains("30 秒") {
+            return 650
+        }
+        return 1_400
+    }
+
     private let apiKey: String
     private let apiHost: URL
     private let modelID: String
@@ -535,7 +560,7 @@ public struct QwenLearningAssistant: LearningAssistant {
             tools: allowsWebSearch ? [.init(type: "web_search")] : nil,
             store: false,
             stream: streamsResponse,
-            maxOutputTokens: 1400
+            maxOutputTokens: Self.responseTokenBudget(for: question)
         )
     }
 
