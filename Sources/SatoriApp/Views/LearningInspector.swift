@@ -1370,16 +1370,6 @@ struct LearningInspector: View {
                 .controlSize(.small)
                 .help("允许这次提问使用 Qwen 网页搜索")
 
-                Button {
-                    selectMode(.run)
-                } label: {
-                    Label("运行代码", systemImage: "play.rectangle")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(SatoriTheme.accent)
-                .help("打开代码运行台")
-
                 Spacer()
                 Button {
                     isThinking ? stopAssistant() : askAssistant()
