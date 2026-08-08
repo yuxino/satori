@@ -635,7 +635,8 @@ struct SatoriCoreTests {
                 expectedImageCount: 1,
                 expectsWebSearch: false,
                 expectedHistoryTurnCount: 0,
-                expectsPageContent: false
+                expectsPageContent: true,
+                expectsImageOnlyPageInstruction: true
             )
         ).explain(request: "解释扫描页", pageIndex: 4)
         precondition(imageResponse.text == "fixture explanation", "Expected scanned-page output text")
@@ -1126,6 +1127,7 @@ private struct FixtureAssistantTransport: AssistantTransport {
     var expectsQuickClarification: Bool = false
     var expectsExercisePage: Bool = false
     var expectsVisualEvidenceInstruction: Bool = false
+    var expectsImageOnlyPageInstruction: Bool = false
     var expectedMaxOutputTokens: Int?
     var maximumRequestBodyBytes: Int?
 
@@ -1189,6 +1191,14 @@ private struct FixtureAssistantTransport: AssistantTransport {
                     && (pageText?.contains("紧邻页") == true
                         || pageText?.contains("下一项页面图像") == true),
                 "Expected OCR-backed page requests to prioritize the page image"
+            )
+        }
+        if expectsImageOnlyPageInstruction {
+            precondition(
+                pageText?.contains("文字层不可用") == true
+                    && pageText?.contains("页面图像是这页的原始证据") == true
+                    && pageText?.contains("正文、图示/表格、代码还是习题") == true,
+                "Expected image-only pages to carry page-type and evidence guidance"
             )
         }
         let selectionText = content.filter { $0["type"] as? String == "input_text" }

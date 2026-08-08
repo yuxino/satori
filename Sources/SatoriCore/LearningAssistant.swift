@@ -736,11 +736,18 @@ public struct QwenLearningAssistant: LearningAssistant {
                 imageURL: nil
             )]
         case .imageJPEG(let data)?:
-            return [.init(
-                type: "input_image",
-                text: nil,
-                imageURL: "data:image/jpeg;base64,\(data.base64EncodedString())"
-            )]
+            return [
+                .init(
+                    type: "input_text",
+                    text: "用户正在阅读教材 PDF 第 \(pageNumber) 页。下面是这页的原始扫描图像，文字层不可用；请先判断页面是正文、图示/表格、代码还是习题，再回答用户的问题。页面图像是这页的原始证据，代码、公式、数字和符号以图像为准；无法看清时明确说不确定，不要凭常识补齐。",
+                    imageURL: nil
+                ),
+                .init(
+                    type: "input_image",
+                    text: nil,
+                    imageURL: "data:image/jpeg;base64,\(data.base64EncodedString())"
+                )
+            ]
         case let .textAndImage(text, data)?:
             return [
                 .init(
