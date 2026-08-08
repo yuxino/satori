@@ -14,6 +14,8 @@ extension Notification.Name {
     static let satoriPageRegionCaptured = Notification.Name("satori.pageRegionCaptured")
     /// userInfo: documentID, url (the PDF), position (ReadingPosition with page + offset).
     static let satoriReaderJumpRequested = Notification.Name("satori.readerJumpRequested")
+    /// userInfo: documentID, url, query, direction (-1 previous / 1 next).
+    static let satoriReaderSearchRequested = Notification.Name("satori.readerSearchRequested")
 }
 
 /// The reading canvas. Text selection raises a floating「理解 / 接上文 / 举例 /
@@ -29,6 +31,7 @@ struct PDFReaderView: NSViewRepresentable {
     @Binding var isRegionCaptureEnabled: Bool
     let onPositionChanged: (Int, Double) -> Void
     var onPageRegionCaptured: ((Data, Int) -> Void)? = nil
+    var onSearchResult: ((Int, Int) -> Void)? = nil
 
     /// Selection toolbar callbacks, in addition to the notification channel:
     /// (selectedText, pageIndex). Defaults keep existing call sites working.
@@ -42,7 +45,8 @@ struct PDFReaderView: NSViewRepresentable {
             onPageRegionCaptured: onPageRegionCaptured,
             onPositionChanged: onPositionChanged,
             onAskSelection: onAskSelection,
-            onRunSelection: onRunSelection
+            onRunSelection: onRunSelection,
+            onSearchResult: onSearchResult
         )
     }
 
@@ -78,6 +82,7 @@ struct PDFReaderView: NSViewRepresentable {
         context.coordinator.onAskSelection = onAskSelection
         context.coordinator.onRunSelection = onRunSelection
         context.coordinator.onPageRegionCaptured = onPageRegionCaptured
+        context.coordinator.onSearchResult = onSearchResult
         context.coordinator.setRegionCaptureEnabled(isRegionCaptureEnabled, in: view)
         guard let document = view.document, document.pageCount > 0 else { return }
         let targetIndex = min(max(currentPageIndex, 0), document.pageCount - 1)
@@ -104,6 +109,7 @@ struct PDFReaderView: NSViewRepresentable {
         private let currentPageIndex: Binding<Int>
         private let onPositionChanged: (Int, Double) -> Void
         var onPageRegionCaptured: ((Data, Int) -> Void)?
+        var onSearchResult: ((Int, Int) -> Void)?
         var onAskSelection: ((String, Int) -> Void)?
         var onRunSelection: ((String, Int) -> Void)?
 
@@ -124,6 +130,10 @@ struct PDFReaderView: NSViewRepresentable {
         /// Scrolling reports offsets continuously; only the settle matters.
         private var offsetDebounce: Timer?
         private var jumpObserverToken: NSObjectProtocol?
+        private var searchObserverToken: NSObjectProtocol?
+        private var searchQuery = ""
+        private var searchMatches: [PDFSelection] = []
+        private var searchMatchIndex: Int?
         /// 最近一次上报的 (页, 偏移)，用于滤掉同一位置导航触发的重复上报。
         private var lastReportedPageIndex: Int?
         private var lastReportedOffset: Double = -1
@@ -135,7 +145,8 @@ struct PDFReaderView: NSViewRepresentable {
             onPageRegionCaptured: ((Data, Int) -> Void)?,
             onPositionChanged: @escaping (Int, Double) -> Void,
             onAskSelection: ((String, Int) -> Void)?,
-            onRunSelection: ((String, Int) -> Void)?
+            onRunSelection: ((String, Int) -> Void)?,
+            onSearchResult: ((Int, Int) -> Void)?
         ) {
             self.documentID = documentID
             self.currentPageIndex = currentPageIndex
@@ -143,6 +154,7 @@ struct PDFReaderView: NSViewRepresentable {
             self.onPositionChanged = onPositionChanged
             self.onAskSelection = onAskSelection
             self.onRunSelection = onRunSelection
+            self.onSearchResult = onSearchResult
         }
 
         func observe(_ view: PDFView) {
@@ -180,6 +192,24 @@ struct PDFReaderView: NSViewRepresentable {
                     )
                 }
             }
+            searchObserverToken = center.addObserver(
+                forName: .satoriReaderSearchRequested,
+                object: nil,
+                queue: .main
+            ) { [weak self] note in
+                let query = note.userInfo?["query"] as? String ?? ""
+                let direction = note.userInfo?["direction"] as? Int ?? 1
+                let requestedDocumentID = note.userInfo?["documentID"] as? UUID
+                let requestedURL = note.userInfo?["url"] as? URL
+                Task { @MainActor [weak self] in
+                    self?.handleSearchRequest(
+                        query: query,
+                        direction: direction,
+                        requestedDocumentID: requestedDocumentID,
+                        requestedURL: requestedURL
+                    )
+                }
+            }
         }
 
         func stopObserving() {
@@ -188,6 +218,10 @@ struct PDFReaderView: NSViewRepresentable {
                 NotificationCenter.default.removeObserver(jumpObserverToken)
                 self.jumpObserverToken = nil
             }
+            if let searchObserverToken {
+                NotificationCenter.default.removeObserver(searchObserverToken)
+                self.searchObserverToken = nil
+            }
             offsetDebounce?.invalidate()
             offsetDebounce = nil
             regionCaptureView?.removeFromSuperview()
@@ -195,6 +229,62 @@ struct PDFReaderView: NSViewRepresentable {
             toolbar?.removeFromSuperview()
             toolbar = nil
             observedView = nil
+        }
+
+        // MARK: In-document search
+
+        @MainActor private func handleSearchRequest(
+            query: String,
+            direction: Int,
+            requestedDocumentID: UUID?,
+            requestedURL: URL?
+        ) {
+            guard let view = observedView,
+                  let document = view.document else { return }
+            if let requestedDocumentID, requestedDocumentID != documentID { return }
+            if let requestedURL, let documentURL = document.documentURL,
+               requestedURL.standardizedFileURL != documentURL.standardizedFileURL { return }
+
+            let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalizedQuery.isEmpty else {
+                onSearchResult?(0, 0)
+                return
+            }
+
+            if normalizedQuery != searchQuery {
+                searchQuery = normalizedQuery
+                searchMatches = document.findString(normalizedQuery, withOptions: [.caseInsensitive])
+                searchMatchIndex = nil
+            }
+            guard !searchMatches.isEmpty else {
+                onSearchResult?(0, 0)
+                return
+            }
+
+            let step = direction < 0 ? -1 : 1
+            let nextIndex: Int
+            if let searchMatchIndex {
+                nextIndex = (searchMatchIndex + step + searchMatches.count) % searchMatches.count
+            } else if let currentPage = view.currentPage {
+                let currentPageIndex = document.index(for: currentPage)
+                if step > 0 {
+                    nextIndex = searchMatches.firstIndex { match in
+                        match.pages.contains { document.index(for: $0) >= currentPageIndex }
+                    } ?? 0
+                } else {
+                    nextIndex = searchMatches.lastIndex { match in
+                        match.pages.contains { document.index(for: $0) <= currentPageIndex }
+                    } ?? searchMatches.count - 1
+                }
+            } else {
+                nextIndex = step > 0 ? 0 : searchMatches.count - 1
+            }
+
+            searchMatchIndex = nextIndex
+            let match = searchMatches[nextIndex]
+            view.setCurrentSelection(match, animate: true)
+            view.scrollSelectionToVisible(nil)
+            onSearchResult?(nextIndex + 1, searchMatches.count)
         }
 
         /// Scanned PDFs have no PDFKit text selection. A temporary drag layer

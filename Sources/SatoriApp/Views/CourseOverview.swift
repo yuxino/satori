@@ -164,6 +164,9 @@ private struct DocumentWorkspace: View {
     let onRemove: () -> Void
     @State private var currentPageIndex: Int
     @State private var pageInput = ""
+    @State private var isSearchPresented = false
+    @State private var searchQuery = ""
+    @State private var searchNotice = ""
     /// 这本书的章节导览（PDF outline 优先，扫描目录 OCR 次之，课程目录回退）；打开时一次性加载。
     @State private var chapters: [BookChapter] = []
     /// 目录快速跳转浮层是否显示（⌘T 或点目录按钮）。
@@ -460,6 +463,15 @@ private struct DocumentWorkspace: View {
                                 "jpegData": jpegData
                             ]
                         )
+                    },
+                    onSearchResult: { matchIndex, matchCount in
+                        if matchCount == 0 {
+                            searchNotice = document.contentKind == .scanned
+                                ? "这本扫描书没有可搜索的文字层，可以用“框选理解”。"
+                                : "没有找到“\(searchQuery)”。"
+                        } else {
+                            searchNotice = "第 \(matchIndex) / \(matchCount) 处"
+                        }
                     }
                 )
 
@@ -602,6 +614,18 @@ private struct DocumentWorkspace: View {
 
             Spacer(minLength: 8)
 
+            Button {
+                searchNotice = ""
+                isSearchPresented = true
+            } label: {
+                Label("查找", systemImage: "magnifyingglass")
+            }
+            .keyboardShortcut("f", modifiers: .command)
+            .popover(isPresented: $isSearchPresented, arrowEdge: .bottom) {
+                pdfSearchPopover
+            }
+            .help("在这本书中查找（⌘F）")
+
             if !router.isImmersiveReading {
                 Button {
                     showsInspector.toggle()
@@ -640,6 +664,62 @@ private struct DocumentWorkspace: View {
         .padding(.horizontal, 14)
         .frame(height: 58)
         .background(router.isImmersiveReading ? SatoriTheme.paper : Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var pdfSearchPopover: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("在这本书中查找")
+                .font(.headline)
+            HStack(spacing: 6) {
+                TextField("术语、标题或文件名", text: $searchQuery)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { requestSearch(direction: 1) }
+                Button("上一个", systemImage: "chevron.up") {
+                    requestSearch(direction: -1)
+                }
+                .labelStyle(.iconOnly)
+                .help("上一个匹配")
+                Button("下一个", systemImage: "chevron.down") {
+                    requestSearch(direction: 1)
+                }
+                .labelStyle(.iconOnly)
+                .help("下一个匹配")
+            }
+            if !searchNotice.isEmpty {
+                Label(
+                    searchNotice,
+                    systemImage: searchNotice.hasPrefix("没有") ? "info.circle" : "text.magnifyingglass"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(document.contentKind == .scanned
+                 ? "扫描页没有文字索引；找图、公式或代码请用“框选理解”。"
+                 : "Enter 查找下一处 · 从当前页继续查找")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(14)
+        .frame(width: 330)
+    }
+
+    private func requestSearch(direction: Int) {
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            searchNotice = "先输入要查找的内容。"
+            return
+        }
+        NotificationCenter.default.post(
+            name: .satoriReaderSearchRequested,
+            object: nil,
+            userInfo: [
+                "documentID": document.id,
+                "url": url,
+                "query": query,
+                "direction": direction
+            ]
+        )
     }
 
     /// 目录按钮：常驻显示当前章节，点击（或按 ⌘T）呼出可跳转任意章节/小节的浮层。
