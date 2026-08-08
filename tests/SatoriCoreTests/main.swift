@@ -197,6 +197,10 @@ struct SatoriCoreTests {
             "Expected book and chapter overviews to produce a reading map"
         )
         precondition(
+            QwenLearningAssistant.defaultLearningInstructions.contains("可能只是 OCR/排版问题"),
+            "Expected textbook correctness checks to separate OCR doubts from factual errors"
+        )
+        precondition(
             ReadingOCRPolicy.usesRemoteOCR(forPageRangeCount: 2, hasQwenConfiguration: true),
             "Expected short page bridges to use high-fidelity remote OCR"
         )
@@ -211,15 +215,17 @@ struct SatoriCoreTests {
         precondition(QwenLearningAssistant.responseTokenBudget(for: "解释这一页") == 1_400, "Expected ordinary explanations to keep the normal budget")
         precondition(QwenLearningAssistant.responseTokenBudget(for: "解释我选中的这段内容", hasSelection: true) == 700, "Expected selected-passage explanations to stay compact by default")
         precondition(QwenLearningAssistant.responseTokenBudget(for: "完整代码", hasSelection: true) == 1_400, "Expected explicit complete-code requests to keep enough room")
+        // Real system.pdf outline: Chapter 6 starts at PDF page 183 (index 182)
+        // and Chapter 7 starts at PDF page 228 (index 227).
         precondition(
             ReadingFactAnswer.pageCountAnswer(
                 for: "这一章有多少页",
                 pageCount: 294,
                 currentPageIndex: 187,
                 scope: .page,
-                chapterRange: 145...181
-            ) == "当前范围是第 146–182 页，共 37 页。",
-            "Expected chapter page count to use the full top-level chapter range"
+                chapterRange: 182...227
+            ) == "当前范围是第 183–228 页，共 46 页。",
+            "Expected the real system.pdf chapter range to include the whole sixth chapter"
         )
         precondition(
             ReadingFactAnswer.pageCountAnswer(
@@ -252,26 +258,26 @@ struct SatoriCoreTests {
             ReadingScopeInference.scope(
                 for: "这一章在讲什么",
                 pageIndex: 187,
-                chapterRange: 182...224,
-                sectionRange: 186...188
-            ) == .pageRange(start: 182, end: 224),
+                chapterRange: 182...227,
+                sectionRange: 182...188
+            ) == .pageRange(start: 182, end: 227),
             "Expected chapter language to expand to the current top-level chapter"
         )
         precondition(
             ReadingScopeInference.scope(
                 for: "第六章有哪些重点",
                 pageIndex: 187,
-                chapterRange: 182...224,
-                sectionRange: 186...188
-            ) == .pageRange(start: 182, end: 224),
+                chapterRange: 182...227,
+                sectionRange: 182...188
+            ) == .pageRange(start: 182, end: 227),
             "Expected numbered chapter language to expand naturally"
         )
         precondition(
             ReadingScopeInference.scope(
                 for: "这本书主要讲什么",
                 pageIndex: 187,
-                chapterRange: 182...224,
-                sectionRange: 186...188
+                chapterRange: 182...227,
+                sectionRange: 182...188
             ) == .wholeDocument,
             "Expected book-overview language to use the whole document"
         )
@@ -297,8 +303,8 @@ struct SatoriCoreTests {
             ReadingScopeInference.scope(
                 for: "这本书第几页有磁盘内容",
                 pageIndex: 187,
-                chapterRange: 182...224,
-                sectionRange: 186...188
+                chapterRange: 182...227,
+                sectionRange: 182...188
             ) == nil,
             "Expected a book page lookup not to trigger whole-book context"
         )
@@ -306,8 +312,8 @@ struct SatoriCoreTests {
             ReadingScopeInference.scope(
                 for: "上一页和这一页怎么连起来",
                 pageIndex: 187,
-                chapterRange: 182...224,
-                sectionRange: 186...188
+                chapterRange: 182...227,
+                sectionRange: 182...188
             ) == .pageRange(start: 186, end: 187),
             "Expected previous-page language to include the adjacent page"
         )
@@ -315,8 +321,8 @@ struct SatoriCoreTests {
             ReadingScopeInference.scope(
                 for: "这一页接着前面的文件系统内容往下讲了什么",
                 pageIndex: 187,
-                chapterRange: 182...224,
-                sectionRange: 186...188
+                chapterRange: 182...227,
+                sectionRange: 182...188
             ) == .pageRange(start: 186, end: 187),
             "Expected natural continuation language to include the adjacent page"
         )
@@ -324,8 +330,8 @@ struct SatoriCoreTests {
             ReadingScopeInference.scope(
                 for: "这一页和前面有什么关系",
                 pageIndex: 187,
-                chapterRange: 182...224,
-                sectionRange: 186...188
+                chapterRange: 182...227,
+                sectionRange: 182...188
             ) == .pageRange(start: 186, end: 187),
             "Expected relationship language to include the adjacent page"
         )
@@ -333,8 +339,8 @@ struct SatoriCoreTests {
             ReadingScopeInference.scope(
                 for: "这一页的磁盘地址是什么意思",
                 pageIndex: 187,
-                chapterRange: 182...224,
-                sectionRange: 186...188
+                chapterRange: 182...227,
+                sectionRange: 182...188
             ) == nil,
             "Expected ordinary page questions to keep the default page scope"
         )
