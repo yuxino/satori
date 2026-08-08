@@ -269,9 +269,20 @@ enum PDFPageContextExtractor {
                 previousText: previousText
             ),
                let jpeg = renderPageJPEG(page) {
+                var visualPages = [LearningPageImage(pageIndex: pageIndex, jpegData: jpeg)]
+                // In real textbooks a sentence such as “如图 6-2 所示” often
+                // lands at the bottom of one page while the figure starts at
+                // the top of the next. A current-page question should still
+                // let the model see that figure, without expanding the text
+                // scope or making every page request multi-page.
+                if ReadingVisualEvidence.mentionsVisualReference(in: text),
+                   let nextPage = document.page(at: pageIndex + 1),
+                   let nextJPEG = renderPageJPEG(nextPage) {
+                    visualPages.append(.init(pageIndex: pageIndex + 1, jpegData: nextJPEG))
+                }
                 return .textAndImages(
                     pageText,
-                    [.init(pageIndex: pageIndex, jpegData: jpeg)]
+                    visualPages
                 )
             }
             return .text(pageText)

@@ -87,6 +87,7 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Chapter-language alignment: “第六章” and “第6章” now resolve to the same recovered chapter, so Chinese-numbered questions keep their chapter-wide context on scanned books too.
 - Scanned-page reading: local Vision OCR now detects actual two-column layouts instead of blindly splitting every page, keeps single-column body text in order, repairs long-but-damaged text layers, and keeps the scanned page image beside OCR text so Qwen can verify the result.
 - OCR/code safety: when scanned OCR reaches code, formulas, numbers, or symbols, the request now explicitly treats the page image as the original evidence and tells Qwen to resolve OCR conflicts from the image.
+- Figure look-ahead: when a current page names a numbered figure/table, a single-page question can also carry the immediately following page image because textbook figures often begin across the page break; the request labels the adjacent page as visual evidence without widening the text scope.
 - Scanned-book orientation: OCR table-of-contents entries now retain first-level sections and their printed-page mapping, so scanned books can show the same chapter + section breadcrumb as native-outline PDFs.
 - Printed-page clarity: scanned books now show PDF page and textbook page together in the reading bar and TOC, so a printed citation such as “书内第 25 页” no longer gets confused with PDF 第 30 页.
 

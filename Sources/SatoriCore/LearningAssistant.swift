@@ -659,7 +659,7 @@ public struct QwenLearningAssistant: LearningAssistant {
             var items: [InputContent] = [
                 .init(
                     type: "input_text",
-                    text: "用户正在阅读教材 PDF（当前页第 \(pageNumber) 页）。\n\n以下是可参考的 PDF 原文（可能包含一页或多页，每段以【第 N 页】标注）：\n\(text)\n\n下面附上当前范围中含有图示或表格的页面图像（\(pageLabels)）。页面图像是原始证据；请把文字和对应页图像一起核对，尤其注意空间关系、箭头、代码、数字、公式和表格列项。冲突时以图像为准，无法看清时明确说不确定。",
+                    text: "用户正在阅读教材 PDF（当前页第 \(pageNumber) 页）。\n\n以下是可参考的 PDF 原文（可能包含一页或多页，每段以【第 N 页】标注）：\n\(text)\n\n下面附上当前范围中或紧邻页里含有图示/表格的页面图像（\(pageLabels)）。教材常把“见图/见表”写在一页末尾、把图本体放在下一页；请把文字和对应页图像一起核对，尤其注意空间关系、箭头、代码、数字、公式和表格列项。页面图像是原始证据，冲突时以图像为准，无法看清时明确说不确定。",
                     imageURL: nil
                 )
             ]

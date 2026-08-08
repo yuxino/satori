@@ -501,6 +501,10 @@ struct SatoriCoreTests {
             "Expected a page that names a figure to carry visual evidence"
         )
         precondition(
+            ReadingVisualEvidence.mentionsVisualReference(in: "磁盘的结构如图6-2所示。"),
+            "Expected a current-page figure reference to request a look-ahead image"
+        )
+        precondition(
             ReadingVisualEvidence.requiresPageImage(
                 currentText: "单张磁盘外表看起来就像一张唱片",
                 previousText: "磁盘的结构如图6-2所示。"
@@ -510,6 +514,10 @@ struct SatoriCoreTests {
         precondition(
             !ReadingVisualEvidence.requiresPageImage(currentText: "文件系统负责存储、检索和更新"),
             "Expected ordinary prose to stay text-only"
+        )
+        precondition(
+            !ReadingVisualEvidence.mentionsVisualReference(in: "文件系统负责存储、检索和更新"),
+            "Expected ordinary prose not to trigger a look-ahead image"
         )
         let representativePages = ReadingSamplePlan.representativePageIndices(
             pageCount: 294,
@@ -1067,7 +1075,9 @@ private struct FixtureAssistantTransport: AssistantTransport {
             precondition(
                 (pageText?.contains("页面图像是这页的原始证据") == true
                     || pageText?.contains("页面图像是原始证据") == true)
-                    && pageText?.contains("以图像为准") == true,
+                    && pageText?.contains("以图像为准") == true
+                    && (pageText?.contains("紧邻页") == true
+                        || pageText?.contains("下一项页面图像") == true),
                 "Expected OCR-backed page requests to prioritize the page image"
             )
         }
