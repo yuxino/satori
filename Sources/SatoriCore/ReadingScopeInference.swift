@@ -19,6 +19,21 @@ public enum ReadingScopeInference {
         return start...end
     }
 
+    /// Readers often advance with a one- or two-word command instead of a
+    /// complete question. Only recognize standalone continuation commands;
+    /// phrases such as “继续解释当前页” remain ordinary current-page
+    /// questions because they explicitly name what to continue.
+    public static func isForwardContinuationRequest(for request: String) -> Bool {
+        let normalized = request
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+        return [
+            "继续", "继续讲", "继续往下", "继续往下讲", "继续往下看",
+            "往下", "往下讲", "往下看"
+        ].contains(normalized)
+    }
+
     /// A terse follow-up can inherit a previous range only while the reader is
     /// still looking at that range. This prevents “有多少页” after jumping to
     /// another chapter from silently answering for the old chapter.
@@ -105,6 +120,11 @@ public enum ReadingScopeInference {
         ]
         if pageIndex > 0, previousPageMarkers.contains(where: normalized.contains) {
             return .pageRange(start: pageIndex - 1, end: pageIndex)
+        }
+
+        if isForwardContinuationRequest(for: normalized) {
+            let nextPage = pageCount.map { min(max(pageIndex + 1, 0), max($0 - 1, 0)) } ?? pageIndex + 1
+            return .pageRange(start: min(pageIndex, nextPage), end: max(pageIndex, nextPage))
         }
 
         let nextPageMarkers = [

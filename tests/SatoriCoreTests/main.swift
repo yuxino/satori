@@ -473,6 +473,19 @@ struct SatoriCoreTests {
             "Expected forward-looking questions to include the next page"
         )
         precondition(
+            ReadingScopeInference.isForwardContinuationRequest(for: "继续")
+                && ReadingScopeInference.scope(
+                    for: "继续",
+                    pageIndex: 10,
+                    chapterRange: 0...20,
+                    sectionRange: 10...12,
+                    pageCount: 40
+                ) == .pageRange(start: 10, end: 11)
+                && !ReadingScopeInference.isForwardContinuationRequest(for: "继续解释当前页")
+                && QwenLearningAssistant.responseTokenBudget(for: "继续") == 700,
+            "Expected standalone continuation commands to bridge forward without hijacking explicit current-page questions"
+        )
+        precondition(
             ReadingScopeInference.scope(
                 for: "然后呢",
                 pageIndex: 39,

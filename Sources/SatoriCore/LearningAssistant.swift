@@ -264,6 +264,9 @@ public struct QwenLearningAssistant: LearningAssistant {
         let normalized = request.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return 1_400 }
 
+        if ReadingScopeInference.isForwardContinuationRequest(for: request) {
+            return 700
+        }
         if normalized.contains("一句话") {
             return 260
         }
@@ -645,6 +648,13 @@ public struct QwenLearningAssistant: LearningAssistant {
             content.append(.init(
                 type: "input_text",
                 text: "用户明确要求压缩回答，这是为了继续阅读。最多 3 个短点、约 180 个中文字符；只保留核心结论和一个必要的连接，不要写完整模板、补充推断或重复原文。",
+                imageURL: nil
+            ))
+        }
+        if ReadingScopeInference.isForwardContinuationRequest(for: question) {
+            content.append(.init(
+                type: "input_text",
+                text: "用户只用一个短指令要求继续阅读。若上下文包含当前页和下一页，请不要重复当前页已经讲过的内容；先用一句话接住当前页，再说明下一页新增的主线或变化，控制在 3 个短点以内。若没有下一页证据，直接说明缺少下一页，不要假装看到了。",
                 imageURL: nil
             ))
         }
