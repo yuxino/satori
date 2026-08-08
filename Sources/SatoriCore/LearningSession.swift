@@ -69,6 +69,9 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
     public var contextScope: LearningContextScope?
     /// 回答耗时（从发送到完成，秒）；旧版本存档没有该字段（解码为 nil）。
     public var responseDuration: TimeInterval?
+    /// 用户发起本轮问答时主动选中的原文；旧版本存档没有该字段。
+    /// 保存它是为了让「重试」和回看笔记时仍然围绕同一段内容回答。
+    public var selectionText: String?
 
     public init(
         id: UUID = UUID(),
@@ -81,7 +84,8 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
         createdAt: Date = .now,
         completion: LearningTurnCompletion = .completed,
         contextScope: LearningContextScope? = nil,
-        responseDuration: TimeInterval? = nil
+        responseDuration: TimeInterval? = nil,
+        selectionText: String? = nil
     ) {
         self.id = id
         self.question = question
@@ -94,6 +98,7 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
         self.completion = completion
         self.contextScope = contextScope
         self.responseDuration = responseDuration
+        self.selectionText = selectionText?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

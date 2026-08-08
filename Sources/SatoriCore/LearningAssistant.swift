@@ -140,7 +140,7 @@ public enum AssistantError: LocalizedError, Sendable, Equatable {
         case .invalidResponse:
             "百炼返回了无法识别的响应。"
         case .emptyOutput:
-            "Qwen 没有返回可显示的文字。"
+            "Qwen 没有返回可显示的文字。可能是选中的 PDF 文字过长或识别异常，请缩短选区后重试。"
         case .timeout:
             "回答超时（长时间没有新内容），请重试。"
         case let .api(statusCode, message):

@@ -86,6 +86,8 @@ struct LearningInspector: View {
     @State private var draftPageIndex = 0
     @State private var draftContextScope: LearningContextScope = .none
     @State private var draftAttachmentCount = 0
+    /// 当前草稿关联的选区；即使用户清掉可视锚点，重试也不能丢掉原文。
+    @State private var draftSelectionText: String?
     @State private var response: LearningResponse?
     @State private var isThinking = false
     @State private var isLoadingHistory = true
@@ -336,7 +338,8 @@ struct LearningInspector: View {
             pageIndex: draftPageIndex,
             sourceKind: response?.sourceKind ?? .inference,
             citations: response?.citations ?? [],
-            attachmentCount: draftAttachmentCount
+            attachmentCount: draftAttachmentCount,
+            selectionText: draftSelectionText
         )
     }
 
@@ -981,7 +984,8 @@ struct LearningInspector: View {
                         askAssistant(
                             turn.question,
                             pageOverride: turn.pageIndex,
-                            scope: turn.contextScope ?? .page
+                            scope: turn.contextScope ?? .page,
+                            selectionText: turn.selectionText
                         )
                     }
                     .buttonStyle(.borderless)
@@ -1098,12 +1102,16 @@ struct LearningInspector: View {
             Button("复制", systemImage: "doc.on.doc") { copyToPasteboard(turn.answer) }
                 .buttonStyle(.borderless)
             Button("重试", systemImage: "arrow.clockwise") {
+                // 从「笔记」重试时先回到问答现场，否则请求虽然会发出，
+                // 用户却留在笔记列表里看不到流式回答，也不知道是否成功。
+                selectMode(.ask)
                 onNavigateToPage(turn.pageIndex)
                 askAssistant(
                     turn.question,
                     pageOverride: turn.pageIndex,
                     excludingTurnID: turn.id,
-                    scope: turn.contextScope ?? .page
+                    scope: turn.contextScope ?? .page,
+                    selectionText: turn.selectionText
                 )
             }
             .buttonStyle(.borderless)
@@ -1547,6 +1555,19 @@ struct LearningInspector: View {
         draftPageIndex = targetPageIndex
         draftContextScope = effectiveScope
         draftAttachmentCount = submittedAttachments.count
+        let effectiveSelectionText: String? = {
+            guard let candidate = (selectionText ?? (activeSelectionPage == targetPageIndex ? activeSelectionText : nil))?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !candidate.isEmpty else { return nil }
+            return candidate
+        }()
+        draftSelectionText = effectiveSelectionText
+        if let effectiveSelectionText, !effectiveSelectionText.isEmpty {
+            // 由笔记里的「重试」重新进入选区问答时，恢复可见锚点，
+            // 让用户知道这次回答仍然围绕哪段原文，而不是只在请求里隐形带上它。
+            activeSelectionText = effectiveSelectionText
+            activeSelectionPage = targetPageIndex
+        }
         // 锚定到底部：新消息出现后内容自然向上生长，平滑贴底跟随。
         scrollAnchorID = responseBottomID
         scrollRequest += 1
@@ -1620,7 +1641,7 @@ struct LearningInspector: View {
                 apiKey: config.apiKey,
                 modelID: config.modelID,
                 pageContent: pageContent,
-                selectionText: selectionText,
+                selectionText: effectiveSelectionText,
                 additionalImagesJPEG: submittedAttachments.map(\.jpegData),
                 conversationContext: context,
                 allowsWebSearch: allowsWebSearch,
@@ -1690,6 +1711,7 @@ struct LearningInspector: View {
             draftQuestion = ""
             draftAttachmentCount = 0
             draftContextScope = .none
+            draftSelectionText = nil
             activeAttachmentPreviews = []
             self.response = nil
             return
@@ -1712,12 +1734,14 @@ struct LearningInspector: View {
             attachmentCount: draftAttachmentCount,
             completion: completion,
             contextScope: draftContextScope,
-            responseDuration: duration
+            responseDuration: duration,
+            selectionText: draftSelectionText
         )
         turns.append(turn)
         draftQuestion = ""
         draftAttachmentCount = 0
         draftContextScope = .none
+        draftSelectionText = nil
         activeAttachmentPreviews = []
         response = nil
         persistTurns()
@@ -1744,6 +1768,7 @@ struct LearningInspector: View {
         streamStartDate = nil
         turns = []
         draftQuestion = ""
+        draftSelectionText = nil
         response = nil
         activeAttachmentPreviews = []
         attachments = []

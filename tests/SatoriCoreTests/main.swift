@@ -31,7 +31,8 @@ struct SatoriCoreTests {
             answer: "循环把重复规则写成有限步骤。",
             pageIndex: 2,
             sourceKind: .currentPDF,
-            attachmentCount: 1
+            attachmentCount: 1,
+            selectionText: "把重复规则写成有限步骤"
         )
         try await sessionStore.save([savedTurn], for: firstDocumentID)
         try await sessionStore.save([
@@ -278,17 +279,20 @@ struct SatoriCoreTests {
         let legacyTurn = try decoder.decode(LearningTurn.self, from: Data(legacyTurnJSON.utf8))
         precondition(legacyTurn.contextScope == nil, "Expected legacy turns to decode without contextScope")
         precondition(legacyTurn.responseDuration == nil, "Expected legacy turns to decode without responseDuration")
+        precondition(legacyTurn.selectionText == nil, "Expected legacy turns to decode without selectionText")
         let timedTurn = LearningTurn(
             question: "带耗时的问答",
             answer: "回答",
             pageIndex: 0,
             sourceKind: .currentPDF,
             contextScope: .pageRange(start: 1, end: 3),
-            responseDuration: 4.2
+            responseDuration: 4.2,
+            selectionText: "被选中的原文"
         )
         let timedRoundTrip = try decoder.decode(LearningTurn.self, from: encoder.encode(timedTurn))
         precondition(timedRoundTrip.contextScope == .pageRange(start: 1, end: 3), "Expected context scope to persist")
         precondition(abs((timedRoundTrip.responseDuration ?? -1) - 4.2) < 0.001, "Expected response duration to persist")
+        precondition(timedRoundTrip.selectionText == "被选中的原文", "Expected selected passage to persist for retry")
 
         // Glyph-positioned PDFs hand back CJK text with a space wedged between
         // every character ("返 回 正 整 数"). Those spaces are always artifacts
