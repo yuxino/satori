@@ -2,6 +2,7 @@ import AppKit
 import PDFKit
 import SwiftUI
 import SatoriCore
+import Vision
 
 struct CourseOverview: View {
     @EnvironmentObject private var store: AppModel
@@ -159,7 +160,7 @@ private struct DocumentWorkspace: View {
     let onRemove: () -> Void
     @State private var currentPageIndex: Int
     @State private var pageInput = ""
-    /// 这本书的章节导览（PDF outline 优先，课程目录回退）；打开时一次性加载。
+    /// 这本书的章节导览（PDF outline 优先，扫描目录 OCR 次之，课程目录回退）；打开时一次性加载。
     @State private var chapters: [BookChapter] = []
     /// 目录快速跳转浮层是否显示（⌘T 或点目录按钮）。
     @State private var showsTOC = false
@@ -208,14 +209,23 @@ private struct DocumentWorkspace: View {
             }
         }
         .task(id: document.id) {
-            // 打开 PDF 时一次性提取目录大纲：既做章节导览，也用于把课程目录项
-            // 关联到书内真实页码，避免同一份 PDF 重复解析。
-            let entries = await Task.detached(priority: .utility) {
+            // 打开 PDF 时优先读取原生 outline；扫描版没有 outline 时，再在后台
+            // OCR 前面的目录页并校正印刷页码偏移。两条路径都只在这里做一次，
+            // 不把目录识别混进每次提问的等待。
+            let outlineEntries = await Task.detached(priority: .utility) {
                 OutlinePageMatcher.allEntries(url: url)
             }.value
             guard !Task.isCancelled else { return }
-            chapters = Self.makeChapters(entries: entries, directory: course.learningDirectory)
-            await linkDirectoryPages(entries: entries)
+            if outlineEntries.isEmpty {
+                let scannedEntries = await Task.detached(priority: .utility) {
+                    ScannedOutlineExtractor.entries(url: url)
+                }.value
+                guard !Task.isCancelled else { return }
+                chapters = Self.makeChapters(entries: scannedEntries, directory: course.learningDirectory)
+            } else {
+                chapters = Self.makeChapters(entries: outlineEntries, directory: course.learningDirectory)
+                await linkDirectoryPages(entries: outlineEntries)
+            }
         }
         .task(id: document.id) {
             // 这本书一被打开就记住「课程 + 书」，重启后回到同一本；
@@ -731,6 +741,163 @@ private struct TOCDrawer: View {
             return "\(range.lowerBound + 1)–\(range.upperBound + 1)"
         }
         return "\(chapter.pageIndex + 1)"
+    }
+}
+
+/// Scanned books often have a usable table of contents but no PDF outline.
+/// Read only the front matter plus a bounded body window to discover the
+/// printed-to-PDF page offset; this keeps opening a scanned book local and
+/// bounded instead of sending its whole book to Qwen just to build navigation.
+private enum ScannedOutlineExtractor {
+    private struct CachedEntry: Codable {
+        let title: String
+        let pageIndex: Int
+    }
+
+    static func entries(url: URL) -> [(title: String, pageIndex: Int, depth: Int)] {
+        let cacheKey = cacheKey(for: url)
+        if let cached = cachedEntries(for: cacheKey) {
+            return cached.map { ($0.title, $0.pageIndex, 0) }
+        }
+
+        guard let document = PDFDocument(url: url), document.pageCount > 0 else { return [] }
+        let tocEnd = min(document.pageCount, 20)
+        let tocPages = recognizePages(document: document, indices: Array(0..<tocEnd))
+        let parsed = ScannedOutlineParser.parse(
+            lines: tocPages.flatMap { $0.text.split(whereSeparator: \.isNewline).map(String.init) }
+        )
+        guard let first = parsed.first else { return [] }
+
+        // The first numbered chapter is usually within the first 50 pages,
+        // but keep a little headroom for long prefaces and exam outlines.
+        let searchEnd = min(document.pageCount, max(48, min(96, first.printedPage + 40)))
+        guard searchEnd > tocEnd else { return [] }
+        let bodyPages = recognizePages(
+            document: document,
+            indices: Array(tocEnd..<searchEnd)
+        )
+        let titleToken = searchable(first.title)
+        let chapterToken = searchable("第\(first.chapterNumber)章")
+        // OCR may drop a heading's title (the real scanned language textbook
+        // does this on its first chapter), while still recognizing the chapter
+        // marker. Prefer a line that starts with that marker so a preface
+        // sentence such as “全书共分为十章。第一章……” is not mistaken for
+        // the actual chapter page.
+        let firstChapterPage = bodyPages.first(where: { page in
+            page.text
+                .split(whereSeparator: \.isNewline)
+                .map { searchable(String($0)) }
+                .contains { $0.hasPrefix(chapterToken) }
+        })?.pageIndex ?? bodyPages.first(where: {
+            titleToken.count >= 2 && searchable($0.text).contains(titleToken)
+        })?.pageIndex
+        guard let firstChapterPage else {
+            return []
+        }
+
+        // Printed page 25 on PDF page 30 means the body offset is +5. Apply
+        // that stable offset to every chapter number recovered from the TOC.
+        let offset = firstChapterPage - (first.printedPage - 1)
+        let mapped = parsed.compactMap { entry -> CachedEntry? in
+            let pageIndex = entry.printedPage - 1 + offset
+            guard (0..<document.pageCount).contains(pageIndex) else { return nil }
+            return CachedEntry(
+                title: "第\(entry.chapterNumber)章 \(entry.title)",
+                pageIndex: pageIndex
+            )
+        }
+        guard !mapped.isEmpty else { return [] }
+        save(mapped, for: cacheKey)
+        return mapped.map { ($0.title, $0.pageIndex, 0) }
+    }
+
+    private static func recognizePages(
+        document: PDFDocument,
+        indices: [Int]
+    ) -> [(pageIndex: Int, text: String)] {
+        indices.compactMap { index in
+            guard let page = document.page(at: index),
+                  let text = recognize(page: page),
+                  !text.isEmpty else { return nil }
+            return (index, text)
+        }
+    }
+
+    private static func recognize(page: PDFPage) -> String? {
+        let bounds = page.bounds(for: .mediaBox)
+        guard bounds.width > 0, bounds.height > 0 else { return nil }
+        let scale = 1_600 / max(bounds.width, bounds.height)
+        let image = page.thumbnail(
+            of: NSSize(width: bounds.width * scale, height: bounds.height * scale),
+            for: .mediaBox
+        )
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = true
+        request.recognitionLanguages = ["zh-Hans", "en-US"]
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        do {
+            try handler.perform([request])
+        } catch {
+            return nil
+        }
+        let observations = request.results ?? []
+        // A scanned table of contents is commonly two columns. Sorting the
+        // whole page by y/x interleaves “第一章 …” with “第四章 …”; split
+        // columns first, then rebuild reading lines inside each column.
+        func lines(in column: [VNRecognizedTextObservation]) -> [String] {
+            let sorted = column.sorted { lhs, rhs in
+                let dy = lhs.boundingBox.midY - rhs.boundingBox.midY
+                return abs(dy) > 0.02 ? dy > 0 : lhs.boundingBox.minX < rhs.boundingBox.minX
+            }
+            var result: [String] = []
+            var currentY: CGFloat?
+            for observation in sorted {
+                guard let candidate = observation.topCandidates(1).first?.string,
+                      !candidate.isEmpty else { continue }
+                // At this render scale adjacent OCR rows are about 0.02 apart,
+                // while fragments from one row stay within roughly 0.001.
+                // A wider threshold silently glues a chapter to its first
+                // section and makes the chapter disappear from the parser.
+                if let currentY, abs(observation.boundingBox.midY - currentY) <= 0.01,
+                   !result.isEmpty {
+                    result[result.count - 1] += " " + candidate
+                } else {
+                    result.append(candidate)
+                    currentY = observation.boundingBox.midY
+                }
+            }
+            return result
+        }
+
+        let left = observations.filter { $0.boundingBox.midX < 0.5 }
+        let right = observations.filter { $0.boundingBox.midX >= 0.5 }
+        let text = (lines(in: left) + lines(in: right)).joined(separator: "\n")
+        let normalized = ExtractedTextNormalizer.normalize(text)
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    private static func searchable(_ text: String) -> String {
+        text.lowercased().filter { !$0.isWhitespace && !$0.isPunctuation }
+    }
+
+    private static func cacheKey(for url: URL) -> String {
+        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        let modification = values?.contentModificationDate?.timeIntervalSince1970 ?? -1
+        let size = values?.fileSize ?? -1
+        return "satori.scanned-outline.\(url.standardizedFileURL.path)|\(modification)|\(size)"
+    }
+
+    private static func cachedEntries(for key: String) -> [CachedEntry]? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode([CachedEntry].self, from: data)
+    }
+
+    private static func save(_ entries: [CachedEntry], for key: String) {
+        guard let data = try? JSONEncoder().encode(entries) else { return }
+        UserDefaults.standard.set(data, forKey: key)
     }
 }
 

@@ -60,6 +60,7 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Real-PDF feedback refinement: book-level questions such as “这本书难吗？” now use whole-book context, colloquial freshness questions such as “过时了么” now trigger one-turn web verification, and a numbered chapter's first page offers “看本章路线” before detail questions without treating front matter as a chapter.
 - Reading-map labels: when an answer used an exact top-level chapter range, its history chip now names the chapter as well as the page range (for example “第六章 · 第 183–228 页”), while temporary two-page bridges remain plain page ranges.
 - Verification friction pass: “验证一下” now shows an explicit, skippable state; moving to another page cancels the old verification, and selection/quick actions start a normal reading question instead of being misread as the user's answer. Closing the understanding panel also stops any running micro-experiment.
+- Scanned-PDF navigation: when a scanned book has no native PDF outline, Satori now OCRs a bounded front-matter window, reads two-column tables of contents in column order, corrects the printed-page/PDF-page offset from the first real chapter heading, caches the result by file signature, and uses the recovered chapter map for navigation without sending the whole book to Qwen.
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 

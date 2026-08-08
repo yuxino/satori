@@ -315,6 +315,30 @@ struct SatoriCoreTests {
             ReadingScopeInference.inheritsRecentScope(for: "那有没有过时的内容"),
             "Expected freshness follow-ups to inherit the recent reading scope"
         )
+        let scannedOutline = ScannedOutlineParser.parse(lines: [
+            "第一章 概述................25",
+            "第一节 计算机发展...........25",
+            "第二章 C语言基础知识........43",
+            "第十章 文件与综合练习.......308"
+        ])
+        precondition(
+            scannedOutline == [
+                ScannedOutlineEntry(chapterNumber: 1, title: "概述", printedPage: 25),
+                ScannedOutlineEntry(chapterNumber: 2, title: "C语言基础知识", printedPage: 43),
+                ScannedOutlineEntry(chapterNumber: 10, title: "文件与综合练习", printedPage: 308)
+            ],
+            "Expected scanned table-of-contents chapter lines to parse without sections"
+        )
+        let noisyScannedOutline = ScannedOutlineParser.parse(lines: [
+            "第一章 概述 ：25",
+            "第二章 C语言基础知识• •43",
+            "第三章 数据类型、运算符和表达式 ⋯60",
+            "第十章 文件⋯ •308"
+        ])
+        precondition(
+            noisyScannedOutline.count == 4 && noisyScannedOutline[0].title == "概述",
+            "Expected OCR punctuation and spaces to stay parseable"
+        )
         precondition(
             !ReadingScopeInference.inheritsRecentScope(for: "这一页主要讲什么"),
             "Expected ordinary explanations not to inherit a stale scope"
