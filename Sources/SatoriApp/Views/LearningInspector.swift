@@ -279,8 +279,11 @@ struct LearningInspector: View {
             default:
                 contextMode = .page
             }
-            let anchoredPrompt = "\(prompt)\n\n选中的原文：\n「\(text)」"
-            question += question.isEmpty ? anchoredPrompt : "\n\n" + anchoredPrompt
+            // The selected passage is already carried as a separate, bounded
+            // request item below. Keep only the intent in the editable draft;
+            // duplicating the full passage here made long selections inflate
+            // the prompt and weakened the reader's actual question.
+            question += question.isEmpty ? prompt : "\n\n" + prompt
             DispatchQueue.main.async {
                 isQuestionFocused = true
             }
