@@ -3,6 +3,29 @@ import Foundation
 /// Chooses a bounded set of pages that preserves a book's shape when a
 /// whole-document request cannot include every page in the model context.
 public enum ReadingSamplePlan {
+    /// For a short page bridge, put the page the reader is looking at first,
+    /// then prefer its forward continuation before filling the remaining
+    /// pages. This matters for scanned code: the next page often contains the
+    /// rest of the program, while an earlier page may only be surrounding text.
+    public static func pageIndicesPrioritizingAnchor(
+        in pageRange: ClosedRange<Int>,
+        anchorPage: Int?
+    ) -> [Int] {
+        let ordered = Array(pageRange)
+        guard !ordered.isEmpty, let anchorPage,
+              pageRange.contains(anchorPage) else { return ordered }
+
+        var prioritized = [anchorPage]
+        if pageRange.contains(anchorPage + 1) {
+            prioritized.append(anchorPage + 1)
+        }
+        if pageRange.contains(anchorPage - 1) {
+            prioritized.append(anchorPage - 1)
+        }
+        prioritized.append(contentsOf: ordered.filter { !prioritized.contains($0) })
+        return prioritized
+    }
+
     /// Chooses a very small visual sample for a scanned chapter route.
     /// The text route already carries many bounded samples; images should only
     /// establish the chapter's visual grammar without turning the first answer

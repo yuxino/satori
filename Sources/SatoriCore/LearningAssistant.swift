@@ -695,7 +695,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         ].contains { normalized.contains($0) }
     }
 
-    private static func isFullReconstructionRequest(for request: String) -> Bool {
+    public static func isFullReconstructionRequest(for request: String) -> Bool {
         let normalized = request
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()

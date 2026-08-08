@@ -86,7 +86,12 @@ enum PDFPageContextExtractor {
             case let .page(pageIndex):
                 extracted = await extractPage(from: url, pageIndex: pageIndex, qwenConfiguration: qwenConfiguration)
             case let .pageRange(range):
-                extracted = await extractPageRange(from: url, range: range, qwenConfiguration: qwenConfiguration)
+                extracted = await extractPageRange(
+                    from: url,
+                    range: range,
+                    qwenConfiguration: qwenConfiguration,
+                    anchorPage: anchorPage
+                )
             case let .chapterMap(range):
                 extracted = await extractChapterMap(from: url, range: range)
             case .wholeDocument:
@@ -124,7 +129,8 @@ enum PDFPageContextExtractor {
     private static func extractPageRange(
         from url: URL,
         range: ClosedRange<Int>,
-        qwenConfiguration: QwenConfiguration?
+        qwenConfiguration: QwenConfiguration?,
+        anchorPage: Int?
     ) async -> LearningPageContent? {
         let didAccess = url.startAccessingSecurityScopedResource()
         defer {
@@ -163,7 +169,6 @@ enum PDFPageContextExtractor {
         }
 
         let trimmed = assembled.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
         // A short bridge is allowed to carry a couple of visual pages. This
         // catches textbook layouts where the preceding page says “见图 6-2”
         // but the actual figure starts at the top of the next page. Chapter
@@ -171,8 +176,11 @@ enum PDFPageContextExtractor {
         if range.count <= 4 {
             let textByPage = Dictionary(uniqueKeysWithValues: pages)
             var visualPages: [LearningPageImage] = []
-            let rangeIndices = Array(range.lowerBound...clampedEnd)
-            for pageIndex in rangeIndices {
+            let prioritizedIndices = ReadingSamplePlan.pageIndicesPrioritizingAnchor(
+                in: range.lowerBound...clampedEnd,
+                anchorPage: anchorPage
+            )
+            for pageIndex in prioritizedIndices {
                 let currentText = textByPage[pageIndex] ?? ""
                 let previousText: String
                 if let inRange = textByPage[pageIndex - 1] {
@@ -199,9 +207,17 @@ enum PDFPageContextExtractor {
                 if visualPages.count == 2 { break }
             }
             if !visualPages.isEmpty {
-                return .textAndImages(String(trimmed.prefix(limit)), visualPages)
+                return .textAndImages(
+                    String(trimmed.prefix(limit)),
+                    visualPages.sorted { $0.pageIndex < $1.pageIndex }
+                )
             }
         }
+        // OCR can fail for a whole short bridge (blurred scan, unusual font,
+        // or a page made only of a diagram). Do not discard the only reliable
+        // evidence just because the text layer is empty; the image path above
+        // is intentionally the final fallback for these pages.
+        guard !trimmed.isEmpty else { return nil }
         return .text(String(trimmed.prefix(limit)))
     }
 

@@ -254,6 +254,22 @@ struct SatoriCoreTests {
         precondition(QwenLearningAssistant.responseTokenBudget(for: "解释这一页") == 1_400, "Expected ordinary explanations to keep the normal budget")
         precondition(QwenLearningAssistant.responseTokenBudget(for: "解释我选中的这段内容", hasSelection: true) == 700, "Expected selected-passage explanations to stay compact by default")
         precondition(QwenLearningAssistant.responseTokenBudget(for: "完整代码", hasSelection: true) == 1_400, "Expected explicit complete-code requests to keep enough room")
+        precondition(
+            QwenLearningAssistant.isFullReconstructionRequest(for: "请给我完整代码")
+                && QwenLearningAssistant.isFullReconstructionRequest(for: "完整公式")
+                && !QwenLearningAssistant.isFullReconstructionRequest(for: "解释这段代码"),
+            "Expected only explicit reconstruction requests to expand across page boundaries"
+        )
+        precondition(
+            ReadingScopeInference.adjacentPageRange(around: 52, pageCount: 347) == 51...53
+                && ReadingScopeInference.adjacentPageRange(around: 0, pageCount: 2) == 0...1,
+            "Expected reconstruction context to stay local and clamp at book edges"
+        )
+        precondition(
+            ReadingSamplePlan.pageIndicesPrioritizingAnchor(in: 51...53, anchorPage: 52) == [52, 53, 51]
+                && ReadingSamplePlan.pageIndicesPrioritizingAnchor(in: 51...53, anchorPage: nil) == [51, 52, 53],
+            "Expected scanned continuation images to prioritize the current and forward pages"
+        )
         // Real system.pdf outline: Chapter 6 starts at PDF page 183 (index 182)
         // and Chapter 7 starts at PDF page 228 (index 227).
         precondition(

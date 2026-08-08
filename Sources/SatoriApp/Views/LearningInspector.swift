@@ -2145,6 +2145,19 @@ struct LearningInspector: View {
             effectiveScope = scope
         }
 
+        // A student asking for the “完整代码/公式” is usually looking at a
+        // page break, not asking for a single-page OCR transcription. Pull in
+        // only the adjacent pages when the reader has left scope selection on
+        // intelligent mode. Explicit “无上下文/指定范围” choices still win.
+        if contextMode == .automatic,
+           QwenLearningAssistant.isFullReconstructionRequest(for: request),
+           let adjacentRange = ReadingScopeInference.adjacentPageRange(
+               around: targetPageIndex,
+               pageCount: pageCount
+           ) {
+            effectiveScope = .pageRange(start: adjacentRange.lowerBound, end: adjacentRange.upperBound)
+        }
+
         // Old archived turns may carry a range produced before chapter
         // boundaries were corrected (for example, a sixth-chapter answer
         // anchored to the end of chapter five). A retry must not blindly

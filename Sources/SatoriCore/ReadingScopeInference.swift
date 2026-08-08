@@ -3,6 +3,22 @@ import Foundation
 /// Infers the smallest useful PDF scope from a natural-language reading request.
 /// The UI can still override this with an explicit context choice.
 public enum ReadingScopeInference {
+    /// A deliberate request to reconstruct code or a formula usually crosses
+    /// a printed page boundary. Keep the expansion small and local so the
+    /// reader gets the continuation without turning a focused request into a
+    /// chapter-wide extraction.
+    public static func adjacentPageRange(
+        around pageIndex: Int,
+        pageCount: Int,
+        radius: Int = 1
+    ) -> ClosedRange<Int>? {
+        guard pageCount > 0, radius >= 0 else { return nil }
+        let anchor = min(max(pageIndex, 0), pageCount - 1)
+        let start = max(0, anchor - radius)
+        let end = min(pageCount - 1, anchor + radius)
+        return start...end
+    }
+
     /// A terse follow-up can inherit a previous range only while the reader is
     /// still looking at that range. This prevents “有多少页” after jumping to
     /// another chapter from silently answering for the old chapter.
