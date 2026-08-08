@@ -211,6 +211,10 @@ struct SatoriCoreTests {
         )
         precondition(QwenLearningAssistant.responseTokenBudget(for: "一句话说清楚") == 260, "Expected one-sentence answers to stay compact")
         precondition(
+            QwenLearningAssistant.responseTokenBudget(for: "请简要设计一个 30 秒内能完成的微实验") == 650,
+            "Expected explicit micro-experiments to keep enough room for all safe steps"
+        )
+        precondition(
             QwenLearningAssistant.isCompactRequest(for: "简化，字太多")
                 && QwenLearningAssistant.responseTokenBudget(for: "简化，字太多") == 420,
             "Expected simplify requests to use a genuinely short reading card"
@@ -677,6 +681,24 @@ struct SatoriCoreTests {
         ).explain(request: "核对这页的术语", pageIndex: 44)
         precondition(degradedTextResponse.text == "fixture explanation", "Expected damaged text to travel with a page image")
 
+        let completeCodeResponse = await QwenLearningAssistant(
+            apiKey: "fixture-key",
+            pageContent: .textAndImage(
+                "【第 54 页】\nint main(void) {\n    scanf(\"%d\", &n);",
+                Data([0xFF, 0xD8, 0xFF])
+            ),
+            transport: FixtureAssistantTransport(
+                expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
+                expectedModelID: "qwen3.8-max",
+                expectedImageCount: 1,
+                expectsWebSearch: false,
+                expectedHistoryTurnCount: 0,
+                expectsVisualEvidenceInstruction: true,
+                expectsReconstructionGuard: true
+            )
+        ).explain(request: "完整代码", pageIndex: 53)
+        precondition(completeCodeResponse.text == "fixture explanation", "Expected complete-code requests to reject guessed OCR reconstruction")
+
         let exercisePageResponse = await QwenLearningAssistant(
             apiKey: "fixture-key",
             // Real system.pdf: PDF page 226 (printed page 219) starts the
@@ -1128,6 +1150,7 @@ private struct FixtureAssistantTransport: AssistantTransport {
     var expectsExercisePage: Bool = false
     var expectsVisualEvidenceInstruction: Bool = false
     var expectsImageOnlyPageInstruction: Bool = false
+    var expectsReconstructionGuard: Bool = false
     var expectedMaxOutputTokens: Int?
     var maximumRequestBodyBytes: Int?
 
@@ -1201,6 +1224,10 @@ private struct FixtureAssistantTransport: AssistantTransport {
                 "Expected image-only pages to carry page-type and evidence guidance"
             )
         }
+        let reconstructionMarker = content.filter { $0["type"] as? String == "input_text" }
+            .compactMap { $0["text"] as? String }
+            .first { $0.hasPrefix("用户要求完整代码/完整程序/完整公式") }
+        precondition((reconstructionMarker != nil) == expectsReconstructionGuard, "Expected complete-code requests to carry reconstruction safety guidance")
         let selectionText = content.filter { $0["type"] as? String == "input_text" }
             .compactMap { $0["text"] as? String }
             .first { $0.hasPrefix("用户在 PDF 中选中的原文") }

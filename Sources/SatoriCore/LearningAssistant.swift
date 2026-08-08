@@ -273,14 +273,18 @@ public struct QwenLearningAssistant: LearningAssistant {
         if isQuickClarificationRequest(for: request) {
             return 360
         }
+        // The experiment prompt intentionally contains “简要”, but it still
+        // needs enough room for purpose → operation → observation → concept.
+        // Keep this explicit hands-on path ahead of the generic compression
+        // rule so a safe micro-experiment is not truncated mid-step.
+        if normalized.contains("微实验") || normalized.contains("30 秒") {
+            return 650
+        }
         if isCompactRequest(for: request) {
             return 420
         }
         if ["阅读路线图", "阅读地图", "概念怎样递进", "看本章路线"].contains(where: normalized.contains) {
             return 900
-        }
-        if normalized.contains("微实验") || normalized.contains("30 秒") {
-            return 650
         }
         if hasSelection,
            !["完整代码", "逐行", "详细", "深入", "推导", "全部"].contains(where: normalized.contains) {
@@ -613,6 +617,13 @@ public struct QwenLearningAssistant: LearningAssistant {
                 imageURL: nil
             ))
         }
+        if Self.isFullReconstructionRequest(for: question) {
+            content.append(.init(
+                type: "input_text",
+                text: "用户要求完整代码/完整程序/完整公式。只有当前请求提供的页面、选区或附图能够逐项核对全部 token 时，才可以整理完整版本；如果内容跨页、被截断、模糊或 OCR 缺失，必须先说明缺少哪一页/哪几行以及哪些 token 不确定，不要凭常识补齐，不要输出“大致如下”，也不要把猜测版本冒充原文。可以给出已确认片段和继续核对的路径。",
+                imageURL: nil
+            ))
+        }
         if isVerificationResponse {
             content.append(.init(
                 type: "input_text",
@@ -682,6 +693,16 @@ public struct QwenLearningAssistant: LearningAssistant {
             "这一页的核心", "这页的核心", "这一页主要内容", "这页主要内容", "解释这一页",
             "解释这页", "这是什么"
         ].contains { normalized.contains($0) }
+    }
+
+    private static func isFullReconstructionRequest(for request: String) -> Bool {
+        let normalized = request
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+        return ["完整代码", "完整程序", "完整源码", "全部代码", "所有代码", "完整公式"].contains {
+            normalized.contains($0)
+        }
     }
 
     /// A page of exercises needs a different reading stance from a page of
