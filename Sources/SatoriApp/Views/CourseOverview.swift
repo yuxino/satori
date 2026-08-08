@@ -287,6 +287,12 @@ private struct DocumentWorkspace: View {
         chapters.last { $0.pageIndex <= currentPageIndex }
     }
 
+    /// Keep the top-level chapter visible while a section title is selected.
+    /// On a long textbook page, the section alone is not enough orientation.
+    private var currentTopLevelChapter: BookChapter? {
+        chapters.last { $0.depth == 0 && $0.pageIndex <= currentPageIndex }
+    }
+
     private func persistPanelSize() {
         UserDefaults.standard.set(Double(panelWidth), forKey: "satori.workspace.panelWidth.\(document.id.uuidString)")
         UserDefaults.standard.set(Double(panelHeight), forKey: "satori.workspace.panelHeight.\(document.id.uuidString)")
@@ -571,9 +577,18 @@ private struct DocumentWorkspace: View {
             HStack(spacing: 7) {
                 Image(systemName: "list.bullet.indent")
                     .foregroundStyle(SatoriTheme.accent)
-                Text(currentChapter?.title ?? "目录")
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(currentTopLevelChapter?.title ?? currentChapter?.title ?? "目录")
+                        .font(.callout.weight(.medium))
+                        .lineLimit(1)
+                    if let section = currentChapter,
+                       section.id != currentTopLevelChapter?.id {
+                        Text(section.title)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
                 Image(systemName: "chevron.down")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.tertiary)
@@ -585,7 +600,10 @@ private struct DocumentWorkspace: View {
         .buttonStyle(.plain)
         .keyboardShortcut("t", modifiers: .command)
         .frame(maxWidth: 180, alignment: .leading)
-        .help(currentChapter.map { "目录（⌘T）· 当前章节：\($0.title)" } ?? "目录（⌘T）")
+        .help(currentTopLevelChapter.map { chapter in
+            let section = currentChapter.map { " · \($0.title)" } ?? ""
+            return "目录（⌘T）· 当前章节：\(chapter.title)\(section)"
+        } ?? "目录（⌘T）")
     }
 
     private var documentMenu: some View {
