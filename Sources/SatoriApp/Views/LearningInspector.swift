@@ -1669,10 +1669,15 @@ struct LearningInspector: View {
         // meaningful range; otherwise the thread abruptly collapses to one
         // current page and loses the chapter map.
         guard ReadingScopeInference.inheritsRecentScope(for: request) else { return nil }
-        return turns.reversed().compactMap(\.contextScope).first { scope in
-            if case .none = scope { return false }
-            return true
-        }
+        return turns.reversed().compactMap { turn -> LearningContextScope? in
+            guard let scope = turn.contextScope,
+                  ReadingScopeInference.isRecentScopeRelevant(
+                      scope,
+                      turnPageIndex: turn.pageIndex,
+                      currentPageIndex: pageIndex
+                  ) else { return nil }
+            return scope
+        }.first
     }
 
     /// “这一章”跟随当前阅读位置；“第六章”则优先匹配目录中的明确章节，

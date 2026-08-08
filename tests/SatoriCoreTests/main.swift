@@ -332,6 +332,30 @@ struct SatoriCoreTests {
             "Expected freshness follow-ups to inherit the recent reading scope"
         )
         precondition(
+            ReadingScopeInference.isRecentScopeRelevant(
+                .pageRange(start: 10, end: 20),
+                turnPageIndex: 12,
+                currentPageIndex: 18
+            ) && !ReadingScopeInference.isRecentScopeRelevant(
+                .pageRange(start: 10, end: 20),
+                turnPageIndex: 12,
+                currentPageIndex: 21
+            ),
+            "Expected chapter follow-ups to stop inheriting after a chapter jump"
+        )
+        precondition(
+            ReadingScopeInference.isRecentScopeRelevant(
+                .wholeDocument,
+                turnPageIndex: 12,
+                currentPageIndex: 291
+            ) && !ReadingScopeInference.isRecentScopeRelevant(
+                .page,
+                turnPageIndex: 12,
+                currentPageIndex: 13
+            ),
+            "Expected whole-book scope to survive navigation but page scope not to"
+        )
+        precondition(
             ReadingScopeInference.scope(
                 for: "下一页讲什么？",
                 pageIndex: 10,

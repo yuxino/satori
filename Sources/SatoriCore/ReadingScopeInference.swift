@@ -3,6 +3,26 @@ import Foundation
 /// Infers the smallest useful PDF scope from a natural-language reading request.
 /// The UI can still override this with an explicit context choice.
 public enum ReadingScopeInference {
+    /// A terse follow-up can inherit a previous range only while the reader is
+    /// still looking at that range. This prevents “有多少页” after jumping to
+    /// another chapter from silently answering for the old chapter.
+    public static func isRecentScopeRelevant(
+        _ scope: LearningContextScope,
+        turnPageIndex: Int,
+        currentPageIndex: Int
+    ) -> Bool {
+        switch scope {
+        case .none:
+            return false
+        case .page:
+            return turnPageIndex == currentPageIndex
+        case let .pageRange(start, end):
+            return (min(start, end)...max(start, end)).contains(currentPageIndex)
+        case .wholeDocument:
+            return true
+        }
+    }
+
     /// Short metadata questions such as “有多少页” usually refer to the
     /// range the reader just asked about. The UI uses this only when there is
     /// a recent completed turn with a usable scope, so an isolated question
