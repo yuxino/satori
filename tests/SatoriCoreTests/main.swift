@@ -376,6 +376,24 @@ struct SatoriCoreTests {
         )
         precondition(
             ReadingScopeInference.scope(
+                for: "接上文讲讲这一页",
+                pageIndex: 187,
+                chapterRange: 182...227,
+                sectionRange: 182...188
+            ) == .pageRange(start: 186, end: 187),
+            "Expected direct '接上文' wording to include the adjacent page"
+        )
+        precondition(
+            ReadingScopeInference.scope(
+                for: "跟上文怎么联系",
+                pageIndex: 187,
+                chapterRange: 182...227,
+                sectionRange: 182...188
+            ) == .pageRange(start: 186, end: 187),
+            "Expected colloquial '跟上文' wording to include the adjacent page"
+        )
+        precondition(
+            ReadingScopeInference.scope(
                 for: "这一页的磁盘地址是什么意思",
                 pageIndex: 187,
                 chapterRange: 182...227,
