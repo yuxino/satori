@@ -54,7 +54,7 @@ The supplied PDFs were imported for local verification: `lang.pdf` and `software
 
 ## Next milestone
 
-Finish the unlocked end-to-end `system.pdf` reading pass: real answer, “验证一下” follow-up, return to the anchored passage, and a page transition. Measure first-token latency only after the Keychain connection is healthy; the current investigation found that the earlier apparent PDF delay was actually a blocked Keychain read. Then add opt-in micro experiments for concepts that genuinely benefit from manipulation; do not turn the reader into a general code execution surface. OCR-based editable table-of-contents extraction remains useful for scanned PDFs without outlines (`lang.pdf`, `software.pdf`), but it follows the comprehension loop rather than leading it.
+Finish the unlocked end-to-end `system.pdf` reading pass: real answer, “验证一下” follow-up, return to the anchored passage, and a page transition. Measure first-token latency only after the Keychain connection is healthy; the current investigation found that the earlier apparent PDF delay was actually a blocked Keychain read. Validate the opt-in micro experiments on concepts that genuinely benefit from manipulation; keep them short and safe, and do not turn the reader into a general code execution surface. OCR-based editable table-of-contents extraction remains useful for scanned PDFs without outlines (`lang.pdf`, `software.pdf`), but it follows the comprehension loop rather than leading it.
 
 ## Open questions
 
