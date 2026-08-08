@@ -290,26 +290,36 @@ struct PDFReaderView: NSViewRepresentable {
             guard let view = observedView, let document = view.document, let page = view.currentPage else { return }
             let pageIndex = document.index(for: page)
             currentPageIndex.wrappedValue = pageIndex
-            reportPosition(in: view, pageIndex: pageIndex)
+            reportPosition(in: view, page: page, pageIndex: pageIndex)
         }
 
         /// Fires on scroll/zoom too; debounce so a long scroll within a tall
         /// page still lands a real offset without spamming saves.
         @MainActor @objc private func viewportChanged() {
-            guard let view = observedView, let page = view.currentPage else { return }
-            let pageIndex = view.document?.index(for: page) ?? currentPageIndex.wrappedValue
+            guard observedView != nil else { return }
             offsetDebounce?.invalidate()
             offsetDebounce = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
                 Task { @MainActor in
                     guard let self, let observed = self.observedView else { return }
-                    self.reportPosition(in: observed, pageIndex: pageIndex)
+                    // Resolve page and offset together after the debounce.
+                    // Capturing the page index before the delay can pair page A
+                    // with page B's offset when a fast scroll crosses a boundary.
+                    self.reportPosition(in: observed)
                     self.settleToolbar(in: observed)
                 }
             }
         }
 
-        @MainActor private func reportPosition(in view: PDFView, pageIndex: Int) {
-            let offset = visibleOffset(in: view)
+        @MainActor private func reportPosition(in view: PDFView) {
+            guard let document = view.document, let page = view.currentPage else { return }
+            reportPosition(in: view, page: page, pageIndex: document.index(for: page))
+        }
+
+        /// Keep the page and offset from the same PDFKit snapshot. This is
+        /// important in continuous mode, where visible-page notifications and
+        /// scroll notifications can arrive in different orders.
+        @MainActor private func reportPosition(in view: PDFView, page: PDFPage, pageIndex: Int) {
+            let offset = visibleOffset(in: view, page: page)
             // 一次翻页会先后触发 PDFViewPageChanged 与滚动/可见页通知；偏移未变时
             // 跳过，避免重复写盘和重复记录「已读页」。
             if pageIndex == lastReportedPageIndex, abs(offset - lastReportedOffset) < 0.001 { return }
