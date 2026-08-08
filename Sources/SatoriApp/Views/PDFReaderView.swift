@@ -228,8 +228,12 @@ struct PDFReaderView: NSViewRepresentable {
                 regionCaptureView?.removeFromSuperview()
                 regionCaptureView = nil
             }
-            guard let document = view.document,
-                  let page = view.currentPage else { return }
+            guard let document = view.document else { return }
+            let page = view.page(
+                for: NSPoint(x: viewRect.midX, y: viewRect.midY),
+                nearest: true
+            )
+            guard let page else { return }
             let pageRectInView = view.convert(page.bounds(for: .mediaBox), from: page)
             let clipped = viewRect.intersection(pageRectInView)
             guard clipped.width >= 24, clipped.height >= 24 else { return }
