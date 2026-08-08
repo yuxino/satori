@@ -841,6 +841,13 @@ struct SatoriCoreTests {
                 && CodeRunner.experimentLanguages == [.python, .c, .cpp],
             "Expected shell not to be offered as an experiment language"
         )
+        precondition(
+            CodeRunner.languageHint(for: "#include <stdio.h>\nint main(void) { printf(\"hi\"); }") == .c
+                && CodeRunner.languageHint(for: "std::cout << 42;") == .cpp
+                && CodeRunner.languageHint(for: "print(2 + 2)") == .python
+                && CodeRunner.languageHint(for: "这是一段普通教材解释") == nil,
+            "Expected conservative language hints for selection-to-experiment routing"
+        )
 
         // Code runner: an answer's example snippet can be executed locally.
         let pythonRun = await CodeRunner.run(

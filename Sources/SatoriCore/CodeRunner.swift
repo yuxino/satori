@@ -105,10 +105,10 @@ public enum CodeRunner {
                 return .swift
             default:
                 return nil
-            }
         }
+    }
 
-        var executable: String {
+    var executable: String {
             switch self {
             case .c: "/usr/bin/clang"
             case .cpp: "/usr/bin/clang++"
@@ -130,6 +130,30 @@ public enum CodeRunner {
     /// remain decodable for older callers, but are deliberately not offered as
     /// experiment languages.
     public static let experimentLanguages: [Language] = [.python, .c, .cpp]
+
+    /// Gives the selection-to-experiment route a conservative language hint.
+    /// It is intentionally only a hint: `safety(for:language:)` remains the
+    /// final gate, and the reader still has to press Run.
+    public static func languageHint(for code: String) -> Language? {
+        let normalized = code.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return nil }
+        if normalized.contains("std::") || normalized.contains("cout <<") || normalized.contains("cin >>") {
+            return .cpp
+        }
+        if normalized.contains("#include")
+            || normalized.contains("int main")
+            || normalized.contains("printf(")
+            || normalized.contains("scanf(") {
+            return .c
+        }
+        if normalized.contains("def ")
+            || normalized.contains("print(")
+            || normalized.contains("import math")
+            || normalized.contains("input(") {
+            return .python
+        }
+        return nil
+    }
 
     /// Defense-in-depth gate for both the answer-card runner and the secondary
     /// experiment space. A blocked snippet can still be copied out, but Satori

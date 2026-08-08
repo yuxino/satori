@@ -151,6 +151,7 @@ struct LearningInspector: View {
 
     @State private var runCode = ""
     @State private var runLanguage: CodeRunner.Language = .python
+    @State private var runSourcePage: Int?
     @State private var runOutput: CodeRunResult?
     @State private var isRunning = false
     @State private var runTask: Task<Void, Never>?
@@ -319,6 +320,39 @@ struct LearningInspector: View {
               request.url == nil || request.url == documentURL else { return }
         selectMode(.run)
         runCode = text
+        runSourcePage = request.pageIndex
+    }
+
+    /// A reader who has already selected code often says only “运行”. Route
+    /// that short action into the safe experiment space instead of spending a
+    /// model turn explaining how terminals work. It never runs automatically;
+    /// the reader reviews the snippet and presses Run explicitly.
+    private func routeRunIntentIfPossible(for request: String) -> Bool {
+        guard !pendingVerification,
+              let code = activeSelectionText?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !code.isEmpty,
+              let language = CodeRunner.languageHint(for: code),
+              isRunIntent(request) else { return false }
+        selectMode(.run)
+        runCode = code
+        runLanguage = language
+        runSourcePage = activeSelectionPage
+        runOutput = nil
+        question = ""
+        pendingSelectionPage = nil
+        return true
+    }
+
+    private func isRunIntent(_ request: String) -> Bool {
+        let normalized = request
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+        guard normalized.count <= 20,
+              !["为什么", "怎么写", "如何写", "运行过程", "执行过程"].contains(where: normalized.contains)
+        else { return false }
+        return ["运行", "执行", "运行一下", "执行一下", "跑一下", "跑跑看", "试着运行", "帮我运行"]
+            .contains { normalized == $0 || normalized.contains($0) }
     }
 
     private var inspectorHeader: some View {
@@ -876,6 +910,12 @@ struct LearningInspector: View {
                         .tint(SatoriTheme.accent)
                         .disabled((runCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             || !CodeRunner.safety(for: runCode, language: runLanguage).isAllowed) && !isRunning)
+                    }
+
+                    if let runSourcePage {
+                        Label("来自第 \(runSourcePage + 1) 页的选区；请先检查代码，再运行", systemImage: "text.quote")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
 
                     ZStack(alignment: .topLeading) {
@@ -1956,6 +1996,10 @@ struct LearningInspector: View {
     ) {
         let request = (suppliedQuestion ?? question).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty, !isThinking else { return }
+
+        if suppliedQuestion == nil, !verification, routeRunIntentIfPossible(for: request) {
+            return
+        }
 
         // Only a deliberate send after explicitly entering answer mode answers
         // the verification prompt. Ordinary composer questions, selection
