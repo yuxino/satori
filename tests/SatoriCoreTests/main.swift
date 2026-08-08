@@ -444,6 +444,10 @@ struct SatoriCoreTests {
             "Expected conclusion-style follow-ups to inherit the recent reading scope"
         )
         precondition(
+            !ReadingScopeInference.inheritsRecentScope(for: "所以本页怎么做"),
+            "Expected a concrete current-page question not to inherit a stale broad scope"
+        )
+        precondition(
             ReadingScopeInference.isRecentScopeRelevant(
                 .pageRange(start: 10, end: 20),
                 turnPageIndex: 12,

@@ -69,7 +69,8 @@ public enum ReadingScopeInference {
             "过时", "还适用", "适用吗", "现在还能", "需要更新",
             // Natural conclusion checks after a chapter/book answer, such as
             // “所以难度不高？” or “所以呢，核心考点？”.
-            "所以", "那呢", "那么呢", "这样的话", "难度", "对吗", "对么", "真的吗"
+            "所以呢", "所以难度", "所以核心", "所以考点", "所以是不是",
+            "那呢", "那么呢", "这样的话", "难度", "对吗", "对么", "真的吗"
         ].contains(where: normalized.contains)
     }
 
