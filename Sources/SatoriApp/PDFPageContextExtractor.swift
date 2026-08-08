@@ -84,7 +84,11 @@ enum PDFPageContextExtractor {
             case let .pageRange(range):
                 extracted = await extractPageRange(from: url, range: range, qwenConfiguration: qwenConfiguration)
             case .wholeDocument:
-                extracted = await extractWholeDocument(from: url, anchorPage: anchorPage)
+                extracted = await extractWholeDocument(
+                    from: url,
+                    anchorPage: anchorPage,
+                    qwenConfiguration: qwenConfiguration
+                )
             case .selection, .none:
                 extracted = nil
             }
@@ -240,7 +244,11 @@ enum PDFPageContextExtractor {
         return normalized.isEmpty ? nil : normalized
     }
 
-    private static func extractWholeDocument(from url: URL, anchorPage: Int?) async -> LearningPageContent? {
+    private static func extractWholeDocument(
+        from url: URL,
+        anchorPage: Int?,
+        qwenConfiguration: QwenConfiguration?
+    ) async -> LearningPageContent? {
         let didAccess = url.startAccessingSecurityScopedResource()
         defer {
             if didAccess { url.stopAccessingSecurityScopedResource() }
@@ -261,15 +269,27 @@ enum PDFPageContextExtractor {
         // 整本书也必须先保证当前阅读位置附近在上下文里；否则前 6 万字符
         // 会被书的开头吃完，用户在第 188 页提问时却拿不到眼前内容。
         // 同时把附近页排到 OCR 队列前面，扫描版也优先识别当前页。
-        let extractionOrder = nearbyPages + allPages.filter { !nearbySet.contains($0) }
-        let pages = await extractPagesConcurrently(
+        // The nearby pages are the only pages the reader is looking at now;
+        // give those scanned pages the better Qwen OCR path when a connection
+        // is available. The rest of a whole-book pass stays local and bounded
+        // so asking for a book overview never turns into dozens of OCR calls.
+        let nearbyResults = await extractPagesConcurrently(
             document: document,
-            indices: extractionOrder,
+            indices: nearbyPages,
+            qwenConfiguration: qwenConfiguration,
+            useQwenOCR: qwenConfiguration != nil,
+            ocrBudget: nil,
+            concurrency: 3
+        )
+        let remainingResults = await extractPagesConcurrently(
+            document: document,
+            indices: allPages.filter { !nearbySet.contains($0) },
             qwenConfiguration: nil,
             useQwenOCR: false,
             ocrBudget: OCRBudget(40),
             concurrency: 3
         )
+        let pages = nearbyResults + remainingResults
 
         let orderedPages = nearbyPages.compactMap { index in
             pages.first { $0.pageIndex == index }
