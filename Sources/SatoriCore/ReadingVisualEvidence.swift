@@ -22,4 +22,20 @@ public enum ReadingVisualEvidence {
         mentionsVisualReference(in: currentText)
             || mentionsVisualReference(in: String(previousText.suffix(800)))
     }
+
+    /// Short page bridges also need an image when the PDF has no trustworthy
+    /// native text layer. OCR output may still be available in `currentText`,
+    /// but the original page is the only way to verify a diagram, code block,
+    /// formula, or table after an OCR miss.
+    public static func requiresPageImage(
+        currentText: String,
+        previousText: String = "",
+        nativePageText: String
+    ) -> Bool {
+        requiresPageImage(currentText: currentText, previousText: previousText)
+            || {
+                let normalized = ExtractedTextNormalizer.normalize(nativePageText)
+                return normalized.count < 40 || ExtractedTextNormalizer.likelyDegraded(normalized)
+            }()
+    }
 }

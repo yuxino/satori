@@ -171,7 +171,8 @@ enum PDFPageContextExtractor {
         if range.count <= 4 {
             let textByPage = Dictionary(uniqueKeysWithValues: pages)
             var visualPages: [LearningPageImage] = []
-            for pageIndex in pages.map(\.pageIndex) {
+            let rangeIndices = Array(range.lowerBound...clampedEnd)
+            for pageIndex in rangeIndices {
                 let currentText = textByPage[pageIndex] ?? ""
                 let previousText: String
                 if let inRange = textByPage[pageIndex - 1] {
@@ -183,10 +184,15 @@ enum PDFPageContextExtractor {
                 } else {
                     previousText = ""
                 }
-                guard ReadingVisualEvidence.requiresPageImage(
-                          currentText: currentText,
-                          previousText: previousText
-                      ),
+                // For a short scan bridge, an OCR miss must not turn into a
+                // dead end. The original page image is the only reliable
+                // evidence left, especially for a flowchart or a code block.
+                let needsImage = ReadingVisualEvidence.requiresPageImage(
+                    currentText: currentText,
+                    previousText: previousText,
+                    nativePageText: document.page(at: pageIndex)?.string ?? ""
+                )
+                guard needsImage,
                       let page = document.page(at: pageIndex),
                       let jpeg = renderPageJPEG(page) else { continue }
                 visualPages.append(.init(pageIndex: pageIndex, jpegData: jpeg))

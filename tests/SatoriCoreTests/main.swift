@@ -512,6 +512,22 @@ struct SatoriCoreTests {
             "Expected a figure that starts on the next page to carry the next page image"
         )
         precondition(
+            ReadingVisualEvidence.requiresPageImage(
+                currentText: "",
+                previousText: "",
+                nativePageText: ""
+            ),
+            "Expected an OCR-missed scan page to keep its original image in a short bridge"
+        )
+        precondition(
+            !ReadingVisualEvidence.requiresPageImage(
+                currentText: "文件系统负责存储、检索和更新",
+                previousText: "",
+                nativePageText: "文件系统负责存储、检索和更新。磁盘和文件目录共同提供稳定的访问接口，并支持按名称查找、按地址定位以及对内容进行修改。"
+            ),
+            "Expected ordinary native-text bridge pages to remain text-only"
+        )
+        precondition(
             !ReadingVisualEvidence.requiresPageImage(currentText: "文件系统负责存储、检索和更新"),
             "Expected ordinary prose to stay text-only"
         )
