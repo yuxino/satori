@@ -238,6 +238,15 @@ struct SatoriCoreTests {
         )
         precondition(
             ReadingScopeInference.scope(
+                for: "这本书第几页有磁盘内容",
+                pageIndex: 187,
+                chapterRange: 182...224,
+                sectionRange: 186...188
+            ) == nil,
+            "Expected a book page lookup not to trigger whole-book context"
+        )
+        precondition(
+            ReadingScopeInference.scope(
                 for: "上一页和这一页怎么连起来",
                 pageIndex: 187,
                 chapterRange: 182...224,

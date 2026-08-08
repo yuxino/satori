@@ -936,7 +936,7 @@ struct LearningInspector: View {
             VStack(spacing: SatoriTheme.Spacing.sm) {
                 ForEach(quickPrompts, id: \.self) { prompt in
                     // 快捷提问就是围绕当前页的，显式带上页上下文；
-                    // 输入框里手打的问题也默认以当前页为依据。
+                    // 输入框里手打的问题走智能范围；没有章节/跨页意图时回到当前页。
                     QuickPromptButton(prompt: prompt) { askAssistant(prompt, scope: .page) }
                 }
             }
@@ -1410,7 +1410,7 @@ struct LearningInspector: View {
         .background(.bar)
     }
 
-    /// 提问参考上下文选择：默认锁定当前页，需要时再扩展到章节/多页/整本书。
+    /// 提问参考上下文选择：默认按问题智能选择，需要时仍可明确指定范围。
     private var contextScopeRow: some View {
         HStack(spacing: SatoriTheme.Spacing.sm) {
             Menu {
@@ -1431,7 +1431,7 @@ struct LearningInspector: View {
             .menuStyle(.borderlessButton)
             .font(.caption)
             .foregroundStyle(.secondary)
-            .help("提问时给 AI 的参考内容。默认以当前页为主，需要时再扩展范围。")
+            .help("提问时给 AI 的参考内容。默认按问题自动选择，普通问题使用当前页。")
 
             if contextMode == .chapter, !chapters.isEmpty {
                 chapterPickerMenu
@@ -1830,7 +1830,7 @@ struct LearningInspector: View {
             targetPageIndex = pageIndex
         }
 
-        // 输入框发送跟着选择器走（默认当前页）；快捷提问、重问各自带上下文。
+        // 输入框发送跟着选择器走（默认智能范围）；快捷提问、重问各自带上下文。
         let effectiveScope: LearningContextScope
         if suppliedQuestion == nil {
             switch contextMode {
