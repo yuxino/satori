@@ -59,7 +59,11 @@ public enum ReadingScopeInference {
             return .pageRange(start: sectionRange.lowerBound, end: sectionRange.upperBound)
         }
 
-        let previousPageMarkers = ["上一页", "前一页", "前面接着", "接着前面", "承接前面", "和前面连起来"]
+        let previousPageMarkers = [
+            "上一页", "前一页", "前面接着", "接着前面", "接着前面的", "承接前面",
+            "和前面连起来", "和前面有什么关系", "与前面", "前后关系", "前面讲的",
+            "前面内容", "怎么接上", "如何衔接", "怎么衔接", "衔接"
+        ]
         if pageIndex > 0, previousPageMarkers.contains(where: normalized.contains) {
             return .pageRange(start: pageIndex - 1, end: pageIndex)
         }

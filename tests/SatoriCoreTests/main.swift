@@ -278,6 +278,24 @@ struct SatoriCoreTests {
         )
         precondition(
             ReadingScopeInference.scope(
+                for: "这一页接着前面的文件系统内容往下讲了什么",
+                pageIndex: 187,
+                chapterRange: 182...224,
+                sectionRange: 186...188
+            ) == .pageRange(start: 186, end: 187),
+            "Expected natural continuation language to include the adjacent page"
+        )
+        precondition(
+            ReadingScopeInference.scope(
+                for: "这一页和前面有什么关系",
+                pageIndex: 187,
+                chapterRange: 182...224,
+                sectionRange: 186...188
+            ) == .pageRange(start: 186, end: 187),
+            "Expected relationship language to include the adjacent page"
+        )
+        precondition(
+            ReadingScopeInference.scope(
                 for: "这一页的磁盘地址是什么意思",
                 pageIndex: 187,
                 chapterRange: 182...224,
