@@ -187,7 +187,7 @@ enum PDFPageContextExtractor {
                 if visualPages.count == 2 { break }
             }
             if !visualPages.isEmpty {
-                return .textAndImages(trimmed, visualPages)
+                return .textAndImages(String(trimmed.prefix(limit)), visualPages)
             }
         }
         return .text(String(trimmed.prefix(limit)))
