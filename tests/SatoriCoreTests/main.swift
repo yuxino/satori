@@ -829,6 +829,14 @@ struct SatoriCoreTests {
             "Expected C system execution to be blocked"
         )
         precondition(
+            !CodeRunner.safety(
+                for: "#include <stdio.h>\nint main(void) { int n; scanf(\"%d\", &n); return n; }",
+                language: .c
+            ).isAllowed
+                && CodeRunner.safety(for: "input('n?')", language: .python).message?.contains("交互输入") == true,
+            "Expected interactive stdin examples from textbooks to be blocked with a clear explanation"
+        )
+        precondition(
             !CodeRunner.safety(for: "echo hello", language: .shell).isAllowed
                 && CodeRunner.experimentLanguages == [.python, .c, .cpp],
             "Expected shell not to be offered as an experiment language"
@@ -848,6 +856,17 @@ struct SatoriCoreTests {
             language: .python
         )
         precondition(blockedRun.exitCode != 0 && blockedRun.stderr.contains("实验未运行"), "Expected unsafe experiments to fail closed")
+
+        let interactiveRun = await CodeRunner.run(
+            code: "#include <stdio.h>\nint main(void) { int n; scanf(\"%d\", &n); return n; }",
+            language: .c
+        )
+        precondition(
+            interactiveRun.exitCode != 0
+                && !interactiveRun.timedOut
+                && interactiveRun.stderr.contains("交互输入"),
+            "Expected textbook stdin examples to fail immediately instead of waiting for input"
+        )
 
         let sandboxedWriteAttempt = await CodeRunner.run(
             code: "import tempfile\\nwith tempfile.NamedTemporaryFile() as handle:\\n    handle.write(b'x')",

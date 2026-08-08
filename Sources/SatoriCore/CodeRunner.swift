@@ -156,6 +156,9 @@ public enum CodeRunner {
             if blockedPatterns.contains(where: { trimmed.range(of: $0, options: .regularExpression) != nil }) {
                 return .blocked("检测到文件、网络或动态执行接口；实验只能做纯计算。")
             }
+            if trimmed.range(of: #"\binput\s*\("#, options: .regularExpression) != nil {
+                return .blocked("这段代码需要交互输入；Satori 实验只运行纯计算代码。请先把输入改成固定值，或复制到终端运行。")
+            }
         case .c, .cpp:
             let blockedPatterns = [
                 #"\b(fopen|freopen|remove|unlink|rename|system|popen|fork|exec\w*|socket|connect|getaddrinfo|open|creat|mkdir|rmdir|chdir|getenv)\s*\("#,
@@ -166,6 +169,14 @@ public enum CodeRunner {
             ]
             if blockedPatterns.contains(where: { trimmed.range(of: $0, options: .regularExpression) != nil }) {
                 return .blocked("检测到文件、网络或进程接口；实验只能做纯计算。")
+            }
+            let interactiveInputPatterns = [
+                #"\b(scanf|fscanf|getchar|fgetc|fgets|gets)\s*\("#,
+                #"\b(std::)?cin\s*>>"#,
+                #"\b(std::)?getline\s*\("#
+            ]
+            if interactiveInputPatterns.contains(where: { trimmed.range(of: $0, options: .regularExpression) != nil }) {
+                return .blocked("这段代码需要交互输入；Satori 实验只运行纯计算代码。请先把输入改成固定值，或复制到终端运行。")
             }
         }
 
