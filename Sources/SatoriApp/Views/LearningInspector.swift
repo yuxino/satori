@@ -41,7 +41,8 @@ struct LearningInspector: View {
     }
 
 
-    /// 提问时参考的上下文：默认不带页上下文，需要时再主动选。
+    /// 提问时参考的上下文：默认绑定当前页，让用户在阅读现场直接提问；
+    /// 需要时仍可主动切换到章节、整本书或无上下文。
     enum ContextMode: String, CaseIterable, Identifiable {
         case none
         case page
@@ -65,8 +66,8 @@ struct LearningInspector: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var mode: InspectorMode = .ask
     @State private var question = ""
-    /// 发送问题时给 AI 的上下文：默认不带上下文（需要时主动选页）。
-    @State private var contextMode: ContextMode = .none
+    /// 发送问题时给 AI 的上下文：默认带当前页，避免每次提问前先配置范围。
+    @State private var contextMode: ContextMode = .page
     /// 「多页」范围（1 起，UI 显示用；发送时转成 0 起）。
     @State private var rangeStart = 1
     @State private var rangeEnd = 1

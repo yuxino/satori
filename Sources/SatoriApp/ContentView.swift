@@ -35,6 +35,12 @@ final class ReaderSelectionRouter: ObservableObject {
     /// TODO(布局施工队): read `inspectorFloats` in DocumentWorkspace
     /// (CourseOverview.swift) and render LearningInspector as an overlay.
     @Published var inspectorFloats = false
+
+    /// Protect the reading flow by temporarily removing course chrome and the
+    /// learning inspector while keeping the document, page position, and
+    /// selection routing alive. This is intentionally session-scoped: opening
+    /// the app should never strand a user in a mode with hidden navigation.
+    @Published var isImmersiveReading = false
 }
 
 struct ContentView: View {
@@ -58,6 +64,9 @@ struct ContentView: View {
             .navigationSplitViewStyle(.balanced)
             .onChange(of: width) { _, newWidth in
                 applyLayout(for: newWidth)
+            }
+            .onChange(of: router.isImmersiveReading) { _, _ in
+                applyLayout(for: width)
             }
             .task(id: width) {
                 applyLayout(for: width)
@@ -110,7 +119,7 @@ struct ContentView: View {
         } else if width < Self.floatThreshold {
             router.inspectorFloats = true
         }
-        let visibility: NavigationSplitViewVisibility = width < 960 ? .detailOnly : .all
+        let visibility: NavigationSplitViewVisibility = router.isImmersiveReading || width < 960 ? .detailOnly : .all
         guard columnVisibility != visibility else { return }
         withAnimation(SatoriTheme.Motion.quick) {
             columnVisibility = visibility

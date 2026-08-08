@@ -318,7 +318,7 @@ private struct DocumentWorkspace: View {
     private var horizontalWorkspace: some View {
         HStack(spacing: 0) {
             readerColumn
-            if showsInspector {
+            if showsInspector && !router.isImmersiveReading {
                 divider
                 LearningInspector(
                     documentID: document.id,
@@ -341,7 +341,7 @@ private struct DocumentWorkspace: View {
     private var verticalWorkspace: some View {
         VStack(spacing: 0) {
             readerColumn
-            if showsInspector {
+            if showsInspector && !router.isImmersiveReading {
                 panelHeightDivider
                 LearningInspector(
                     documentID: document.id,
@@ -480,7 +480,9 @@ private struct DocumentWorkspace: View {
 
     private var readingBar: some View {
         HStack(spacing: 14) {
-            documentMenu
+            if !router.isImmersiveReading {
+                documentMenu
+            }
 
             if !chapters.isEmpty {
                 tocButton
@@ -523,17 +525,31 @@ private struct DocumentWorkspace: View {
 
             Spacer(minLength: 8)
 
-            Button {
-                showsInspector.toggle()
-            } label: {
-                Label(showsInspector ? "隐藏理解" : "打开理解", systemImage: "sparkles.rectangle.stack")
+            if !router.isImmersiveReading {
+                Button {
+                    showsInspector.toggle()
+                } label: {
+                    Label(showsInspector ? "隐藏理解" : "打开理解", systemImage: "sparkles.rectangle.stack")
+                }
+                .help(showsInspector ? "隐藏理解面板" : "打开理解面板")
+                .tint(SatoriTheme.accent)
             }
-            .help(showsInspector ? "隐藏理解面板" : "打开理解面板")
-            .tint(SatoriTheme.accent)
+
+            Button {
+                router.isImmersiveReading.toggle()
+            } label: {
+                Label(
+                    router.isImmersiveReading ? "退出沉浸" : "沉浸阅读",
+                    systemImage: router.isImmersiveReading ? "arrow.down.right.and.arrow.up.left" : "viewfinder"
+                )
+            }
+            .keyboardShortcut("f", modifiers: [.command, .shift])
+            .help(router.isImmersiveReading ? "退出沉浸阅读（⌘⇧F）" : "进入沉浸阅读（⌘⇧F）")
+            .tint(router.isImmersiveReading ? SatoriTheme.gold : SatoriTheme.accent)
         }
         .padding(.horizontal, 14)
         .frame(height: 58)
-        .background(.bar)
+        .background(router.isImmersiveReading ? SatoriTheme.paper : Color(nsColor: .windowBackgroundColor))
     }
 
     /// 目录按钮：常驻显示当前章节，点击（或按 ⌘T）呼出可跳转任意章节/小节的浮层。
