@@ -19,6 +19,32 @@ public enum ExtractedTextNormalizer {
         return collapsed.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Flags text layers that are long enough to look usable but contain
+    /// telltale OCR damage. A page like “5「。。口叫技术” can otherwise pass
+    /// the length gate and make the model confidently explain corrupted text.
+    /// The caller should keep the text for search/grounding and attach the
+    /// rendered page image for visual correction.
+    public static func likelyDegraded(_ text: String) -> Bool {
+        let normalized = normalize(text)
+        guard normalized.count >= 40 else { return false }
+
+        if normalized.unicodeScalars.contains(where: { scalar in
+            scalar.value == 0xFFFD || scalar.value == 0x25A1
+        }) {
+            return true
+        }
+
+        let uppercased = normalized.uppercased()
+        if ["UNK", "UNDC", "UND^"].contains(where: uppercased.contains) {
+            return true
+        }
+
+        // Two full stops in a row are unusual in this Chinese textbook and
+        // are a reliable signal for the punctuation/character substitutions
+        // seen in its OCR layer. Keep normal Chinese ellipses (“……” ) alone.
+        return normalized.contains("。。")
+    }
+
     private static func collapseInterCJKSpaces(_ text: String) -> String {
         let scalars = Array(text.unicodeScalars)
         var result = String.UnicodeScalarView()

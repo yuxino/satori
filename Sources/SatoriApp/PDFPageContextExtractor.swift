@@ -168,13 +168,14 @@ enum PDFPageContextExtractor {
               let page = document.page(at: pageIndex) else { return nil }
 
         let text = ExtractedTextNormalizer.normalize(page.string ?? "")
-        if text.count >= 40 {
+        let needsVisualVerification = text.count < 40 || ExtractedTextNormalizer.likelyDegraded(text)
+        if text.count >= 40, !needsVisualVerification {
             // 带页码标注返回，和整章/多页提取的格式一致，模型能明确知道是哪一页。
             return .text("【第 \(pageIndex + 1) 页】\n" + String(text.prefix(24_000)))
         }
 
-        // 扫描版 / 图片页：先 Qwen OCR（识别质量更好），失败再本地 Vision，
-        // 都识别不出就退回高清页图，让模型直接看图。
+        // 扫描版 / 疑似 OCR 损坏页：先 Qwen OCR（识别质量更好），失败再本地
+        // Vision；文字层已经足够长但疑似损坏时，保留文字并同时附上页面图像。
         guard let image = renderPageImage(page, maximumLongestSide: Self.ocrRenderLongestSide) else { return nil }
         if let qwenConfiguration,
            let jpeg = jpegData(from: image),
@@ -184,11 +185,21 @@ enum PDFPageContextExtractor {
         }
         if let recognized = recognizeText(in: image),
            recognized.count >= 40 {
+            if text.count < 40 {
+                return .text(String(recognized.prefix(24_000)))
+            }
+            if let jpeg = jpegData(from: image) {
+                return .textAndImage(String(recognized.prefix(24_000)), jpeg)
+            }
             return .text(String(recognized.prefix(24_000)))
         }
 
-        // OCR 也没读到内容（纯图/公式页）：退回高清页图，让模型看图。
+        // OCR 也没读到内容（纯图/公式页）：退回高清页图，让模型直接看图；
+        // 对疑似损坏的文字层则保留原文，避免丢掉可检索的部分。
         guard let jpeg = renderPageJPEG(page) else { return nil }
+        if text.count >= 40 {
+            return .textAndImage(String(text.prefix(24_000)), jpeg)
+        }
         return .imageJPEG(jpeg)
     }
 
@@ -372,7 +383,8 @@ enum PDFPageContextExtractor {
     ) async -> String {
         guard let page = document.page(at: pageIndex) else { return "" }
         var text = ExtractedTextNormalizer.normalize(page.string ?? "")
-        guard text.count < 40, (await ocrBudget?.take()) ?? true else { return text }
+        let needsOCR = text.count < 40 || ExtractedTextNormalizer.likelyDegraded(text)
+        guard needsOCR, (await ocrBudget?.take()) ?? true else { return text }
 
         if useQwenOCR, let qwenConfiguration,
            let image = renderPageImage(page, maximumLongestSide: Self.ocrRenderLongestSide),

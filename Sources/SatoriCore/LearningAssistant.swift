@@ -76,6 +76,9 @@ public struct LearningCitation: Codable, Sendable, Equatable, Identifiable {
 public enum LearningPageContent: Sendable, Equatable {
     case text(String)
     case imageJPEG(Data)
+    /// A mostly useful text layer with enough OCR damage that the page image
+    /// should be sent too, so the model can verify names, numbers, and symbols.
+    case textAndImage(String, Data)
 }
 
 public struct AssistantTransportResponse: Sendable {
@@ -438,9 +441,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         """
 
         var content: [InputContent] = []
-        if let item = makePageContentItem(pageNumber: pageNumber) {
-            content.append(item)
-        }
+        content.append(contentsOf: makePageContentItems(pageNumber: pageNumber))
         content.append(contentsOf: makeAttachmentItems(imageBudget.images))
         content.append(.init(type: "input_text", text: reviewBody, imageURL: nil))
 
@@ -478,9 +479,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         let pageNumber = (pageIndex ?? 0) + 1
 
         var content: [InputContent] = []
-        if let item = makePageContentItem(pageNumber: pageNumber) {
-            content.append(item)
-        }
+        content.append(contentsOf: makePageContentItems(pageNumber: pageNumber))
         if let selectionText, !selectionText.isEmpty {
             content.append(.init(
                 type: "input_text",
@@ -522,22 +521,35 @@ public struct QwenLearningAssistant: LearningAssistant {
     }
 
     /// 页上下文内容；没有页上下文（不带上下文提问）时返回 nil，请求里不夹带页面。
-    private func makePageContentItem(pageNumber: Int) -> InputContent? {
+    private func makePageContentItems(pageNumber: Int) -> [InputContent] {
         switch pageContent {
         case .text(let text)?:
-            return .init(
+            return [.init(
                 type: "input_text",
-                text: "用户正在阅读教材 PDF。\n\n以下是可参考的 PDF 原文（可能包含一页或多页，每段以【第 N 页】标注）：\n\(text)",
+                text: "用户正在阅读教材 PDF 第 \(pageNumber) 页。\n\n以下是可参考的 PDF 原文（可能包含一页或多页，每段以【第 N 页】标注）：\n\(text)",
                 imageURL: nil
-            )
+            )]
         case .imageJPEG(let data)?:
-            return .init(
+            return [.init(
                 type: "input_image",
                 text: nil,
                 imageURL: "data:image/jpeg;base64,\(data.base64EncodedString())"
-            )
+            )]
+        case let .textAndImage(text, data)?:
+            return [
+                .init(
+                    type: "input_text",
+                    text: "用户正在阅读教材 PDF 第 \(pageNumber) 页。\n\n以下是 PDF 的文字层，但其中可能有 OCR 识别错误：\n\(text)\n\n请同时核对下一项页面图像中的术语、数字、公式和符号，不要把明显的 OCR 错误当成原文。",
+                    imageURL: nil
+                ),
+                .init(
+                    type: "input_image",
+                    text: nil,
+                    imageURL: "data:image/jpeg;base64,\(data.base64EncodedString())"
+                )
+            ]
         case nil:
-            return nil
+            return []
         }
     }
 
@@ -554,6 +566,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         let capabilities = Self.capabilities(for: modelID)
         let needsImage: Bool = {
             if case .imageJPEG? = pageContent { return true }
+            if case .textAndImage? = pageContent { return true }
             return !imageBudget.images.isEmpty
         }()
         if needsImage && !capabilities.contains(.image) {

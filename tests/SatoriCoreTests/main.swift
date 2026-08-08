@@ -324,6 +324,23 @@ struct SatoriCoreTests {
         ).explain(request: "解释扫描页", pageIndex: 4)
         precondition(imageResponse.text == "fixture explanation", "Expected scanned-page output text")
 
+        let degradedTextResponse = await QwenLearningAssistant(
+            apiKey: "fixture-key",
+            pageContent: .textAndImage(
+                "文字层里有疑似 OCR 错误的术语",
+                Data([0xFF, 0xD8, 0xFF])
+            ),
+            transport: FixtureAssistantTransport(
+                expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
+                expectedModelID: "qwen3.8-max",
+                expectedImageCount: 1,
+                expectsWebSearch: false,
+                expectedHistoryTurnCount: 0,
+                expectsPageContent: true
+            )
+        ).explain(request: "核对这页的术语", pageIndex: 44)
+        precondition(degradedTextResponse.text == "fixture explanation", "Expected damaged text to travel with a page image")
+
         let streamingAssistant = QwenLearningAssistant(
             apiKey: "fixture-key",
             pageContent: .text("fixture page text"),
@@ -487,6 +504,14 @@ struct SatoriCoreTests {
         precondition(
             ExtractedTextNormalizer.normalize("  正常中文句子，不该被改。  ") == "正常中文句子，不该被改。",
             "Expected clean CJK text to only be trimmed"
+        )
+        precondition(
+            ExtractedTextNormalizer.likelyDegraded(String(repeating: "教材正文 ", count: 8) + "5「。。口叫技术"),
+            "Expected obvious OCR punctuation damage to request visual verification"
+        )
+        precondition(
+            !ExtractedTextNormalizer.likelyDegraded(String(repeating: "这是正常的中文教材正文。", count: 8)),
+            "Expected clean text to stay text-only"
         )
 
         // Code runner: an answer's example snippet can be executed locally.
