@@ -875,6 +875,7 @@ struct SatoriCoreTests {
         precondition(legacyTurn.selectionText == nil, "Expected legacy turns to decode without selectionText")
         precondition(legacyTurn.selectionOffset == nil, "Expected legacy turns to decode without selectionOffset")
         precondition(legacyTurn.selectionAnchorOffset == nil, "Expected legacy turns to decode without selectionAnchorOffset")
+        precondition(legacyTurn.attachmentNotice == nil, "Expected legacy turns to decode without attachmentNotice")
         let timedTurn = LearningTurn(
             question: "带耗时的问答",
             answer: "回答",
@@ -884,7 +885,8 @@ struct SatoriCoreTests {
             responseDuration: 4.2,
             selectionText: "被选中的原文",
             selectionOffset: 0.42,
-            selectionAnchorOffset: 0.58
+            selectionAnchorOffset: 0.58,
+            attachmentNotice: "1 张附图已压缩"
         )
         let timedRoundTrip = try decoder.decode(LearningTurn.self, from: encoder.encode(timedTurn))
         precondition(timedRoundTrip.contextScope == .pageRange(start: 1, end: 3), "Expected context scope to persist")
@@ -892,6 +894,7 @@ struct SatoriCoreTests {
         precondition(timedRoundTrip.selectionText == "被选中的原文", "Expected selected passage to persist for retry")
         precondition(abs((timedRoundTrip.selectionOffset ?? -1) - 0.42) < 0.001, "Expected selected passage position to persist")
         precondition(abs((timedRoundTrip.selectionAnchorOffset ?? -1) - 0.58) < 0.001, "Expected precise selection anchor to persist")
+        precondition(timedRoundTrip.attachmentNotice == "1 张附图已压缩", "Expected attachment notices to persist for later review")
 
         let clampedTurn = LearningTurn(
             question: "边界位置",

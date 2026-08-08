@@ -482,7 +482,8 @@ struct LearningInspector: View {
             attachmentCount: draftAttachmentCount,
             selectionText: draftSelectionText,
             selectionOffset: draftSelectionOffset,
-            selectionAnchorOffset: draftSelectionOffset
+            selectionAnchorOffset: draftSelectionOffset,
+            attachmentNotice: response?.attachmentNotice
         )
     }
 
@@ -1338,6 +1339,12 @@ struct LearningInspector: View {
                     }
                     .font(.caption)
                     .foregroundStyle(.tertiary)
+                }
+                if let attachmentNotice = turn.attachmentNotice,
+                   !attachmentNotice.isEmpty {
+                    Label(attachmentNotice, systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 citationsView(turn.citations)
             }
@@ -2461,7 +2468,8 @@ struct LearningInspector: View {
             responseDuration: duration,
             selectionText: draftSelectionText,
             selectionOffset: draftSelectionOffset,
-            selectionAnchorOffset: draftSelectionOffset
+            selectionAnchorOffset: draftSelectionOffset,
+            attachmentNotice: finalResponse.attachmentNotice
         )
         turns.append(turn)
         recentCompletedPage = targetPage

@@ -77,11 +77,13 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
     /// 新版记录的选中文字垂直中心（0…1）：0 是页首，1 是页尾。
     /// 与旧版视口偏移分开，避免升级后把旧的页首位置误当成原文位置。
     public var selectionAnchorOffset: Double?
+    /// 附图因请求体积限制被压缩或丢弃时的提示；旧存档没有该字段。
+    public var attachmentNotice: String?
 
     private enum CodingKeys: String, CodingKey {
         case id, question, answer, pageIndex, sourceKind, citations, attachmentCount
         case createdAt, completion, contextScope, responseDuration
-        case selectionText, selectionOffset, selectionAnchorOffset
+        case selectionText, selectionOffset, selectionAnchorOffset, attachmentNotice
     }
 
     public init(
@@ -98,7 +100,8 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
         responseDuration: TimeInterval? = nil,
         selectionText: String? = nil,
         selectionOffset: Double? = nil,
-        selectionAnchorOffset: Double? = nil
+        selectionAnchorOffset: Double? = nil,
+        attachmentNotice: String? = nil
     ) {
         self.id = id
         self.question = question
@@ -114,6 +117,7 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
         self.selectionText = selectionText?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.selectionOffset = selectionOffset.map { min(max($0, 0), 1) }
         self.selectionAnchorOffset = selectionAnchorOffset.map { min(max($0, 0), 1) }
+        self.attachmentNotice = attachmentNotice?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Decode through the same normalization as newly-created turns. This is
@@ -135,7 +139,8 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
             responseDuration: try container.decodeIfPresent(TimeInterval.self, forKey: .responseDuration),
             selectionText: try container.decodeIfPresent(String.self, forKey: .selectionText),
             selectionOffset: try container.decodeIfPresent(Double.self, forKey: .selectionOffset),
-            selectionAnchorOffset: try container.decodeIfPresent(Double.self, forKey: .selectionAnchorOffset)
+            selectionAnchorOffset: try container.decodeIfPresent(Double.self, forKey: .selectionAnchorOffset),
+            attachmentNotice: try container.decodeIfPresent(String.self, forKey: .attachmentNotice)
         )
     }
 
@@ -155,6 +160,7 @@ public struct LearningTurn: Identifiable, Codable, Equatable, Sendable {
         try container.encodeIfPresent(selectionText, forKey: .selectionText)
         try container.encodeIfPresent(selectionOffset, forKey: .selectionOffset)
         try container.encodeIfPresent(selectionAnchorOffset, forKey: .selectionAnchorOffset)
+        try container.encodeIfPresent(attachmentNotice, forKey: .attachmentNotice)
     }
 }
 
