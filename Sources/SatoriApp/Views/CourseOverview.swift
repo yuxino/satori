@@ -127,6 +127,10 @@ struct BookChapter: Identifiable, Equatable {
     let pageIndex: Int
     /// outline 里的层级：0 为章，1 为节，2 为小节；课程目录回退时均为 0。
     let depth: Int
+    /// Scanned books also carry the printed page shown in their table of
+    /// contents. Native PDF outlines leave this nil because PDF and book page
+    /// numbers are usually already the same.
+    let printedPage: Int?
 
     /// 层级感知的页码范围（0 起、含两端）：从自己的起始页到**下一个同级或更高级**
     /// 条目的起始页前 1 页。这样选「第一章」得到整章（含其下所有节），
@@ -221,7 +225,7 @@ private struct DocumentWorkspace: View {
                     ScannedOutlineExtractor.entries(url: url)
                 }.value
                 guard !Task.isCancelled else { return }
-                chapters = Self.makeChapters(entries: scannedEntries, directory: course.learningDirectory)
+                chapters = Self.makeScannedChapters(entries: scannedEntries)
             } else {
                 chapters = Self.makeChapters(entries: outlineEntries, directory: course.learningDirectory)
                 await linkDirectoryPages(entries: outlineEntries)
@@ -268,7 +272,8 @@ private struct DocumentWorkspace: View {
                     id: $0.offset,
                     title: $0.element.title,
                     pageIndex: $0.element.pageIndex,
-                    depth: $0.element.depth
+                    depth: $0.element.depth,
+                    printedPage: nil
                 )
             }
         }
@@ -278,7 +283,21 @@ private struct DocumentWorkspace: View {
         }
         .enumerated()
         .map {
-            BookChapter(id: $0.offset, title: $0.element.title, pageIndex: $0.element.pageIndex, depth: 0)
+            BookChapter(id: $0.offset, title: $0.element.title, pageIndex: $0.element.pageIndex, depth: 0, printedPage: nil)
+        }
+    }
+
+    private static func makeScannedChapters(
+        entries: [(title: String, pageIndex: Int, depth: Int, printedPage: Int)]
+    ) -> [BookChapter] {
+        entries.enumerated().map {
+            BookChapter(
+                id: $0.offset,
+                title: $0.element.title,
+                pageIndex: $0.element.pageIndex,
+                depth: $0.element.depth,
+                printedPage: $0.element.printedPage
+            )
         }
     }
 
@@ -291,6 +310,18 @@ private struct DocumentWorkspace: View {
     /// On a long textbook page, the section alone is not enough orientation.
     private var currentTopLevelChapter: BookChapter? {
         chapters.last { $0.depth == 0 && $0.pageIndex <= currentPageIndex }
+    }
+
+    /// For scanned books, carry the printed-page number forward from the most
+    /// recent mapped chapter/section. Front matter has no reliable printed
+    /// body-page mapping, so it keeps the normal PDF-only indicator.
+    private var currentPrintedPage: Int? {
+        guard document.contentKind == .scanned,
+              let anchor = chapters.last(where: {
+                  $0.printedPage != nil && $0.pageIndex <= currentPageIndex
+              }),
+              let printedPage = anchor.printedPage else { return nil }
+        return printedPage + (currentPageIndex - anchor.pageIndex)
     }
 
     private func persistPanelSize() {
@@ -514,14 +545,26 @@ private struct DocumentWorkspace: View {
                 .labelStyle(.iconOnly)
                 .disabled(currentPageIndex == 0)
 
-                Text("\(currentPageIndex + 1)")
-                    .font(.callout.monospacedDigit().weight(.semibold))
-                    .frame(minWidth: 30, alignment: .trailing)
+                if let currentPrintedPage {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("PDF \(currentPageIndex + 1) / \(pageCount)")
+                            .font(.caption.monospacedDigit().weight(.semibold))
+                        Text("书内 \(currentPrintedPage)")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                     .fixedSize()
-                Text("/ \(pageCount)")
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
+                    .help("PDF 页码与教材印刷页码")
+                } else {
+                    Text("\(currentPageIndex + 1)")
+                        .font(.callout.monospacedDigit().weight(.semibold))
+                        .frame(minWidth: 30, alignment: .trailing)
+                        .fixedSize()
+                    Text("/ \(pageCount)")
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                }
 
                 Button("下一页", systemImage: "chevron.right") {
                     currentPageIndex = min(pageCount - 1, currentPageIndex + 1)
@@ -531,11 +574,11 @@ private struct DocumentWorkspace: View {
 
                 Divider().frame(height: 18)
 
-                TextField("页码", text: $pageInput)
+                TextField(currentPrintedPage == nil ? "页码" : "PDF页", text: $pageInput)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 58)
                     .onSubmit(jumpToPage)
-                    .accessibilityLabel("跳转页码")
+                    .accessibilityLabel(currentPrintedPage == nil ? "跳转页码" : "跳转 PDF 页码")
                 Button("跳转", action: jumpToPage)
                     .disabled(Int(pageInput) == nil)
             }
@@ -756,7 +799,14 @@ private struct TOCDrawer: View {
 
     private func pageRangeLabel(_ chapter: BookChapter) -> String {
         if let range = BookChapter.pageRange(for: chapter, in: chapters, pageCount: pageCount) {
-            return "\(range.lowerBound + 1)–\(range.upperBound + 1)"
+            let pdfLabel = "\(range.lowerBound + 1)–\(range.upperBound + 1)"
+            if let printedPage = chapter.printedPage {
+                return "PDF \(pdfLabel) · 书内 \(printedPage)"
+            }
+            return pdfLabel
+        }
+        if let printedPage = chapter.printedPage {
+            return "PDF \(chapter.pageIndex + 1) · 书内 \(printedPage)"
         }
         return "\(chapter.pageIndex + 1)"
     }
@@ -771,11 +821,13 @@ private enum ScannedOutlineExtractor {
         let title: String
         let pageIndex: Int
         let depth: Int
+        let printedPage: Int
 
-        init(title: String, pageIndex: Int, depth: Int = 0) {
+        init(title: String, pageIndex: Int, depth: Int = 0, printedPage: Int) {
             self.title = title
             self.pageIndex = pageIndex
             self.depth = depth
+            self.printedPage = printedPage
         }
 
         init(from decoder: Decoder) throws {
@@ -783,17 +835,18 @@ private enum ScannedOutlineExtractor {
             title = try container.decode(String.self, forKey: .title)
             pageIndex = try container.decode(Int.self, forKey: .pageIndex)
             depth = try container.decodeIfPresent(Int.self, forKey: .depth) ?? 0
+            printedPage = try container.decodeIfPresent(Int.self, forKey: .printedPage) ?? 0
         }
 
         private enum CodingKeys: String, CodingKey {
-            case title, pageIndex, depth
+            case title, pageIndex, depth, printedPage
         }
     }
 
-    static func entries(url: URL) -> [(title: String, pageIndex: Int, depth: Int)] {
+    static func entries(url: URL) -> [(title: String, pageIndex: Int, depth: Int, printedPage: Int)] {
         let cacheKey = cacheKey(for: url)
         if let cached = cachedEntries(for: cacheKey) {
-            return cached.map { ($0.title, $0.pageIndex, $0.depth) }
+            return cached.map { ($0.title, $0.pageIndex, $0.depth, $0.printedPage) }
         }
 
         guard let document = PDFDocument(url: url), document.pageCount > 0 else { return [] }
@@ -846,12 +899,13 @@ private enum ScannedOutlineExtractor {
             return CachedEntry(
                 title: title,
                 pageIndex: pageIndex,
-                depth: entry.depth
+                depth: entry.depth,
+                printedPage: entry.printedPage
             )
         }
         guard !mapped.isEmpty else { return [] }
         save(mapped, for: cacheKey)
-        return mapped.map { ($0.title, $0.pageIndex, $0.depth) }
+        return mapped.map { ($0.title, $0.pageIndex, $0.depth, $0.printedPage) }
     }
 
     private static func recognizePages(
@@ -930,7 +984,7 @@ private enum ScannedOutlineExtractor {
         let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
         let modification = values?.contentModificationDate?.timeIntervalSince1970 ?? -1
         let size = values?.fileSize ?? -1
-        return "satori.scanned-outline.v2|\(url.standardizedFileURL.path)|\(modification)|\(size)"
+        return "satori.scanned-outline.v3|\(url.standardizedFileURL.path)|\(modification)|\(size)"
     }
 
     private static func cachedEntries(for key: String) -> [CachedEntry]? {
