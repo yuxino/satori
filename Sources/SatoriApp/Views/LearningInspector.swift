@@ -157,7 +157,7 @@ struct LearningInspector: View {
     private let responseBottomID = "learning-response-bottom"
     private let quickPrompts = [
         "这一页最重要的一个意思是什么？",
-        "作者为什么要这样讲？",
+        "它在解决什么问题？",
         "给我一个具体例子"
     ]
     private static let maxSelectionCharacters = 4_000
