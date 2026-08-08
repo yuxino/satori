@@ -132,12 +132,19 @@ enum PDFPageContextExtractor {
         let clampedEnd = min(range.upperBound, document.pageCount - 1)
         guard range.lowerBound <= clampedEnd else { return nil }
 
-        // 扫描页 OCR 是最大的耗时点，4 路并发显著加快整章/多页理解。
+        // 扫描页 OCR 是最大的耗时点。前后页桥接通常只有 2–3 页，远程
+        // Qwen OCR 能换来更高的术语准确度；但“看本章路线”可能覆盖几十页，
+        // 不应为了建立阅读地图发起几十次远程请求。长范围先用本地 Vision
+        // 批量提取，远程能力留给当前页的精确核对。
+        let useRemoteOCR = ReadingOCRPolicy.usesRemoteOCR(
+            forPageRangeCount: range.count,
+            hasQwenConfiguration: qwenConfiguration != nil
+        )
         let pages = await extractPagesConcurrently(
             document: document,
             indices: Array(range.lowerBound...clampedEnd),
-            qwenConfiguration: qwenConfiguration,
-            useQwenOCR: true,
+            qwenConfiguration: useRemoteOCR ? qwenConfiguration : nil,
+            useQwenOCR: useRemoteOCR,
             ocrBudget: nil,
             concurrency: 4
         )

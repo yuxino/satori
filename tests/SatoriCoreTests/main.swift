@@ -196,6 +196,15 @@ struct SatoriCoreTests {
             QwenLearningAssistant.defaultLearningInstructions.contains("快速阅读地图"),
             "Expected book and chapter overviews to produce a reading map"
         )
+        precondition(
+            ReadingOCRPolicy.usesRemoteOCR(forPageRangeCount: 2, hasQwenConfiguration: true),
+            "Expected short page bridges to use high-fidelity remote OCR"
+        )
+        precondition(
+            !ReadingOCRPolicy.usesRemoteOCR(forPageRangeCount: 20, hasQwenConfiguration: true)
+                && !ReadingOCRPolicy.usesRemoteOCR(forPageRangeCount: 2, hasQwenConfiguration: false),
+            "Expected chapter maps and unconfigured readers to stay local"
+        )
         precondition(QwenLearningAssistant.responseTokenBudget(for: "一句话说清楚") == 260, "Expected one-sentence answers to stay compact")
         precondition(QwenLearningAssistant.responseTokenBudget(for: "简化，字太多") == 560, "Expected simplify requests to lower the output budget")
         precondition(QwenLearningAssistant.responseTokenBudget(for: "我刚开始读这一章，请给我阅读路线图") == 900, "Expected reading maps to keep enough room for structure")
