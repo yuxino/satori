@@ -96,6 +96,9 @@ struct LearningInspector: View {
     /// 列表底部是否在视野内；滚上去看历史时变 false，用来显示
     /// 「回到底部」浮动按钮。
     @State private var isAtBottom = true
+    /// 每次新问题或历史加载完成时递增，强制 ScrollViewReader 执行一次滚动。
+    /// 不能只依赖 scrollPosition 的 ID：连续提问时 ID 可能没有变化。
+    @State private var scrollRequest = 0
     @State private var hasQwenConfiguration = false
     @State private var isCheckingConfiguration = false
     @State private var configuredModelID: String?
@@ -144,7 +147,13 @@ struct LearningInspector: View {
         }
         .background(SatoriTheme.paper)
         .task(id: documentID) { await loadHistory() }
-        .onAppear { refreshConfigurationState() }
+        .onAppear {
+            refreshConfigurationState()
+            // 沉浸阅读时面板会暂时卸载；如果用户在那期间点了选区动作，
+            // Router 会保留请求，但此时不会触发下面的 onChange。面板重新
+            // 出现时主动接管，避免「点了举例却没有回答」的静默丢失。
+            consumePendingRouterRequests()
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { refreshConfigurationState() }
         }
@@ -155,12 +164,12 @@ struct LearningInspector: View {
         // PDFReaderView 只负责发出通知，ContentView 将它转换为 typed
         // request；这里消费 Router，因此沉浸模式下的选区动作不会丢失。
         .onChange(of: router.pendingAskSelection) { _, request in
-            guard let request else { return }
+            guard let request, !router.isImmersiveReading else { return }
             router.pendingAskSelection = nil
             handleSelection(request)
         }
         .onChange(of: router.pendingRunSelection) { _, request in
-            guard let request else { return }
+            guard let request, !router.isImmersiveReading else { return }
             router.pendingRunSelection = nil
             handleRunSelection(request)
         }
@@ -215,6 +224,18 @@ struct LearningInspector: View {
             DispatchQueue.main.async {
                 isQuestionFocused = true
             }
+        }
+    }
+
+    private func consumePendingRouterRequests() {
+        guard !router.isImmersiveReading else { return }
+        if let request = router.pendingAskSelection {
+            router.pendingAskSelection = nil
+            handleSelection(request)
+        }
+        if let request = router.pendingRunSelection {
+            router.pendingRunSelection = nil
+            handleRunSelection(request)
         }
     }
 
@@ -326,74 +347,102 @@ struct LearningInspector: View {
     /// 问 — 这本书的对话流 + 输入框。所有问答连成一条对话，翻页不消失。
     private var askView: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: SatoriTheme.Spacing.lg) {
-                    if let activeSelectionText, let activeSelectionPage {
-                        selectionAnchorBanner(text: activeSelectionText, pageIndex: activeSelectionPage)
-                    }
-                    if let completedPage = completedElsewherePage {
-                        savedElsewhereBanner(pageIndex: completedPage)
-                    }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: SatoriTheme.Spacing.lg) {
+                        if let completedPage = completedElsewherePage {
+                            savedElsewhereBanner(pageIndex: completedPage)
+                        }
 
-                    if isLoadingHistory {
-                        HStack(spacing: 8) {
-                            ProgressView().controlSize(.small)
-                            Text("正在载入这本书的学习记录…")
-                        }
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 18)
-                    } else if turns.isEmpty, activeTurn == nil {
-                        promptStarter
-                    } else {
-                        // 一条连续的对话流：历史问答 + 正在进行的这一轮。
-                        // 提问消息一发送就出现在列表里，回答紧跟其下流式输出。
-                        ForEach(turns) { turn in
-                            conversationTurnCard(turn)
-                                .id(turn.id)
-                        }
-                        if let activeTurn {
-                            conversationTurnCard(activeTurn, isActive: true)
-                                .id("streaming-draft")
-                        }
-                    }
-
-                    if !historyStatus.isEmpty {
-                        Label(historyStatus, systemImage: "exclamationmark.triangle")
-                            .font(.caption)
+                        if isLoadingHistory {
+                            HStack(spacing: 8) {
+                                ProgressView().controlSize(.small)
+                                Text("正在载入这本书的学习记录…")
+                            }
+                            .font(.callout)
                             .foregroundStyle(.secondary)
-                    }
+                            .padding(.vertical, 18)
+                        } else if turns.isEmpty, activeTurn == nil {
+                            promptStarter
+                        } else {
+                            // 一条连续的对话流：历史问答 + 正在进行的这一轮。
+                            // 提问消息一发送就出现在列表里，回答紧跟其下流式输出。
+                            ForEach(turns) { turn in
+                                conversationTurnCard(turn)
+                                    .id(turn.id)
+                            }
+                            if let activeTurn {
+                                conversationTurnCard(activeTurn, isActive: true)
+                                    .id("streaming-draft")
+                            }
+                        }
 
-                    Color.clear
-                        .frame(height: 1)
-                        .id(responseBottomID)
-                        .onAppear { isAtBottom = true }
-                        .onDisappear { isAtBottom = false }
-                }
-                .padding(SatoriTheme.Spacing.lg)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .scrollPosition(id: $scrollAnchorID, anchor: .bottom)
-            .overlay(alignment: .bottom) {
-                if !isAtBottom {
-                    Button {
-                        scrollAnchorID = responseBottomID
-                    } label: {
-                        Label("回到底部", systemImage: "arrow.down")
+                        if !historyStatus.isEmpty {
+                            Label(historyStatus, systemImage: "exclamationmark.triangle")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id(responseBottomID)
+                            .onAppear { isAtBottom = true }
+                            .onDisappear { isAtBottom = false }
                     }
-                    .buttonStyle(.plain)
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 5)
-                    .background(.regularMaterial, in: Capsule())
-                    .overlay(
-                        Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
-                    )
-                    .shadow(color: .black.opacity(0.10), radius: 5, y: 1)
-                    .padding(.bottom, 7)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .animation(SatoriTheme.Motion.quick, value: isAtBottom)
+                    .padding(SatoriTheme.Spacing.lg)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .scrollTargetLayout()
                 }
+                .scrollPosition(id: $scrollAnchorID, anchor: .bottom)
+                .defaultScrollAnchor(.bottom)
+                .onChange(of: scrollRequest) { _, _ in
+                    DispatchQueue.main.async {
+                        withAnimation(SatoriTheme.Motion.quick) {
+                            proxy.scrollTo(responseBottomID, anchor: .bottom)
+                        }
+                    }
+                }
+                .onChange(of: response?.text) { _, _ in
+                    // 回答是流式增长的；只在回答进行中跟随底部，避免用户
+                    // 翻阅历史时被每个 token 抢回最新位置。
+                    guard isThinking else { return }
+                    DispatchQueue.main.async {
+                        proxy.scrollTo(responseBottomID, anchor: .bottom)
+                    }
+                }
+                .onChange(of: turns.count) { _, _ in
+                    // 流结束后草稿会归档进 turns，再补一次滚动，确保最后
+                    // 一段 Markdown 没有被输入框挡住。
+                    DispatchQueue.main.async {
+                        proxy.scrollTo(responseBottomID, anchor: .bottom)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if !isAtBottom {
+                        Button {
+                            scrollAnchorID = responseBottomID
+                            scrollRequest += 1
+                        } label: {
+                            Label("回到底部", systemImage: "arrow.down")
+                        }
+                        .buttonStyle(.plain)
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 5)
+                        .background(.regularMaterial, in: Capsule())
+                        .overlay(
+                            Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                        )
+                        .shadow(color: .black.opacity(0.10), radius: 5, y: 1)
+                        .padding(.bottom, 7)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .animation(SatoriTheme.Motion.quick, value: isAtBottom)
+                    }
+                }
+            }
+
+            if let activeSelectionText, let activeSelectionPage {
+                selectionAnchorBanner(text: activeSelectionText, pageIndex: activeSelectionPage)
             }
 
             Divider()
@@ -408,9 +457,9 @@ struct LearningInspector: View {
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text("正在理解第 \(pageIndex + 1) 页")
+                    Text("原文选区 · 第 \(pageIndex + 1) 页")
                         .font(.caption.weight(.semibold))
-                    Text("· 已锚定原文")
+                    Text("回答会围绕这段内容")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1424,6 +1473,7 @@ struct LearningInspector: View {
             turns = try await sessionStore.turns(for: documentID)
             // 打开面板默认看最新对话：锚定到底部，历史加载完自动贴底。
             scrollAnchorID = responseBottomID
+            scrollRequest += 1
         } catch {
             turns = []
             historyStatus = "学习记录暂时无法读取；不影响继续阅读和提问。"
@@ -1499,6 +1549,7 @@ struct LearningInspector: View {
         draftAttachmentCount = submittedAttachments.count
         // 锚定到底部：新消息出现后内容自然向上生长，平滑贴底跟随。
         scrollAnchorID = responseBottomID
+        scrollRequest += 1
         question = ""
         attachments = []
         attachmentStatus = ""
