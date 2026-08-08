@@ -251,6 +251,15 @@ struct SatoriCoreTests {
         )
         precondition(
             ReadingScopeInference.scope(
+                for: "这本书有没有过时的内容？",
+                pageIndex: 30,
+                chapterRange: 0...28,
+                sectionRange: 20...28
+            ) == .wholeDocument,
+            "Expected book freshness questions to use the whole document"
+        )
+        precondition(
+            ReadingScopeInference.scope(
                 for: "这本书第几页有磁盘内容",
                 pageIndex: 187,
                 chapterRange: 182...224,
@@ -283,6 +292,10 @@ struct SatoriCoreTests {
         precondition(
             ReadingScopeInference.inheritsRecentScope(for: "有什么值得看的"),
             "Expected terse priority follow-ups to inherit the recent reading scope"
+        )
+        precondition(
+            ReadingScopeInference.inheritsRecentScope(for: "那有没有过时的内容"),
+            "Expected freshness follow-ups to inherit the recent reading scope"
         )
         precondition(
             !ReadingScopeInference.inheritsRecentScope(for: "这一页主要讲什么"),
