@@ -213,6 +213,7 @@ public struct QwenLearningAssistant: LearningAssistant {
     历史对话中提到的图片当前不可见，若需图片细节请用户重新附图。
     回答依次包含“原文依据”“解释”；只有确实超出原文时才增加“补充推断”，并明确标注。
     原文依据要短，不要大段复述。解释应帮助用户建立概念联系，可以给一个具体例子。
+    当 PDF 文字层标注可能有 OCR 错误且同时提供页面图像时，页面图像是原始证据；代码、公式、数字和符号以图像为准，无法看清时明确说不确定，不要把 OCR 错误当成原文复述。
     如果用户明确要求“简要”“一句话”“三句话”“先讲主线”或表示“字太多”，严格服从这个长度要求：
     只保留最关键的结论和必要依据，可以省略标题、例子和补充推断，不要为了套模板写成长答案。
     如果页面信息不足，直接说明缺少什么。不要要求用户做笔记或背诵。
@@ -637,7 +638,7 @@ public struct QwenLearningAssistant: LearningAssistant {
             return [
                 .init(
                     type: "input_text",
-                    text: "用户正在阅读教材 PDF 第 \(pageNumber) 页。\n\n以下是 PDF 的文字层，但其中可能有 OCR 识别错误：\n\(text)\n\n请同时核对下一项页面图像中的术语、数字、公式和符号，不要把明显的 OCR 错误当成原文。",
+                    text: "用户正在阅读教材 PDF 第 \(pageNumber) 页。\n\n以下是 PDF 的文字层，但其中可能有 OCR 识别错误：\n\(text)\n\n下一项页面图像是这页的原始证据。请以图像核对文字，尤其是代码、公式、数字和符号；如果图像与 OCR 冲突，以图像为准，无法看清时明确说不确定，不要把 OCR 错误当成原文。",
                     imageURL: nil
                 ),
                 .init(
@@ -658,7 +659,7 @@ public struct QwenLearningAssistant: LearningAssistant {
             var items: [InputContent] = [
                 .init(
                     type: "input_text",
-                    text: "用户正在阅读教材 PDF（当前页第 \(pageNumber) 页）。\n\n以下是可参考的 PDF 原文（可能包含一页或多页，每段以【第 N 页】标注）：\n\(text)\n\n下面附上当前范围中含有图示或表格的页面图像（\(pageLabels)）。请把文字和对应页图像一起核对，尤其注意空间关系、箭头、数字、公式和表格列项。",
+                    text: "用户正在阅读教材 PDF（当前页第 \(pageNumber) 页）。\n\n以下是可参考的 PDF 原文（可能包含一页或多页，每段以【第 N 页】标注）：\n\(text)\n\n下面附上当前范围中含有图示或表格的页面图像（\(pageLabels)）。页面图像是原始证据；请把文字和对应页图像一起核对，尤其注意空间关系、箭头、代码、数字、公式和表格列项。冲突时以图像为准，无法看清时明确说不确定。",
                     imageURL: nil
                 )
             ]

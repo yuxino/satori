@@ -604,7 +604,8 @@ struct SatoriCoreTests {
                 expectedImageCount: 1,
                 expectsWebSearch: false,
                 expectedHistoryTurnCount: 0,
-                expectsPageContent: true
+                expectsPageContent: true,
+                expectsVisualEvidenceInstruction: true
             )
         ).explain(request: "结合图示解释磁盘地址", pageIndex: 186)
         precondition(figurePageResponse.text == "fixture explanation", "Expected figure-aware page content to reach the model")
@@ -621,7 +622,8 @@ struct SatoriCoreTests {
                 expectedImageCount: 1,
                 expectsWebSearch: false,
                 expectedHistoryTurnCount: 0,
-                expectsPageContent: true
+                expectsPageContent: true,
+                expectsVisualEvidenceInstruction: true
             )
         ).explain(request: "核对这页的术语", pageIndex: 44)
         precondition(degradedTextResponse.text == "fixture explanation", "Expected damaged text to travel with a page image")
@@ -1009,6 +1011,7 @@ private struct FixtureAssistantTransport: AssistantTransport {
     var expectsSelectionText: Bool = false
     var expectsVerificationResponse: Bool = false
     var expectsQuickClarification: Bool = false
+    var expectsVisualEvidenceInstruction: Bool = false
     var expectedMaxOutputTokens: Int?
 
     func send(_ request: URLRequest) async throws -> AssistantTransportResponse {
@@ -1060,6 +1063,14 @@ private struct FixtureAssistantTransport: AssistantTransport {
             .compactMap { $0["text"] as? String }
             .first { $0.hasPrefix("用户正在阅读教材 PDF") }
         precondition((pageText != nil) == expectsPageContent, "Expected page content presence to match scope")
+        if expectsVisualEvidenceInstruction {
+            precondition(
+                (pageText?.contains("页面图像是这页的原始证据") == true
+                    || pageText?.contains("页面图像是原始证据") == true)
+                    && pageText?.contains("以图像为准") == true,
+                "Expected OCR-backed page requests to prioritize the page image"
+            )
+        }
         let selectionText = content.filter { $0["type"] as? String == "input_text" }
             .compactMap { $0["text"] as? String }
             .first { $0.hasPrefix("用户在 PDF 中选中的原文") }
