@@ -140,6 +140,8 @@ struct LearningInspector: View {
     /// 验证提示回答完成后，下一次输入应被理解为用户自己的回答；
     /// 它只存在于当前阅读现场，不把 Satori 变成强制测验系统。
     @State private var pendingVerification = false
+    /// 只有用户明确点了「回答」才进入验证回答模式；普通追问不应被误判。
+    @State private var verificationAnswerMode = false
     @State private var draftIsVerification = false
     @FocusState private var isQuestionFocused: Bool
     @State private var requestTask: Task<Void, Never>?
@@ -235,6 +237,7 @@ struct LearningInspector: View {
             // Once the reader moves on, the next question is a normal reading
             // question—not an answer to an old prompt.
             pendingVerification = false
+            verificationAnswerMode = false
             // 章节选择自动同步阅读位置：翻到别的章节时取消手动选择，跟随当前章节。
             if let selectedChapterID,
                let selected = chapters.first(where: { $0.id == selectedChapterID }),
@@ -585,13 +588,21 @@ struct LearningInspector: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("理解验证")
                     .font(.caption.weight(.semibold))
-                Text("先用自己的话回答上面的情境；也可以直接继续提问。")
+                Text("想回答情境就点“回答”；也可以直接继续提问。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
-            Button("跳过，继续提问") {
+            Button("回答") {
+                verificationAnswerMode = true
+                isQuestionFocused = true
+            }
+            .buttonStyle(.borderless)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(SatoriTheme.accent)
+            Button("继续提问") {
                 pendingVerification = false
+                verificationAnswerMode = false
                 isQuestionFocused = true
             }
             .buttonStyle(.borderless)
@@ -1779,7 +1790,7 @@ struct LearningInspector: View {
     }
 
     private var composerPlaceholder: String {
-        if pendingVerification {
+        if pendingVerification && verificationAnswerMode {
             return "用自己的话回答上面的情境…"
         }
         if turns.isEmpty {
@@ -1793,8 +1804,11 @@ struct LearningInspector: View {
 
     private var composerHint: String {
         let web = allowsWebSearch ? "、联网" : ""
-        if pendingVerification, !isThinking {
+        if pendingVerification, verificationAnswerMode, !isThinking {
             return "先用自己的话回答上面的情境 · Enter 发送 · Shift+Enter 换行 · 参考：最近对话、附件\(web)"
+        }
+        if pendingVerification, !isThinking {
+            return "可以直接继续提问；想回答情境请点上方“回答” · Enter 发送 · Shift+Enter 换行 · 参考：最近对话、附件\(web)"
         }
         let scopeText: String
         if isThinking, !draftQuestion.isEmpty {
@@ -1860,6 +1874,7 @@ struct LearningInspector: View {
         completedElsewherePage = nil
         recentCompletedPage = nil
         pendingVerification = false
+        verificationAnswerMode = false
         draftIsVerification = false
         requestPhase = .preparing
         do {
@@ -1917,13 +1932,17 @@ struct LearningInspector: View {
         let request = (suppliedQuestion ?? question).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty, !isThinking else { return }
 
-        // Only a deliberate send from the composer answers the verification
-        // prompt. Selection actions and quick prompts are new reading actions
-        // and must not be mislabeled as the student's answer.
-        let isAnswerToVerification = pendingVerification && !verification && suppliedQuestion == nil
+        // Only a deliberate send after explicitly entering answer mode answers
+        // the verification prompt. Ordinary composer questions, selection
+        // actions, and quick prompts are new reading actions.
+        let isAnswerToVerification = pendingVerification
+            && verificationAnswerMode
+            && !verification
+            && suppliedQuestion == nil
         let usesWebSearch = allowsWebSearch
             || (!verification && QwenLearningAssistant.shouldAutoEnableWebSearch(for: request))
         pendingVerification = false
+        verificationAnswerMode = false
         draftIsVerification = verification
 
         // 输入框发送（suppliedQuestion == nil）优先沿用选区所在页；
@@ -2241,6 +2260,7 @@ struct LearningInspector: View {
             draftSelectionOffset = nil
             activeAttachmentPreviews = []
             pendingVerification = false
+            verificationAnswerMode = false
             draftIsVerification = false
             requestPhase = .preparing
             self.response = nil
@@ -2271,6 +2291,7 @@ struct LearningInspector: View {
         turns.append(turn)
         recentCompletedPage = targetPage
         pendingVerification = draftIsVerification
+        verificationAnswerMode = false
         draftIsVerification = false
         requestPhase = .preparing
         draftQuestion = ""
@@ -2312,6 +2333,7 @@ struct LearningInspector: View {
         completedElsewherePage = nil
         recentCompletedPage = nil
         pendingVerification = false
+        verificationAnswerMode = false
         draftIsVerification = false
         requestPhase = .preparing
         pendingSelectionPage = nil
