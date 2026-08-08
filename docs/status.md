@@ -47,6 +47,7 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Explicit external-information requests such as “找资料、查最新、给来源/链接、有没有过时” now auto-enable web search for that one turn and expose the search/source state; ordinary PDF understanding does not silently leave the local reading flow.
 - Deterministic page-count questions now resolve from the PDF/章节导航 locally, so “这一章有多少页” does not spend a Qwen request or wait for a first token.
 - Reading-first subtraction pass: the course sidebar no longer surfaces due-review counts or the streak/badge wall, and the composer no longer carries a permanent “运行代码” button. Review data and the secondary run space remain intact, but comprehension is now the primary visible action.
+- Selection context alignment: “接上文” now sends the previous page together with the selected passage's current page; when a user is already drafting a question, the visible context picker switches to that page range instead of keeping the broader scope hidden.
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 

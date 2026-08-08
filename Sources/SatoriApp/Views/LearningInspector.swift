@@ -243,18 +243,29 @@ struct LearningInspector: View {
         activeSelectionText = text
         activeSelectionPage = request.pageIndex
         activeSelectionOffset = request.position?.normalizedPageOffset
-        let prompt = selectionPrompt(for: request.intent)
+        let selectionContextScope = selectionScope(for: request.intent, pageIndex: request.pageIndex)
+        let prompt = selectionPrompt(for: request.intent, pageIndex: request.pageIndex)
         if question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isThinking {
             DispatchQueue.main.async {
                 askAssistant(
                     prompt,
                     pageOverride: request.pageIndex,
-                    scope: .page,
+                    scope: selectionContextScope,
                     selectionText: text,
                     selectionOffset: request.position?.normalizedPageOffset
                 )
             }
         } else {
+            // 用户已经在输入问题：把选区动作的上下文同步到可见选择器，
+            // 让他知道下一次发送会带哪些页，也允许他继续手动覆盖范围。
+            switch selectionContextScope {
+            case let .pageRange(start, end):
+                contextMode = .pageRange
+                rangeStart = start + 1
+                rangeEnd = end + 1
+            default:
+                contextMode = .page
+            }
             let anchoredPrompt = "\(prompt)\n\n选中的原文：\n「\(text)」"
             question += question.isEmpty ? anchoredPrompt : "\n\n" + anchoredPrompt
             DispatchQueue.main.async {
@@ -627,13 +638,20 @@ struct LearningInspector: View {
         .padding(.bottom, SatoriTheme.Spacing.sm)
     }
 
-    private func selectionPrompt(for intent: ReaderSelectionIntent) -> String {
+    private func selectionScope(for intent: ReaderSelectionIntent, pageIndex: Int) -> LearningContextScope {
+        guard intent == .context, pageIndex > 0 else { return .page }
+        return .pageRange(start: pageIndex - 1, end: pageIndex)
+    }
+
+    private func selectionPrompt(for intent: ReaderSelectionIntent, pageIndex: Int) -> String {
         let instruction: String
         switch intent {
         case .explain:
             instruction = "请用更容易理解的话解释下面这段原文，并指出它在当前页中的关键意思。"
         case .context:
-            instruction = "请说明下面这段原文为什么出现在这里，以及它和当前页前后内容的关系。"
+            instruction = pageIndex > 0
+                ? "请结合前一页和当前页，说明下面这段原文为什么出现在这里：前一页在解决什么、当前页新增了什么，以及两页之间最重要的连接是什么。"
+                : "请说明下面这段原文为什么出现在当前页，以及它在这一页中承接和引出的内容。"
         case .example:
             instruction = "请给下面这段原文举一个具体、贴近日常或实际工作的例子，帮助我建立直觉。"
         case .experiment:
@@ -788,7 +806,7 @@ struct LearningInspector: View {
 
                     ZStack(alignment: .topLeading) {
                         if runCode.isEmpty {
-                            Text("把书里的代码粘贴到这里，或直接在 PDF 里选中一段代码点「运行这段」…")
+                            Text("把书里的代码粘贴到这里，运行一段小实验…")
                                 .font(.body)
                                 .foregroundStyle(.tertiary)
                                 .padding(.horizontal, SatoriTheme.Spacing.md + 1)
