@@ -33,15 +33,16 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Structured Markdown rendering for headings, paragraphs, ordered/unordered lists, quotes, inline formatting, links, and copyable code blocks
 - Follow-up questions include at most the latest six local text turns while Model Studio response storage remains disabled
 - Reading-bar chapter navigator: the current section/chapter is always visible; ⌘T (or the reading-bar button) opens a TOC drawer that lists chapters and subsections with outline-depth indentation, auto-scrolls to and highlights the current position, and jumps on click. Page ranges are hierarchy-aware (a chapter spans its own start to the next same-level entry, so 第一章 = the whole chapter while 第一节 = just that section); sources prefer the PDF's own outline, falling back to linked course-directory items, and the outline extraction is reused for directory page linking and the question-context chapter picker
-- Themed PDF selection: the default system-blue highlight is overlaid with the lavender accent, and the floating 问 AI / 运行 / 复制 bar is restyled as a compact rounded capsule (primary action filled, secondary actions borderless with lavender hover) to match the app theme in both light and dark mode
+- Themed PDF selection: the default system-blue highlight is overlaid with the lavender accent, and the floating 理解 / 接上文 / 举例 / 试试看 / 复制 bar is restyled as a compact rounded capsule (primary action filled, secondary actions borderless with lavender hover) to match the app theme in both light and dark mode
 - AI answers render flat on the paper surface (no card bubble, no gold emphasis); page extraction is parallelized (4-way for chapter/multi-page, 3-way local OCR for whole-book with the 40-page budget), and pasted/imported images are compressed on background tasks so large attachments don't block the UI
 - Flow-protected reading mode is available from the reading bar or ⌘⇧F; it temporarily hides course chrome and the learning inspector without losing the current document or page position. Manual questions now default to the current page context, with chapter/range/whole-document/none still available when the user needs a wider or narrower scope.
+- Selection-first understanding is now the primary reading loop: selecting text exposes 理解 / 接上文 / 举例 / 试试看 / 复制, the first four actions send an intent-aware question against the selected passage plus its current page, and the inspector keeps a visible source anchor with a one-click return to the original page. Code execution remains available from the secondary run space instead of competing with comprehension at the moment of selection.
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 
 ## Next milestone
 
-Add OCR-based editable table-of-contents extraction and source/URL/code attachments, then connect learning-directory items to pages and conversations. Scanned PDFs without outlines (`lang.pdf`, `software.pdf`) currently show no chapter menu; OCR-based TOC extraction would cover them.
+Make the selected passage a first-class `SelectionAnchor` in the core request/turn model, so answers can show precise local evidence and the anchor survives panel/layout changes. Then add opt-in micro experiments for concepts that genuinely benefit from manipulation; do not turn the reader into a general code execution surface. OCR-based editable table-of-contents extraction remains useful for scanned PDFs without outlines (`lang.pdf`, `software.pdf`), but it follows the comprehension loop rather than leading it.
 
 ## Open questions
 

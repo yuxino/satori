@@ -2,14 +2,25 @@ import AppKit
 import SwiftUI
 import SatoriCore
 
-/// A text selection the reader routed to the learning panel (「问 AI」) or the
-/// code runner (「运行」). `id` makes repeated identical selections distinct so
-/// `onChange` consumers fire every time the same passage is picked again.
+/// The next useful thing to do with a selected passage. Keep this small and
+/// reading-first: a selection is usually a request for understanding, not a
+/// request to manage a note or open a code workspace.
+enum ReaderSelectionIntent: String, Equatable, Sendable {
+    case explain
+    case context
+    case example
+    case experiment
+}
+
+/// A text selection the reader routed to the learning panel. `id` makes
+/// repeated identical selections distinct so `onChange` consumers fire every
+/// time the same passage is picked again.
 struct ReaderSelectionRequest: Equatable, Sendable {
     let id = UUID()
     let text: String
     let pageIndex: Int
     let url: URL?
+    let intent: ReaderSelectionIntent
 }
 
 /// ContentView-owned routing state for the reader ↔ panel channels (redesign
@@ -20,11 +31,8 @@ struct ReaderSelectionRequest: Equatable, Sendable {
 final class ReaderSelectionRouter: ObservableObject {
     static let shared = ReaderSelectionRouter()
 
-    /// 划选即问 channel: PDFReaderView's「问 AI」posts .satoriAskSelectionRequested,
-    /// ContentView stores it here.
-    /// TODO(LearningInspector 施工队): consume `pendingAskSelection` in
-    /// LearningInspector — match `url` against documentURL, then ask with the
-    /// selected text as the anchor and `pageIndex` as the page.
+    /// 划选即理解 channel: PDFReaderView's selection actions post
+    /// .satoriAskSelectionRequested, ContentView stores the typed request here.
     @Published var pendingAskSelection: ReaderSelectionRequest?
     /// Same channel for「运行」: selected code should land in the run space.
     /// TODO(LearningInspector 施工队): consume `pendingRunSelection` and fill
@@ -80,7 +88,10 @@ struct ContentView: View {
                 router.pendingAskSelection = ReaderSelectionRequest(
                     text: text,
                     pageIndex: pageIndex,
-                    url: note.userInfo?["url"] as? URL
+                    url: note.userInfo?["url"] as? URL,
+                    intent: ReaderSelectionIntent(
+                        rawValue: note.userInfo?["intent"] as? String ?? ""
+                    ) ?? .explain
                 )
             }
         }
@@ -91,7 +102,8 @@ struct ContentView: View {
                 router.pendingRunSelection = ReaderSelectionRequest(
                     text: text,
                     pageIndex: pageIndex,
-                    url: note.userInfo?["url"] as? URL
+                    url: note.userInfo?["url"] as? URL,
+                    intent: .explain
                 )
             }
         }

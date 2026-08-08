@@ -3,9 +3,10 @@ import PDFKit
 import SwiftUI
 import SatoriCore
 
-/// Notification posted by the selection toolbar's「问 AI」button. The learning
-/// panel consumes it via ContentView → ReaderSelectionRouter.pendingAskSelection
-/// to ask about the selected passage. userInfo: text, pageIndex, url.
+/// Notification posted by the selection toolbar's reading actions. The
+/// learning panel consumes it via ContentView → ReaderSelectionRouter and
+/// immediately starts the selected intent. userInfo: text, pageIndex, url,
+/// intent.
 extension Notification.Name {
     static let satoriAskSelectionRequested = Notification.Name("satori.askSelectionRequested")
     static let satoriRunSelectionRequested = Notification.Name("satori.runSelectionRequested")
@@ -13,7 +14,8 @@ extension Notification.Name {
     static let satoriReaderJumpRequested = Notification.Name("satori.readerJumpRequested")
 }
 
-/// The reading canvas. Text selection raises a floating「问 AI / 运行 / 复制」
+/// The reading canvas. Text selection raises a floating「理解 / 接上文 / 举例 /
+/// 试试看 / 复制」
 /// toolbar (AppKit overlay, theme-colored); the page's visible position is
 /// reported as a real 0…1 offset instead of a constant 0, and jumps can be
 /// targeted at a (page, offset) pair via the satoriReaderJumpRequested channel.
@@ -368,25 +370,17 @@ struct PDFReaderView: NSViewRepresentable {
 
         @MainActor private func makeToolbar() -> SelectionToolbarView {
             let bar = SelectionToolbarView()
-            bar.onAsk = { [weak self] in
-                self?.deliverPinnedSelection { text, pageIndex in
-                    self?.onAskSelection?(text, pageIndex)
-                    NotificationCenter.default.post(
-                        name: .satoriAskSelectionRequested,
-                        object: nil,
-                        userInfo: ["text": text, "pageIndex": pageIndex, "url": self?.observedView?.document?.documentURL as Any]
-                    )
-                }
+            bar.onExplain = { [weak self] in
+                self?.deliverSelection(intent: .explain)
             }
-            bar.onRun = { [weak self] in
-                self?.deliverPinnedSelection { text, pageIndex in
-                    self?.onRunSelection?(text, pageIndex)
-                    NotificationCenter.default.post(
-                        name: .satoriRunSelectionRequested,
-                        object: nil,
-                        userInfo: ["text": text, "pageIndex": pageIndex, "url": self?.observedView?.document?.documentURL as Any]
-                    )
-                }
+            bar.onContext = { [weak self] in
+                self?.deliverSelection(intent: .context)
+            }
+            bar.onExample = { [weak self] in
+                self?.deliverSelection(intent: .example)
+            }
+            bar.onExperiment = { [weak self] in
+                self?.deliverSelection(intent: .experiment)
             }
             bar.onCopy = { [weak self] in
                 self?.deliverPinnedSelection { text, _ in
@@ -396,6 +390,22 @@ struct PDFReaderView: NSViewRepresentable {
             }
             toolbar = bar
             return bar
+        }
+
+        @MainActor private func deliverSelection(intent: ReaderSelectionIntent) {
+            deliverPinnedSelection { [weak self] text, pageIndex in
+                self?.onAskSelection?(text, pageIndex)
+                NotificationCenter.default.post(
+                    name: .satoriAskSelectionRequested,
+                    object: nil,
+                    userInfo: [
+                        "text": text,
+                        "pageIndex": pageIndex,
+                        "url": self?.observedView?.document?.documentURL as Any,
+                        "intent": intent.rawValue
+                    ]
+                )
+            }
         }
 
         /// The page of the pinned selection (first selected page), falling
@@ -428,8 +438,10 @@ struct PDFReaderView: NSViewRepresentable {
 /// positioned in the view's coordinate space. Surfaces use the shared theme
 /// tokens (SatoriThemeAppKit) so it tracks light/dark automatically.
 final class SelectionToolbarView: NSView {
-    var onAsk: (() -> Void)?
-    var onRun: (() -> Void)?
+    var onExplain: (() -> Void)?
+    var onContext: (() -> Void)?
+    var onExample: (() -> Void)?
+    var onExperiment: (() -> Void)?
     var onCopy: (() -> Void)?
 
     init() {
@@ -445,10 +457,12 @@ final class SelectionToolbarView: NSView {
         layer?.shadowRadius = 12
         layer?.shadowOffset = CGSize(width: 0, height: -4)
 
-        let ask = makeButton(title: "问 AI", symbol: "sparkles", action: #selector(askTapped), prominent: true)
-        let run = makeButton(title: "运行", symbol: "play.fill", action: #selector(runTapped), prominent: false)
+        let explain = makeButton(title: "理解", symbol: "sparkles", action: #selector(explainTapped), prominent: true)
+        let context = makeButton(title: "接上文", symbol: "arrow.turn.up.left", action: #selector(contextTapped), prominent: false)
+        let example = makeButton(title: "举例", symbol: "lightbulb", action: #selector(exampleTapped), prominent: false)
+        let experiment = makeButton(title: "试试看", symbol: "wand.and.stars", action: #selector(experimentTapped), prominent: false)
         let copy = makeButton(title: "复制", symbol: "doc.on.doc", action: #selector(copyTapped), prominent: false)
-        let stack = NSStackView(views: [ask, run, copy])
+        let stack = NSStackView(views: [explain, context, example, experiment, copy])
         stack.orientation = .horizontal
         stack.spacing = 2
         stack.edgeInsets = NSEdgeInsets(top: 4, left: 5, bottom: 4, right: 5)
@@ -501,8 +515,10 @@ final class SelectionToolbarView: NSView {
         layer.add(group, forKey: "appear")
     }
 
-    @objc private func askTapped() { onAsk?() }
-    @objc private func runTapped() { onRun?() }
+    @objc private func explainTapped() { onExplain?() }
+    @objc private func contextTapped() { onContext?() }
+    @objc private func exampleTapped() { onExample?() }
+    @objc private func experimentTapped() { onExperiment?() }
     @objc private func copyTapped() { onCopy?() }
 }
 

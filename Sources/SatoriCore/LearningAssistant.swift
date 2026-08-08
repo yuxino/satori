@@ -177,6 +177,9 @@ public struct QwenLearningAssistant: LearningAssistant {
     你是 Satori 的学习理解助手。默认使用简体中文，直接回答问题。
     优先依据用户提供的 PDF 原文；原文可能包含一页或多页，每段以【第 N 页】标注，
     请综合所有提供的页面回答，不要假装看到了未提供的页面。
+    如果请求中包含独立的“用户在 PDF 中选中的原文”，那段文字就是用户此刻卡住的对象：先围绕它回答，
+    再用当前页解释它为什么出现在这里。默认先给一句话结论，再给必要的原文依据和解释，
+    避免把用户拖进一篇长教程；只有用户继续追问时才展开更多背景。
     可以参考前面的本地学习问答理解“这里”“刚才”等追问，但本轮页面证据优先。
     历史对话中提到的图片当前不可见，若需图片细节请用户重新附图。
     回答依次包含“原文依据”“解释”；只有确实超出原文时才增加“补充推断”，并明确标注。
@@ -201,6 +204,9 @@ public struct QwenLearningAssistant: LearningAssistant {
     private let apiHost: URL
     private let modelID: String
     private let pageContent: LearningPageContent?
+    /// 用户在 PDF 中主动选中的原文。它和问题分开传输，让模型明确
+    /// 这段文字是本轮优先理解的对象，而不是普通聊天内容。
+    private let selectionText: String?
     private let additionalImagesJPEG: [Data]
     private let conversationContext: [LearningConversationContext]
     private let allowsWebSearch: Bool
@@ -212,6 +218,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         apiHost: URL = QwenLearningAssistant.defaultAPIHost,
         modelID: String = QwenLearningAssistant.defaultModelID,
         pageContent: LearningPageContent?,
+        selectionText: String? = nil,
         additionalImagesJPEG: [Data] = [],
         conversationContext: [LearningConversationContext] = [],
         allowsWebSearch: Bool = false,
@@ -223,6 +230,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         let normalizedModelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         self.modelID = normalizedModelID.isEmpty ? Self.defaultModelID : normalizedModelID
         self.pageContent = pageContent
+        self.selectionText = selectionText?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.additionalImagesJPEG = additionalImagesJPEG
         self.conversationContext = conversationContext
         self.allowsWebSearch = allowsWebSearch
@@ -451,6 +459,13 @@ public struct QwenLearningAssistant: LearningAssistant {
         var content: [InputContent] = []
         if let item = makePageContentItem(pageNumber: pageNumber) {
             content.append(item)
+        }
+        if let selectionText, !selectionText.isEmpty {
+            content.append(.init(
+                type: "input_text",
+                text: "用户在 PDF 中选中的原文（这是本轮优先解释的对象）：\n「\(String(selectionText.prefix(4_000)))」",
+                imageURL: nil
+            ))
         }
         content.append(contentsOf: makeAttachmentItems(imageBudget.images))
         content.append(.init(type: "input_text", text: "我的问题：\(question)", imageURL: nil))

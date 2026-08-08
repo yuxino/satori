@@ -64,6 +64,7 @@ struct LearningInspector: View {
 
     @Environment(\.openSettings) private var openSettings
     @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var router: ReaderSelectionRouter
     @State private var mode: InspectorMode = .ask
     @State private var question = ""
     /// 发送问题时给 AI 的上下文：默认带当前页，避免每次提问前先配置范围。
@@ -73,9 +74,13 @@ struct LearningInspector: View {
     @State private var rangeEnd = 1
     /// 「章节」上下文里用户选中的章节 id；nil 表示跟随当前章节。
     @State private var selectedChapterID: Int?
-    /// 上次「问 AI」选中的页码：文本已填入输入框等用户编辑/追问，
-    /// 发送时用它锚定上下文；用户翻页或自行改写后失效。
+    /// 上次选区所在页：用于用户继续追问时保持原文附近的上下文；
+    /// 用户翻页后失效。
     @State private var pendingSelectionPage: Int?
+    /// 当前正在理解的原文锚点。它不替代持久化问答，只负责让阅读现场
+    /// 在回答过程中保持可见，并提供一键返回原文。
+    @State private var activeSelectionText: String?
+    @State private var activeSelectionPage: Int?
     @State private var turns: [LearningTurn] = []
     @State private var draftQuestion = ""
     @State private var draftPageIndex = 0
@@ -118,8 +123,8 @@ struct LearningInspector: View {
     private let sessionStore = LearningSessionStore.shared
     private let responseBottomID = "learning-response-bottom"
     private let quickPrompts = [
-        "这一页主要在讲什么？",
-        "用更简单的话解释",
+        "这一页最重要的一个意思是什么？",
+        "作者为什么要这样讲？",
         "给我一个具体例子"
     ]
 
@@ -147,33 +152,17 @@ struct LearningInspector: View {
             refreshConfigurationState()
         }
 
-        // 划选即问 / 划选即运行（PDFReaderView 浮动工具条 → NotificationCenter →
-        // 本面板）。URL 匹配当前文档才响应，避免其他书页的划选误触发。
-        // 「问 AI」像 Cursor 一样把选中文字放进输入框，不自动发送：
-        // 用户可以补充、改写、追问后再自己发送。
-        .onReceive(NotificationCenter.default.publisher(for: .satoriAskSelectionRequested)) { note in
-            guard let text = note.userInfo?["text"] as? String,
-                  let selectionPage = note.userInfo?["pageIndex"] as? Int else { return }
-            let sourceURL = note.userInfo?["url"] as? URL
-            guard sourceURL == nil || sourceURL == documentURL else { return }
-            selectMode(.ask)
-            pendingSelectionPage = selectionPage
-            if question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                question = text
-            } else {
-                question += "\n" + text
-            }
-            // 下一帧聚焦输入框：用户选中后直接接着打字追问，不用再点一下。
-            DispatchQueue.main.async {
-                isQuestionFocused = true
-            }
+        // PDFReaderView 只负责发出通知，ContentView 将它转换为 typed
+        // request；这里消费 Router，因此沉浸模式下的选区动作不会丢失。
+        .onChange(of: router.pendingAskSelection) { _, request in
+            guard let request else { return }
+            router.pendingAskSelection = nil
+            handleSelection(request)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .satoriRunSelectionRequested)) { note in
-            guard let text = note.userInfo?["text"] as? String else { return }
-            let sourceURL = note.userInfo?["url"] as? URL
-            guard sourceURL == nil || sourceURL == documentURL else { return }
-            selectMode(.run)
-            runCode = text
+        .onChange(of: router.pendingRunSelection) { _, request in
+            guard let request else { return }
+            router.pendingRunSelection = nil
+            handleRunSelection(request)
         }
         .fileImporter(
             isPresented: $isImportingImage,
@@ -201,10 +190,46 @@ struct LearningInspector: View {
         }
     }
 
+    private func handleSelection(_ request: ReaderSelectionRequest) {
+        let text = request.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty,
+              request.url == nil || request.url == documentURL else { return }
+
+        selectMode(.ask)
+        pendingSelectionPage = request.pageIndex
+        activeSelectionText = text
+        activeSelectionPage = request.pageIndex
+        let prompt = selectionPrompt(for: request.intent)
+        if question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isThinking {
+            DispatchQueue.main.async {
+                askAssistant(
+                    prompt,
+                    pageOverride: request.pageIndex,
+                    scope: .page,
+                    selectionText: text
+                )
+            }
+        } else {
+            let anchoredPrompt = "\(prompt)\n\n选中的原文：\n「\(text)」"
+            question += question.isEmpty ? anchoredPrompt : "\n\n" + anchoredPrompt
+            DispatchQueue.main.async {
+                isQuestionFocused = true
+            }
+        }
+    }
+
+    private func handleRunSelection(_ request: ReaderSelectionRequest) {
+        let text = request.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty,
+              request.url == nil || request.url == documentURL else { return }
+        selectMode(.run)
+        runCode = text
+    }
+
     private var inspectorHeader: some View {
         VStack(spacing: SatoriTheme.Spacing.md) {
             HStack(spacing: SatoriTheme.Spacing.sm) {
-                Text("这本书")
+                Text("理解现场")
                     .font(.headline)
                 Spacer()
                 Button("回答设置", systemImage: "gearshape") { openSettings() }
@@ -303,6 +328,9 @@ struct LearningInspector: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: SatoriTheme.Spacing.lg) {
+                    if let activeSelectionText, let activeSelectionPage {
+                        selectionAnchorBanner(text: activeSelectionText, pageIndex: activeSelectionPage)
+                    }
                     if let completedPage = completedElsewherePage {
                         savedElsewhereBanner(pageIndex: completedPage)
                     }
@@ -371,6 +399,62 @@ struct LearningInspector: View {
             Divider()
             composer
         }
+    }
+
+    private func selectionAnchorBanner(text: String, pageIndex: Int) -> some View {
+        HStack(alignment: .top, spacing: SatoriTheme.Spacing.sm) {
+            Image(systemName: "text.quote")
+                .foregroundStyle(SatoriTheme.accent)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text("正在理解第 \(pageIndex + 1) 页")
+                        .font(.caption.weight(.semibold))
+                    Text("· 已锚定原文")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text(text.trimmingCharacters(in: .whitespacesAndNewlines))
+                    .font(.callout)
+                    .lineLimit(3)
+                    .foregroundStyle(.primary.opacity(0.82))
+                Button("回到原文", systemImage: "arrow.up.right") {
+                    onNavigateToPage(pageIndex)
+                }
+                .buttonStyle(.link)
+                .font(.caption.weight(.medium))
+            }
+            Spacer(minLength: 4)
+            Button("清除选区锚点", systemImage: "xmark") {
+                activeSelectionText = nil
+                activeSelectionPage = nil
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("隐藏这段原文，但不会删除问答")
+        }
+        .padding(SatoriTheme.Spacing.md)
+        .background(SatoriTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: SatoriTheme.Radius.md, style: .continuous)
+                .strokeBorder(SatoriTheme.accent.opacity(0.18), lineWidth: 1)
+        )
+    }
+
+    private func selectionPrompt(for intent: ReaderSelectionIntent) -> String {
+        let instruction: String
+        switch intent {
+        case .explain:
+            instruction = "请用更容易理解的话解释下面这段原文，并指出它在当前页中的关键意思。"
+        case .context:
+            instruction = "请说明下面这段原文为什么出现在这里，以及它和当前页前后内容的关系。"
+        case .example:
+            instruction = "请给下面这段原文举一个具体、贴近日常或实际工作的例子，帮助我建立直觉。"
+        case .experiment:
+            instruction = "如果这个概念适合做一个 30 秒的小实验，请设计一个安全、简单的实验；如果不适合，先说明原因再给一个可观察的替代例子。"
+        }
+        return instruction
     }
 
     /// 回答完成时用户已经翻页：提示它存进了哪一页，不再"答完就消失"。
@@ -636,7 +720,7 @@ struct LearningInspector: View {
             VStack(spacing: SatoriTheme.Spacing.sm) {
                 ForEach(quickPrompts, id: \.self) { prompt in
                     // 快捷提问就是围绕当前页的，显式带上页上下文；
-                    // 输入框里手打的问题默认不带上下文，用户可按需选择。
+                    // 输入框里手打的问题也默认以当前页为依据。
                     QuickPromptButton(prompt: prompt) { askAssistant(prompt, scope: .page) }
                 }
             }
@@ -1080,7 +1164,7 @@ struct LearningInspector: View {
         .background(.bar)
     }
 
-    /// 提问参考上下文选择：默认不带页上下文，需要时再选当前页/多页/整本书。
+    /// 提问参考上下文选择：默认锁定当前页，需要时再扩展到章节/多页/整本书。
     private var contextScopeRow: some View {
         HStack(spacing: SatoriTheme.Spacing.sm) {
             Menu {
@@ -1100,7 +1184,7 @@ struct LearningInspector: View {
             .menuStyle(.borderlessButton)
             .font(.caption)
             .foregroundStyle(.secondary)
-            .help("提问时给 AI 的参考内容。默认不带上下文，需要时再选。")
+            .help("提问时给 AI 的参考内容。默认以当前页为主，需要时再扩展范围。")
 
             if contextMode == .chapter, !chapters.isEmpty {
                 chapterPickerMenu
@@ -1351,12 +1435,13 @@ struct LearningInspector: View {
         _ suppliedQuestion: String? = nil,
         pageOverride: Int? = nil,
         excludingTurnID: UUID? = nil,
-        scope: LearningContextScope = .page
+        scope: LearningContextScope = .page,
+        selectionText: String? = nil
     ) {
         let request = (suppliedQuestion ?? question).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty, !isThinking else { return }
 
-        // 输入框发送（suppliedQuestion == nil）优先沿用「问 AI」选中的页码；
+        // 输入框发送（suppliedQuestion == nil）优先沿用选区所在页；
         // 快捷提问、时间线重问各自带自己的上下文。
         let targetPageIndex: Int
         if let pageOverride {
@@ -1368,7 +1453,7 @@ struct LearningInspector: View {
             targetPageIndex = pageIndex
         }
 
-        // 输入框发送跟着选择器走（默认不带上下文）；快捷提问、重问各自带上下文。
+        // 输入框发送跟着选择器走（默认当前页）；快捷提问、重问各自带上下文。
         let effectiveScope: LearningContextScope
         if suppliedQuestion == nil {
             switch contextMode {
@@ -1484,6 +1569,7 @@ struct LearningInspector: View {
                 apiKey: config.apiKey,
                 modelID: config.modelID,
                 pageContent: pageContent,
+                selectionText: selectionText,
                 additionalImagesJPEG: submittedAttachments.map(\.jpegData),
                 conversationContext: context,
                 allowsWebSearch: allowsWebSearch,

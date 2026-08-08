@@ -176,6 +176,21 @@ struct SatoriCoreTests {
         precondition(apiResponse.sourceKind == .web, "Expected web source label when citations are returned")
         precondition(apiResponse.citations.first?.url.absoluteString == "https://example.com/source", "Expected URL citation")
 
+        let selectionResponse = await QwenLearningAssistant(
+            apiKey: "fixture-key",
+            pageContent: .text("fixture page text"),
+            selectionText: "文件系统在不同操作系统中有不同的结构",
+            transport: FixtureAssistantTransport(
+                expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
+                expectedModelID: "qwen3.8-max",
+                expectedImageCount: 0,
+                expectsWebSearch: false,
+                expectedHistoryTurnCount: 0,
+                expectsSelectionText: true
+            )
+        ).explain(request: "用更简单的话解释", pageIndex: 2)
+        precondition(selectionResponse.text == "fixture explanation", "Expected selected-passage output text")
+
         let imageResponse = await QwenLearningAssistant(
             apiKey: "fixture-key",
             apiHost: URL(string: "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/")!,
@@ -466,6 +481,7 @@ private struct FixtureAssistantTransport: AssistantTransport {
     let expectsWebSearch: Bool
     let expectedHistoryTurnCount: Int
     var expectsPageContent: Bool = true
+    var expectsSelectionText: Bool = false
 
     func send(_ request: URLRequest) async throws -> AssistantTransportResponse {
         try validate(request, expectsStreaming: false)
@@ -513,6 +529,13 @@ private struct FixtureAssistantTransport: AssistantTransport {
             .compactMap { $0["text"] as? String }
             .first { $0.hasPrefix("用户正在阅读教材 PDF") }
         precondition((pageText != nil) == expectsPageContent, "Expected page content presence to match scope")
+        let selectionText = content.filter { $0["type"] as? String == "input_text" }
+            .compactMap { $0["text"] as? String }
+            .first { $0.hasPrefix("用户在 PDF 中选中的原文") }
+        precondition((selectionText != nil) == expectsSelectionText, "Expected selected passage presence to match request")
+        if expectsSelectionText {
+            precondition(selectionText?.contains("文件系统在不同操作系统中有不同的结构") == true, "Expected selected passage to be preserved as a separate input")
+        }
         let images = content.filter { $0["type"] as? String == "input_image" }
         precondition(images.count == expectedImageCount, "Expected page and attachment image inputs")
         precondition(images.allSatisfy { ($0["image_url"] as? String)?.hasPrefix("data:image/jpeg;base64,") == true }, "Expected Base64 JPEG data URLs")
