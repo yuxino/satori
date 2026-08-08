@@ -3,6 +3,28 @@ import Foundation
 /// Chooses a bounded set of pages that preserves a book's shape when a
 /// whole-document request cannot include every page in the model context.
 public enum ReadingSamplePlan {
+    /// Chooses a very small visual sample for a scanned chapter route.
+    /// The text route already carries many bounded samples; images should only
+    /// establish the chapter's visual grammar without turning the first answer
+    /// into an image-heavy request. The first and middle samples usually show
+    /// the chapter opening plus one representative diagram/code page.
+    public static func representativeImagePageIndices(
+        from pageIndices: [Int],
+        maxCount: Int = 2
+    ) -> [Int] {
+        let ordered = Array(Set(pageIndices)).sorted()
+        guard !ordered.isEmpty, maxCount > 0 else { return [] }
+        let count = min(maxCount, ordered.count)
+        if count == 1 { return [ordered[0]] }
+        if count == 2 {
+            return [ordered[0], ordered[ordered.count / 2]]
+        }
+        let positions = (0..<count).map { slot in
+            Int((Double(slot) * Double(ordered.count - 1) / Double(count - 1)).rounded())
+        }
+        return positions.map { ordered[$0] }
+    }
+
     /// Samples a bounded range while keeping its page numbers in the
     /// document's coordinate system. This is used for chapter route maps,
     /// where the book's first pages are irrelevant to the current chapter.

@@ -534,6 +534,14 @@ struct SatoriCoreTests {
         precondition(chapterMapPages.contains(182) && chapterMapPages.contains(227), "Expected chapter maps to keep both boundaries")
         precondition(chapterMapPages.contains(189) && chapterMapPages.contains(218), "Expected chapter maps to keep outline anchors inside the range")
         precondition(chapterMapPages.count <= 16, "Expected chapter maps to respect the sampling budget")
+        precondition(
+            ReadingSamplePlan.representativeImagePageIndices(from: chapterMapPages) == [182, 206],
+            "Expected scanned chapter routes to keep only opening and middle visual samples"
+        )
+        precondition(
+            ReadingSamplePlan.representativeImagePageIndices(from: [4], maxCount: 2) == [4],
+            "Expected a one-page chapter route to keep its only visual sample"
+        )
 
         let apiResponse = await QwenLearningAssistant(
             apiKey: "fixture-key",

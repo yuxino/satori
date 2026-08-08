@@ -64,7 +64,7 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Rapid-reading map: book/chapter overview questions now ask the assistant to identify the core problem, concept progression, read-first/skip-first details, and hands-on experiments instead of producing a page-by-page or table-of-contents summary.
 - Compact follow-ups: “简化 / 字太多 / 一句话 / 三句话 / 更简单” now lower the model's output budget, so a reader's request for less does not still return the full explanation template.
 - Selection-first answers: selected passages now default to a one-sentence summary plus at most three key points; explicit “完整代码 / 逐行 / 深入推导” requests retain the larger response budget for deliberate deep dives.
-- Scanned chapter maps: short page bridges may use Qwen OCR for accuracy, but a chapter-range request with more than four pages now stays on local Vision OCR instead of launching one remote OCR request per page.
+- Scanned chapter maps: short page bridges may use Qwen OCR for accuracy, while a chapter route stays local and carries at most two representative original page images when the PDF has no reliable text layer, preserving diagrams/code without making native-text maps heavier.
 - Quick-start alignment: the empty reading panel now asks “它在解决什么问题？” instead of “作者为什么要这样讲？”, keeping the first-click path grounded in the page rather than unsupported author-intent guesses.
 - Textbook correctness checks: “有没有错 / 对不对 / 靠谱吗” now separate page evidence, OCR/layout suspicion, and genuinely unanswerable claims before calling textbook content wrong.
 - Real system.pdf boundary fixture: the sixth chapter is verified as PDF pages 183–228 (46 pages); chapter-scope tests now use that actual outline instead of the earlier truncated 183–225 range.

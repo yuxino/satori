@@ -92,8 +92,8 @@ public enum LearningPageContent: Sendable, Equatable {
     /// should be sent too, so the model can verify names, numbers, and symbols.
     case textAndImage(String, Data)
     /// A reliable text layer plus one or more page images for visual evidence.
-    /// This is used for short page bridges; long chapter maps remain text-only
-    /// so the first answer stays fast and within a small image budget.
+    /// This is used for short page bridges and for at most two representative
+    /// images in scanned chapter maps; ordinary native-text maps stay text-only.
     case textAndImages(String, [LearningPageImage])
 }
 

@@ -202,8 +202,9 @@ enum PDFPageContextExtractor {
     /// A chapter route should answer “这章怎么读” quickly. It only needs the
     /// chapter's shape, not every paragraph: keep the first/last pages,
     /// evenly spaced representatives, and PDF outline anchors. Long scanned
-    /// chapters deliberately use local OCR only; precise page questions still
-    /// use the normal page/range path and can opt into Qwen OCR.
+    /// chapters use local OCR plus at most two representative page images so
+    /// diagrams/code survive the route map; precise page questions still use
+    /// the normal page/range path and can opt into Qwen OCR.
     private static func extractChapterMap(
         from url: URL,
         range: ClosedRange<Int>
@@ -231,6 +232,27 @@ enum PDFPageContextExtractor {
             concurrency: 4
         )
 
+        // A scan often has no usable PDF text layer. The OCR route is still
+        // useful for headings, but it can flatten a flowchart, code block, or
+        // table into misleading prose. Detect that case from the sampled
+        // pages and carry only two original page images into the chapter map.
+        // Native text PDFs remain text-only, keeping their first answer light.
+        let nativeTextPageCount = indices.reduce(into: 0) { count, pageIndex in
+            let text = ExtractedTextNormalizer.normalize(document.page(at: pageIndex)?.string ?? "")
+            if text.count >= 40, !ExtractedTextNormalizer.likelyDegraded(text) {
+                count += 1
+            }
+        }
+        let isScanLike = !indices.isEmpty && nativeTextPageCount < max(1, indices.count / 2)
+        let visualIndices = isScanLike
+            ? ReadingSamplePlan.representativeImagePageIndices(from: indices, maxCount: 2)
+            : []
+        let visualPages: [LearningPageImage] = visualIndices.compactMap { pageIndex in
+            guard let page = document.page(at: pageIndex),
+                  let jpeg = renderPageJPEG(page) else { return nil }
+            return LearningPageImage(pageIndex: pageIndex, jpegData: jpeg)
+        }
+
         let limit = 30_000
         var assembled = "【章节路线抽样页】\n"
         for (pageIndex, text) in pages {
@@ -239,8 +261,12 @@ enum PDFPageContextExtractor {
             if assembled.count >= limit { break }
         }
         let trimmed = assembled.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed != "【章节路线抽样页】" else { return nil }
-        return .text(String(trimmed.prefix(limit)))
+        guard trimmed != "【章节路线抽样页】" || !visualPages.isEmpty else { return nil }
+        let boundedText = String(trimmed.prefix(limit))
+        if !visualPages.isEmpty {
+            return .textAndImages(boundedText, visualPages)
+        }
+        return .text(boundedText)
     }
 
     private static func extractPage(
