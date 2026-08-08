@@ -155,6 +155,7 @@ struct LearningInspector: View {
     @State private var runOutput: CodeRunResult?
     @State private var isRunning = false
     @State private var runTask: Task<Void, Never>?
+    @State private var runNotice = ""
 
     private let sessionStore = LearningSessionStore.shared
     private let responseBottomID = "learning-response-bottom"
@@ -365,6 +366,7 @@ struct LearningInspector: View {
         selectMode(.run)
         runCode = text
         runSourcePage = request.pageIndex
+        runNotice = ""
     }
 
     /// A reader who has already selected code often says only “运行”. Route
@@ -376,27 +378,16 @@ struct LearningInspector: View {
               let code = activeSelectionText?.trimmingCharacters(in: .whitespacesAndNewlines),
               !code.isEmpty,
               let language = CodeRunner.languageHint(for: code),
-              isRunIntent(request) else { return false }
+              CodeRunner.isRunIntent(request) else { return false }
         selectMode(.run)
         runCode = code
         runLanguage = language
         runSourcePage = activeSelectionPage
         runOutput = nil
+        runNotice = ""
         question = ""
         pendingSelectionPage = nil
         return true
-    }
-
-    private func isRunIntent(_ request: String) -> Bool {
-        let normalized = request
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
-        guard normalized.count <= 20,
-              !["为什么", "怎么写", "如何写", "运行过程", "执行过程"].contains(where: normalized.contains)
-        else { return false }
-        return ["运行", "执行", "运行一下", "执行一下", "跑一下", "跑跑看", "试着运行", "帮我运行"]
-            .contains { normalized == $0 || normalized.contains($0) }
     }
 
     private var inspectorHeader: some View {
@@ -980,6 +971,13 @@ struct LearningInspector: View {
                             || !CodeRunner.safety(for: runCode, language: runLanguage).isAllowed) && !isRunning)
                     }
 
+                    if !runNotice.isEmpty {
+                        Label(runNotice, systemImage: "info.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
                     if let runSourcePage {
                         Label("来自第 \(runSourcePage + 1) 页的选区；请先检查代码，再运行", systemImage: "text.quote")
                             .font(.caption)
@@ -988,7 +986,7 @@ struct LearningInspector: View {
 
                     ZStack(alignment: .topLeading) {
                         if runCode.isEmpty {
-                            Text("把书里的纯计算代码粘贴到这里，运行一段小实验…")
+                            Text("先从 PDF 选中一段完整的纯计算代码，或把代码粘贴到这里…")
                                 .font(.body)
                                 .foregroundStyle(.tertiary)
                                 .padding(.horizontal, SatoriTheme.Spacing.md + 1)
@@ -2081,6 +2079,16 @@ struct LearningInspector: View {
         guard !request.isEmpty, !isThinking else { return }
 
         if suppliedQuestion == nil, !verification, routeRunIntentIfPossible(for: request) {
+            return
+        }
+
+        if suppliedQuestion == nil, !verification, !pendingVerification, CodeRunner.isRunIntent(request) {
+            selectMode(.run)
+            runCode = ""
+            runSourcePage = nil
+            runOutput = nil
+            runNotice = "先在 PDF 中选中一段完整代码；扫描页可以先用“框选理解”。Satori 不会从整页 OCR 猜代码。"
+            question = ""
             return
         }
 

@@ -155,6 +155,26 @@ public enum CodeRunner {
         return nil
     }
 
+    /// Distinguishes a short request to launch the selected snippet from a
+    /// conceptual question such as “运行机制” or “运行过程”. The UI uses
+    /// this to enter the experiment space without spending an AI turn.
+    public static func isRunIntent(_ request: String) -> Bool {
+        let normalized = request
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+        guard normalized.count <= 20,
+              !["为什么", "怎么写", "如何写", "运行过程", "执行过程"].contains(where: normalized.contains)
+        else { return false }
+        if ["运行", "执行", "跑一下", "跑跑看"].contains(normalized) {
+            return true
+        }
+        return [
+            "运行一下", "执行一下", "试着运行", "帮我运行", "帮我执行",
+            "运行这段", "执行这段", "跑一下这段"
+        ].contains { normalized.contains($0) }
+    }
+
     /// Defense-in-depth gate for both the answer-card runner and the secondary
     /// experiment space. A blocked snippet can still be copied out, but Satori
     /// will not execute it locally.

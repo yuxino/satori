@@ -977,6 +977,13 @@ struct SatoriCoreTests {
                 && CodeRunner.languageHint(for: "这是一段普通教材解释") == nil,
             "Expected conservative language hints for selection-to-experiment routing"
         )
+        precondition(
+            CodeRunner.isRunIntent("运行")
+                && CodeRunner.isRunIntent("帮我运行这段")
+                && !CodeRunner.isRunIntent("运行机制")
+                && !CodeRunner.isRunIntent("解释运行过程"),
+            "Expected short run actions to stay separate from runtime concepts"
+        )
 
         // Code runner: an answer's example snippet can be executed locally.
         let pythonRun = await CodeRunner.run(
