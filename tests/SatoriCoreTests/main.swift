@@ -193,6 +193,10 @@ struct SatoriCoreTests {
             "Expected textbook criticism to stay grounded in page evidence"
         )
         precondition(
+            QwenLearningAssistant.defaultLearningInstructions.contains("不要在证据不足时把它称为“没用”"),
+            "Expected skip advice to stay scoped to the current reading goal"
+        )
+        precondition(
             QwenLearningAssistant.defaultLearningInstructions.contains("快速阅读地图"),
             "Expected book and chapter overviews to produce a reading map"
         )
@@ -252,6 +256,10 @@ struct SatoriCoreTests {
         )
         precondition(QwenLearningAssistant.responseTokenBudget(for: "我刚开始读这一章，请给我阅读路线图") == 900, "Expected reading maps to keep enough room for structure")
         precondition(QwenLearningAssistant.responseTokenBudget(for: "解释这一页") == 1_400, "Expected ordinary explanations to keep the normal budget")
+        precondition(
+            QwenLearningAssistant.responseTokenBudget(for: "这一章有什么值得看的") == 900,
+            "Expected priority questions to stay a compact reading map instead of a study checklist"
+        )
         precondition(QwenLearningAssistant.responseTokenBudget(for: "解释我选中的这段内容", hasSelection: true) == 700, "Expected selected-passage explanations to stay compact by default")
         precondition(QwenLearningAssistant.responseTokenBudget(for: "完整代码", hasSelection: true) == 1_400, "Expected explicit complete-code requests to keep enough room")
         precondition(

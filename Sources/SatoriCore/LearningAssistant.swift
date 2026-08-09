@@ -219,6 +219,7 @@ public struct QwenLearningAssistant: LearningAssistant {
     如果页面信息不足，直接说明缺少什么。不要要求用户做笔记或背诵。
     评价教材写法时只根据当前页面能观察到的结构（例如铺垫长、过渡弱、定义密集）；
     不要无依据地推断作者意图、概括“国内/国外教材”风格，或把个人感受说成事实。
+    当你建议“先放过”某个细节时，只说明它对当前阅读主线暂时不是必要条件；不要在证据不足时把它称为“没用”“废话”或“完全不重要”，也不要暗示它以后没有价值。
     """
 
     /// 模型能力矩阵。未知模型按最保守的 [.text] 处理：宁可请求前给出
@@ -286,7 +287,11 @@ public struct QwenLearningAssistant: LearningAssistant {
         if isCompactRequest(for: request) {
             return 420
         }
-        if ["阅读路线图", "阅读地图", "概念怎样递进", "看本章路线"].contains(where: normalized.contains) {
+        if [
+            "阅读路线图", "阅读地图", "概念怎样递进", "看本章路线",
+            "有什么值得看", "值得看", "有什么值得学", "值得学习",
+            "核心考点", "有什么重点", "重点呢"
+        ].contains(where: normalized.contains) {
             return 900
         }
         if hasSelection,
