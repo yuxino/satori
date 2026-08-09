@@ -980,10 +980,13 @@ public struct QwenLearningAssistant: LearningAssistant {
             sourceKind = .inference
         } else if !citations.isEmpty {
             sourceKind = .web
+        } else if pageContent != nil {
+            // Page text/image plus a crop is one PDF-grounded reading action,
+            // not an external source. The attachment chip already shows that
+            // visual evidence was included.
+            sourceKind = .currentPDF
         } else if !imageBudget.images.isEmpty {
             sourceKind = .relatedMaterial
-        } else if pageIndex != nil {
-            sourceKind = .currentPDF
         } else {
             sourceKind = .inference
         }
@@ -999,9 +1002,14 @@ public struct QwenLearningAssistant: LearningAssistant {
         )
     }
 
-    /// 流式期间的预判标签：按开关（联网搜索 → 附图 → 当前页）。
+    /// 流式期间的预判标签：联网搜索优先；有 PDF 页面上下文时，框选图仍归当前 PDF。
     private var predictedSourceKind: LearningSourceKind {
         if allowsWebSearch { return .web }
+        // A crop or page image is still evidence from the current PDF when
+        // pageContent is present. Labeling it as “关联资料” makes a student
+        // think the answer came from an external attachment instead of the
+        // page they are reading.
+        if pageContent != nil { return .currentPDF }
         if !additionalImagesJPEG.isEmpty { return .relatedMaterial }
         return .currentPDF
     }

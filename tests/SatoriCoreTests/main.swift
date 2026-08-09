@@ -788,12 +788,12 @@ struct SatoriCoreTests {
             conversationContext: [
                 .init(question: "之前的问题", answer: "之前的回答")
             ],
-            allowsWebSearch: true,
+            allowsWebSearch: false,
             transport: FixtureAssistantTransport(
                 expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
                 expectedModelID: "qwen3.8-max",
                 expectedImageCount: 1,
-                expectsWebSearch: true,
+                expectsWebSearch: false,
                 expectedHistoryTurnCount: 1
             )
         )
@@ -802,6 +802,7 @@ struct SatoriCoreTests {
             streamUpdates.append(update)
         }
         precondition(streamUpdates.first?.text == "fixture ", "Expected first streaming text delta")
+        precondition(streamUpdates.first?.sourceKind == .currentPDF, "Expected a PDF page plus a crop to stay labeled as the current PDF")
         precondition(streamUpdates.last?.text == "fixture explanation", "Expected assembled streaming response")
         precondition(streamUpdates.last?.citations.first?.url.absoluteString == "https://example.com/source", "Expected final streaming citations")
 
