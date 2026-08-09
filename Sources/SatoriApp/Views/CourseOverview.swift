@@ -237,11 +237,20 @@ private struct DocumentWorkspace: View {
             }.value
             guard !Task.isCancelled else { return }
             if outlineEntries.isEmpty {
+                // A text PDF without a native outline should not pay the
+                // scanned-book OCR cost. Use the reading-space directory as a
+                // local fallback; reserve bounded OCR for scan-like books.
+                guard document.contentKind == .scanned || document.contentKind == .mixed else {
+                    chapters = Self.makeChapters(entries: [], directory: course.learningDirectory)
+                    return
+                }
                 let scannedEntries = await Task.detached(priority: .utility) {
                     await ScannedOutlineExtractor.entries(url: url)
                 }.value
                 guard !Task.isCancelled else { return }
-                chapters = Self.makeScannedChapters(entries: scannedEntries)
+                chapters = scannedEntries.isEmpty
+                    ? Self.makeChapters(entries: [], directory: course.learningDirectory)
+                    : Self.makeScannedChapters(entries: scannedEntries)
             } else {
                 chapters = Self.makeChapters(entries: outlineEntries, directory: course.learningDirectory)
                 await linkDirectoryPages(entries: outlineEntries)
