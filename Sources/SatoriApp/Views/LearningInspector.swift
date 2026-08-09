@@ -1623,6 +1623,12 @@ struct LearningInspector: View {
             }
             .buttonStyle(.borderless)
             Menu {
+                if turn.pageIndex < pageCount - 1 {
+                    Button("继续到下一页", systemImage: "arrow.right") {
+                        continueToNextPage(from: turn)
+                    }
+                    Divider()
+                }
                 Button("验证一下", systemImage: "checkmark.circle") {
                     selectMode(.ask)
                     navigateToPage(
@@ -1666,6 +1672,22 @@ struct LearningInspector: View {
         }
         .font(.caption)
         .foregroundStyle(.secondary)
+    }
+
+    /// A completed answer is a natural handoff point in a textbook. Keep the
+    /// action in the overflow menu so the reading surface stays quiet, but let
+    /// a student move to the next page and ask for the smallest useful bridge
+    /// without retyping “接上文”.
+    private func continueToNextPage(from turn: LearningTurn) {
+        let nextPage = min(pageCount - 1, turn.pageIndex + 1)
+        guard nextPage > turn.pageIndex else { return }
+        selectMode(.ask)
+        navigateToPage(nextPage)
+        askAssistant(
+            "继续",
+            pageOverride: nextPage,
+            scope: .pageRange(start: turn.pageIndex, end: nextPage)
+        )
     }
 
     private var composer: some View {
