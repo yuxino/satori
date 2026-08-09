@@ -143,6 +143,10 @@ struct LearningInspector: View {
     /// 验证提示回答完成后，下一次输入应被理解为用户自己的回答；
     /// 它只存在于当前阅读现场，不把 Satori 变成强制测验系统。
     @State private var pendingVerification = false
+    /// Increments on every page change so a slow verification response cannot
+    /// resurrect its prompt after the reader has left and returned.
+    @State private var readingPositionRevision = 0
+    @State private var draftPageRevision = 0
     /// 只有用户明确点了「回答」才进入验证回答模式；普通追问不应被误判。
     @State private var verificationAnswerMode = false
     @State private var draftIsVerification = false
@@ -234,6 +238,7 @@ struct LearningInspector: View {
             stopRunning()
         }
         .onChange(of: pageIndex) { _, newPageIndex in
+            readingPositionRevision += 1
             if let recentCompletedPage, recentCompletedPage != newPageIndex {
                 completedElsewherePage = recentCompletedPage
                 self.recentCompletedPage = nil
@@ -2215,6 +2220,7 @@ struct LearningInspector: View {
 
         draftQuestion = request
         draftPageIndex = targetPageIndex
+        draftPageRevision = readingPositionRevision
         draftContextScope = effectiveScope
         draftAttachmentCount = submittedAttachments.count
         let effectiveSelectionText: String? = {
@@ -2498,6 +2504,8 @@ struct LearningInspector: View {
         turns.append(turn)
         recentCompletedPage = targetPage
         pendingVerification = draftIsVerification
+            && targetPage == pageIndex
+            && draftPageRevision == readingPositionRevision
         verificationAnswerMode = false
         draftIsVerification = false
         requestPhase = .preparing
