@@ -117,7 +117,6 @@ struct LearningInspector: View {
     @State private var scrollRequest = 0
     @State private var hasQwenConfiguration = false
     @State private var isCheckingConfiguration = false
-    @State private var configuredModelID: String?
     @State private var allowsWebSearch = false
     /// 本轮实际是否会联网；可能由用户开关触发，也可能由“找资料/查最新”等
     /// 明确意图自动触发，但不会永久改变下一轮的开关状态。
@@ -137,7 +136,7 @@ struct LearningInspector: View {
     @State private var submittedAttachmentsForActiveRequest: [LearningImageAttachment] = []
     @State private var isImportingImage = false
     @State private var attachmentStatus = ""
-    /// 这一轮回答开始的时间；用于「过程」脚注里显示耗时。
+    /// 这一轮回答开始的时间；只在流式等待期间提示是否仍在工作。
     @State private var streamStartDate: Date?
     @State private var requestPhase: RequestPhase = .preparing
     /// 验证提示回答完成后，下一次输入应被理解为用户自己的回答；
@@ -1247,13 +1246,14 @@ struct LearningInspector: View {
         }
     }
 
-    /// 「过程」脚注里的一枚小标签：这一轮问答实际发生了什么。
+    /// 阅读页脚里的一枚小标签：只保留能帮助读者判断依据的事实。
     private struct ProcessChip: Equatable {
         let symbol: String
         let text: String
     }
 
-    /// 回答卡片底部的处理过程：上下文、附图、联网搜索来源、模型、耗时。
+    /// 回答卡片底部的处理过程：上下文、附图、联网搜索来源。
+    /// 模型名和耗时属于调试信息，不应占据默认阅读空间。
     private func processChips(turn: LearningTurn, isActive: Bool) -> [ProcessChip] {
         var chips: [ProcessChip] = []
         if let label = contextAnchorLabel(turn.contextScope, pageIndex: turn.pageIndex) {
@@ -1266,12 +1266,6 @@ struct LearningInspector: View {
             chips.append(.init(symbol: "globe", text: "正在联网搜索…"))
         } else if !turn.citations.isEmpty {
             chips.append(.init(symbol: "globe", text: "联网搜索 · \(turn.citations.count) 个来源"))
-        }
-        if let modelID = configuredModelID, !modelID.isEmpty {
-            chips.append(.init(symbol: "cpu", text: modelID))
-        }
-        if !isActive, let duration = turn.responseDuration {
-            chips.append(.init(symbol: "clock", text: String(format: "%.1fs", duration)))
         }
         return chips
     }
@@ -2624,7 +2618,6 @@ struct LearningInspector: View {
     private func refreshConfigurationState() {
         let markedAsConfigured = QwenConfigurationStore.hasSavedConfigurationMarker()
         hasQwenConfiguration = markedAsConfigured
-        configuredModelID = QwenConfigurationStore.readModelID()
         guard markedAsConfigured, !isCheckingConfiguration else { return }
         isCheckingConfiguration = true
         Task {
