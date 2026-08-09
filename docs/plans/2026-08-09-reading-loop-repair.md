@@ -19,6 +19,14 @@ Two more failures appeared in the next student pass:
   positions. The outline destination points both land at the page top, so a
   page-only TOC jump cannot move between them when the page is already open.
 
+The next live `system.pdf` pass exposed a higher-risk comprehension failure.
+The student correctly chose disk plus random access for direct student-record
+lookup, but the feedback then claimed that every disk structure in figure 6-3
+supports random access. The source table says linked structure supports only
+sequential access. The same answer also silently collapsed the two-page
+188–189 evidence window that generated the scenario to page 189 while grading
+the student.
+
 ## Design
 
 `ReadingChapterSelector` identifies numbered chapters (`第 N 章` or
@@ -39,6 +47,15 @@ title offset. Native PDF outlines prefer text-layer geometry; scanned outlines
 carry a bounded Vision-OCR line offset when available. TOC clicks post a
 page-plus-offset jump even when the page number does not change.
 
+Verification prompts now retain their exact `LearningContextScope` until the
+reader explicitly enters answer mode. That scope is used for extraction,
+shown in the composer, carried by the active streaming card, and persisted on
+the completed turn. Stopped or stale verification requests cannot leave an
+answer state behind. Verification-response instructions require the model to
+evaluate only what the student actually said, use minimal supporting evidence,
+and inspect supplied figure/table/formula images item by item rather than
+generalizing across unseen cells.
+
 ## Verification
 
 Core checks cover noisy front matter, the `system.pdf`-shaped chapter list,
@@ -49,5 +66,9 @@ wraparound. The release app is built after the core checks. With the Mac
 unlocked, desktop verification also covered the repaired `software.pdf` TOC
 boundary, the Qwen connection smoke test, a chapter route, a constrained
 concept follow-up, a selected-passage micro experiment, and a two-page
-“接上文” bridge. The remaining student-pass check is the explicit
-“验证一下” follow-up and return-to-anchor behavior.
+“接上文” bridge. The next student-pass check covered the explicit
+“验证一下” follow-up and return-to-anchor behavior. The final desktop pass
+kept both the prompt and student answer on PDF pages 188–189, produced a short
+grounded permission-classification judgment without unrelated claims, cleared
+a stopped verification without leaving a false quiz banner, and restored the
+exact highlighted sentence on PDF page 188 through “返回”.

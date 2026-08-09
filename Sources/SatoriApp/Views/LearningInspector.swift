@@ -155,6 +155,10 @@ struct LearningInspector: View {
     /// 验证提示回答完成后，下一次输入应被理解为用户自己的回答；
     /// 它只存在于当前阅读现场，不把 Satori 变成强制测验系统。
     @State private var pendingVerification = false
+    /// The student's answer must use the same evidence window that produced
+    /// the verification scenario. Otherwise a two-page bridge silently
+    /// collapses to the current page while the student is being evaluated.
+    @State private var pendingVerificationScope: LearningContextScope?
     /// Increments on every page change so a slow verification response cannot
     /// resurrect its prompt after the reader has left and returned.
     @State private var readingPositionRevision = 0
@@ -263,6 +267,7 @@ struct LearningInspector: View {
             // Once the reader moves on, the next question is a normal reading
             // question—not an answer to an old prompt.
             pendingVerification = false
+            pendingVerificationScope = nil
             verificationAnswerMode = false
             // 章节选择自动同步阅读位置：只有离开当前顶层章才取消手动选择。
             // 旧逻辑拿最深的小节比较，导致用户选了“第六章”后翻到
@@ -522,9 +527,11 @@ struct LearningInspector: View {
             sourceKind: response?.sourceKind ?? .inference,
             citations: response?.citations ?? [],
             attachmentCount: draftAttachmentCount,
+            contextScope: draftContextScope,
             selectionText: draftSelectionText,
             selectionOffset: draftSelectionOffset,
             selectionAnchorOffset: draftSelectionOffset,
+            regionAnchor: draftRegionAnchor,
             attachmentNotice: response?.attachmentNotice
         )
     }
@@ -731,6 +738,7 @@ struct LearningInspector: View {
             .foregroundStyle(SatoriTheme.accent)
             Button("继续提问") {
                 pendingVerification = false
+                pendingVerificationScope = nil
                 verificationAnswerMode = false
                 isQuestionFocused = true
             }
@@ -2265,7 +2273,11 @@ struct LearningInspector: View {
     private var composerHint: String {
         let web = allowsWebSearch ? "、联网" : ""
         if pendingVerification, verificationAnswerMode, !isThinking {
-            return "先用自己的话回答上面的情境 · Enter 发送 · Shift+Enter 换行 · 参考：最近对话、附件\(web)"
+            let scopeText = contextAnchorLabel(
+                pendingVerificationScope ?? .page,
+                pageIndex: pageIndex
+            ) ?? readingPageLabel(pageIndex)
+            return "先用自己的话回答上面的情境 · Enter 发送 · Shift+Enter 换行 · 参考：\(scopeText)、最近对话、附件\(web)"
         }
         if pendingVerification, !isThinking {
             return "可以直接继续提问；想回答情境请点上方“回答” · Enter 发送 · Shift+Enter 换行 · 参考：最近对话、附件\(web)"
@@ -2340,6 +2352,7 @@ struct LearningInspector: View {
         completedElsewherePage = nil
         recentCompletedPage = nil
         pendingVerification = false
+        pendingVerificationScope = nil
         verificationAnswerMode = false
         draftIsVerification = false
         requestPhase = .preparing
@@ -2475,9 +2488,11 @@ struct LearningInspector: View {
             && verificationAnswerMode
             && !verification
             && suppliedQuestion == nil
+        let verificationAnswerScope = pendingVerificationScope
         let usesWebSearch = allowsWebSearch
             || (!verification && QwenLearningAssistant.shouldAutoEnableWebSearch(for: request))
         pendingVerification = false
+        pendingVerificationScope = nil
         verificationAnswerMode = false
         draftIsVerification = verification
 
@@ -2495,7 +2510,9 @@ struct LearningInspector: View {
 
         // 输入框发送跟着选择器走（默认智能范围）；快捷提问、重问各自带上下文。
         var effectiveScope: LearningContextScope
-        if suppliedQuestion == nil {
+        if isAnswerToVerification {
+            effectiveScope = verificationAnswerScope ?? .page
+        } else if suppliedQuestion == nil {
             switch contextMode {
             case .automatic:
                 effectiveScope = inferredContextScope(for: request, pageIndex: targetPageIndex) ?? .page
@@ -2843,6 +2860,7 @@ struct LearningInspector: View {
             draftRegionAnchor = nil
             activeAttachmentPreviews = []
             pendingVerification = false
+            pendingVerificationScope = nil
             verificationAnswerMode = false
             draftIsVerification = false
             requestPhase = .preparing
@@ -2876,9 +2894,11 @@ struct LearningInspector: View {
         )
         turns.append(turn)
         recentCompletedPage = targetPage
-        pendingVerification = draftIsVerification
+        pendingVerification = completion == .completed
+            && draftIsVerification
             && targetPage == pageIndex
             && draftPageRevision == readingPositionRevision
+        pendingVerificationScope = pendingVerification ? draftContextScope : nil
         verificationAnswerMode = false
         draftIsVerification = false
         requestPhase = .preparing
@@ -2920,6 +2940,7 @@ struct LearningInspector: View {
         completedElsewherePage = nil
         recentCompletedPage = nil
         pendingVerification = false
+        pendingVerificationScope = nil
         verificationAnswerMode = false
         draftIsVerification = false
         requestPhase = .preparing

@@ -1563,6 +1563,14 @@ private struct FixtureAssistantTransport: AssistantTransport {
             .compactMap { $0["text"] as? String }
             .first { $0.hasPrefix("这是用户对上一轮“验证一下”情境的回答") }
         precondition((verificationMarker != nil) == expectsVerificationResponse, "Expected verification response marker to match request")
+        if expectsVerificationResponse {
+            precondition(
+                verificationMarker?.contains("必须逐项核对随请求提供的页面图像") == true
+                    && verificationMarker?.contains("不要扩展、概括或断言用户没有提到的其他表格列") == true
+                    && verificationMarker?.contains("3 个短句以内") == true,
+                "Expected verification feedback to stay visually grounded and narrowly scoped"
+            )
+        }
         let quickClarificationMarker = content.filter { $0["type"] as? String == "input_text" }
             .compactMap { $0["text"] as? String }
             .first { $0.hasPrefix("这是阅读中的一个短卡点") }
