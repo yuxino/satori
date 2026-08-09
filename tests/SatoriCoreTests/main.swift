@@ -730,6 +730,52 @@ struct SatoriCoreTests {
                 && regionAnchor.centerY == 0.625,
             "Expected scanned-page region anchors to clamp to a normalized top-left rectangle"
         )
+        let offsetPageBounds = CGRect(x: 32, y: 48, width: 600, height: 800)
+        let pageSpaceRegion = CGRect(x: 152, y: 448, width: 300, height: 240)
+        let convertedRegionAnchor = try XCTUnwrap(
+            ReadingRegionAnchor(
+                pageIndex: 53,
+                pageRect: pageSpaceRegion,
+                pageBounds: offsetPageBounds
+            )
+        )
+        precondition(
+            convertedRegionAnchor == ReadingRegionAnchor(
+                pageIndex: 53,
+                x: 0.2,
+                y: 0.2,
+                width: 0.5,
+                height: 0.3
+            ),
+            "Expected PDF page coordinates to normalize independently of the page origin"
+        )
+        let restoredPageSpaceRegion = try XCTUnwrap(
+            convertedRegionAnchor.pageRect(in: offsetPageBounds)
+        )
+        precondition(
+            abs(restoredPageSpaceRegion.minX - pageSpaceRegion.minX) < 0.001
+                && abs(restoredPageSpaceRegion.minY - pageSpaceRegion.minY) < 0.001
+                && abs(restoredPageSpaceRegion.width - pageSpaceRegion.width) < 0.001
+                && abs(restoredPageSpaceRegion.height - pageSpaceRegion.height) < 0.001,
+            "Expected persisted region anchors to restore the exact PDF-page crop"
+        )
+        let clippedRegionAnchor = try XCTUnwrap(
+            ReadingRegionAnchor(
+                pageIndex: 53,
+                pageRect: CGRect(x: 0, y: 700, width: 200, height: 300),
+                pageBounds: offsetPageBounds
+            )
+        )
+        let clippedPageSpaceRegion = try XCTUnwrap(
+            clippedRegionAnchor.pageRect(in: offsetPageBounds)
+        )
+        precondition(
+            abs(clippedPageSpaceRegion.minX - 32) < 0.001
+                && abs(clippedPageSpaceRegion.minY - 700) < 0.001
+                && abs(clippedPageSpaceRegion.width - 168) < 0.001
+                && abs(clippedPageSpaceRegion.height - 148) < 0.001,
+            "Expected partially out-of-bounds crops to persist only their visible page region"
+        )
         let anchoredTurn = LearningTurn(
             question: "解释这块代码",
             answer: "它把输入交给函数。",
@@ -743,6 +789,22 @@ struct SatoriCoreTests {
         precondition(
             anchoredRoundTrip.regionAnchor == regionAnchor,
             "Expected a framed PDF region to survive learning-session persistence"
+        )
+        precondition(
+            ReadingScopeInference.referencesChapter(in: "这一章讲了什么？")
+                && ReadingScopeInference.referencesChapter(in: "第六章的重点")
+                && !ReadingScopeInference.referencesChapter(in: "这一页讲了什么？"),
+            "Expected chapter-dependent questions to be detectable before metadata is ready"
+        )
+        precondition(
+            ReadingFactAnswer.pageCountAnswer(
+                for: "这一章有多少页？",
+                pageCount: 229,
+                currentPageIndex: 26,
+                scope: .page,
+                chapterRange: nil
+            ) == nil,
+            "Expected an unresolved chapter page-count question not to fall back to one page"
         )
         precondition(
             !ReadingPositionOrdering.isAtOrBefore(

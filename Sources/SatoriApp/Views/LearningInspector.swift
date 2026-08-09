@@ -70,6 +70,10 @@ struct LearningInspector: View {
     let documentURL: URL
     /// 这本书的章节导览（PDF outline 优先，课程目录回退）；为空时「章节」选项隐藏。
     let chapters: [BookChapter]
+    /// Scanned books recover chapter boundaries asynchronously. Chapter-wide
+    /// questions must wait for that result instead of silently becoming a
+    /// current-page question.
+    let isLoadingChapters: Bool
     /// Returns the textbook's printed page for a PDF page when a local map is
     /// available. Scanned and native books can use different mapping sources.
     let printedPageForPage: (Int) -> Int?
@@ -149,6 +153,10 @@ struct LearningInspector: View {
     @State private var submittedAttachmentsForActiveRequest: [LearningImageAttachment] = []
     @State private var isImportingImage = false
     @State private var attachmentStatus = ""
+    /// A natural chapter question submitted while scanned-outline recovery is
+    /// still running. The text remains in the composer and is sent exactly
+    /// once when chapter boundaries become available.
+    @State private var pendingChapterMetadataQuestion: String?
     /// 这一轮回答开始的时间；只在流式等待期间提示是否仍在工作。
     @State private var streamStartDate: Date?
     @State private var requestPhase: RequestPhase = .preparing
@@ -215,6 +223,20 @@ struct LearningInspector: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { refreshConfigurationState() }
+        }
+        .onChange(of: isLoadingChapters) { wasLoading, isLoading in
+            guard wasLoading, !isLoading,
+                  let pendingQuestion = pendingChapterMetadataQuestion else { return }
+            pendingChapterMetadataQuestion = nil
+            guard question.trimmingCharacters(in: .whitespacesAndNewlines) == pendingQuestion else {
+                return
+            }
+            guard canResolveChapterScope(for: pendingQuestion) else {
+                attachmentStatus = "没有识别出这章的页码范围；请在“智能范围”里选择多页后再发送。"
+                return
+            }
+            attachmentStatus = ""
+            askAssistant()
         }
         .onReceive(NotificationCenter.default.publisher(for: .qwenConfigurationDidChange)) { _ in
             refreshConfigurationState()
@@ -2465,6 +2487,18 @@ struct LearningInspector: View {
         let request = (suppliedQuestion ?? question).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty, !isThinking else { return }
 
+        if suppliedQuestion == nil, !verification, requestNeedsChapterMetadata(request) {
+            if isLoadingChapters {
+                pendingChapterMetadataQuestion = request
+                attachmentStatus = "正在识别目录；完成后会按整章范围自动回答。"
+                return
+            }
+            guard canResolveChapterScope(for: request) else {
+                attachmentStatus = "没有识别出这章的页码范围；请在“智能范围”里选择多页后再发送。"
+                return
+            }
+        }
+
         if suppliedQuestion == nil, !verification, routeRunIntentIfPossible(for: request) {
             return
         }
@@ -2787,6 +2821,30 @@ struct LearningInspector: View {
             scope: scope,
             chapterRange: chapterRange
         )
+    }
+
+    private func requestNeedsChapterMetadata(_ request: String) -> Bool {
+        switch contextMode {
+        case .chapter:
+            return true
+        case .automatic:
+            return ReadingScopeInference.referencesChapter(in: request)
+        default:
+            return false
+        }
+    }
+
+    private func canResolveChapterScope(for request: String) -> Bool {
+        switch contextMode {
+        case .chapter:
+            guard let activeChapter else { return false }
+            return BookChapter.pageRange(for: activeChapter, in: chapters, pageCount: pageCount) != nil
+        case .automatic:
+            guard let chapter = chapterForInference(for: request) else { return false }
+            return BookChapter.pageRange(for: chapter, in: chapters, pageCount: pageCount) != nil
+        default:
+            return true
+        }
     }
 
     /// 有编号章节时只把“第 N 章 / Chapter N”作为学习章节，排除书名页、

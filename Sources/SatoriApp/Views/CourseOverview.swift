@@ -479,6 +479,7 @@ private struct DocumentWorkspace: View {
                     pageCount: pageCount,
                     documentURL: url,
                     chapters: chapters,
+                    isLoadingChapters: isLoadingChapters,
                     printedPageForPage: { pageIndex in printedPage(for: pageIndex) },
                     onNavigateToPage: { targetPage in
                         currentPageIndex = min(max(targetPage, 0), pageCount - 1)
@@ -504,6 +505,7 @@ private struct DocumentWorkspace: View {
                     pageCount: pageCount,
                     documentURL: url,
                     chapters: chapters,
+                    isLoadingChapters: isLoadingChapters,
                     printedPageForPage: { pageIndex in printedPage(for: pageIndex) },
                     onNavigateToPage: { targetPage in
                         currentPageIndex = min(max(targetPage, 0), pageCount - 1)

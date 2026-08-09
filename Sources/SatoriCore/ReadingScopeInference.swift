@@ -3,6 +3,21 @@ import Foundation
 /// Infers the smallest useful PDF scope from a natural-language reading request.
 /// The UI can still override this with an explicit context choice.
 public enum ReadingScopeInference {
+    /// Detects requests whose meaning depends on chapter boundaries. The UI
+    /// uses this before falling back to a single page, because scanned-book
+    /// chapter metadata may still be loading asynchronously.
+    public static func referencesChapter(in request: String) -> Bool {
+        let normalized = request
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let chapterMarkers = ["这一章", "这章", "本章", "这个章节", "该章节", "当前章节", "整章"]
+        return chapterMarkers.contains(where: normalized.contains)
+            || normalized.range(
+                of: #"第[0-9一二三四五六七八九十百千万零〇两]+章"#,
+                options: .regularExpression
+            ) != nil
+    }
+
     /// A deliberate request to reconstruct code or a formula usually crosses
     /// a printed page boundary. Keep the expansion small and local so the
     /// reader gets the continuation without turning a focused request into a
@@ -99,13 +114,7 @@ public enum ReadingScopeInference {
             return .wholeDocument
         }
 
-        let chapterMarkers = ["这一章", "这章", "本章", "这个章节", "该章节", "当前章节", "整章"]
-        let numberedChapter = normalized.range(
-            of: #"第[0-9一二三四五六七八九十百]+章"#,
-            options: .regularExpression
-        ) != nil
-        if (chapterMarkers.contains(where: normalized.contains) || numberedChapter),
-           let chapterRange {
+        if referencesChapter(in: normalized), let chapterRange {
             return .pageRange(start: chapterRange.lowerBound, end: chapterRange.upperBound)
         }
 

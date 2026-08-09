@@ -22,8 +22,11 @@ public enum ReadingFactAnswer {
         let range: ClosedRange<Int>?
         if normalized.contains("本书") || normalized.contains("全书") || normalized.contains("整本") {
             range = 0...(pageCount - 1)
-        } else if ["这一章", "这章", "本章", "这个章节", "该章节", "当前章节"].contains(where: normalized.contains),
-                  let chapterRange {
+        } else if ReadingScopeInference.referencesChapter(in: normalized) {
+            // A chapter question with unknown chapter boundaries is not a
+            // one-page question. Returning nil lets the UI wait for scanned
+            // outline recovery or ask the reader to choose an explicit range.
+            guard let chapterRange else { return nil }
             range = clamped(chapterRange, pageCount: pageCount)
         } else {
             switch scope {

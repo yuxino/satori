@@ -19,7 +19,9 @@ enum ScannedPDFSearch {
     }
 
     private actor TextCache {
-        private let capacity = 180
+        // Large enough to keep one typical textbook's OCR index warm. The
+        // cache is still memory-only and bounded across all open books.
+        private let capacity = 512
         private var values: [String: String] = [:]
         private var order: [String] = []
 
@@ -140,12 +142,15 @@ enum ScannedPDFSearch {
             .filter { !$0.isWhitespace }
     }
 
-    /// Search only needs enough OCR to locate a page. The learning answer
-    /// path still uses its higher-resolution text/image evidence route.
+    /// Search OCR still has to be trustworthy. Vision's `.fast` mode is quick
+    /// on Latin text but produced almost entirely garbled output on real
+    /// Chinese textbook scans, causing confident whole-book false negatives.
+    /// A 1000px accurate pass remains lightweight while reliably locating the
+    /// visible Chinese terms students naturally search for.
     private static func recognize(_ page: PDFPage) -> String? {
         let bounds = page.bounds(for: .mediaBox)
         guard bounds.width > 0, bounds.height > 0 else { return nil }
-        let scale: CGFloat = 1_400 / max(bounds.width, bounds.height)
+        let scale: CGFloat = 1_000 / max(bounds.width, bounds.height)
         let image = page.thumbnail(
             of: NSSize(width: bounds.width * scale, height: bounds.height * scale),
             for: .mediaBox
@@ -155,8 +160,8 @@ enum ScannedPDFSearch {
         }
 
         let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .fast
-        request.usesLanguageCorrection = false
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = true
         request.recognitionLanguages = ["zh-Hans", "en-US"]
         let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
         do {

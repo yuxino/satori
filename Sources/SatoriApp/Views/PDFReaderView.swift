@@ -328,18 +328,15 @@ struct PDFReaderView: NSViewRepresentable {
             let clipped = viewRect.intersection(pageRectInView)
             guard clipped.width >= 24, clipped.height >= 24 else { return }
             let pageRect = view.convert(clipped, to: page)
-            guard let jpeg = Self.renderRegionJPEG(page: page, rect: pageRect) else { return }
             let pageIndex = document.index(for: page)
             guard pageIndex >= 0 else { return }
             let bounds = page.bounds(for: .mediaBox).standardized
-            guard bounds.width > 0, bounds.height > 0 else { return }
-            let anchor = ReadingRegionAnchor(
+            guard let anchor = ReadingRegionAnchor(
                 pageIndex: pageIndex,
-                x: (clipped.minX - bounds.minX) / bounds.width,
-                y: (bounds.maxY - clipped.maxY) / bounds.height,
-                width: clipped.width / bounds.width,
-                height: clipped.height / bounds.height
-            )
+                pageRect: pageRect,
+                pageBounds: bounds
+            ), let anchoredRect = anchor.pageRect(in: bounds),
+               let jpeg = Self.renderRegionJPEG(page: page, rect: anchoredRect) else { return }
             onPageRegionCaptured?(jpeg, pageIndex, anchor)
         }
 
@@ -762,13 +759,7 @@ enum PDFRegionRenderer {
         guard let document = PDFDocument(url: url),
               let page = document.page(at: anchor.pageIndex) else { return nil }
         let bounds = page.bounds(for: .mediaBox).standardized
-        guard bounds.width > 0, bounds.height > 0 else { return nil }
-        let pageRect = NSRect(
-            x: bounds.minX + anchor.x * bounds.width,
-            y: bounds.maxY - (anchor.y + anchor.height) * bounds.height,
-            width: anchor.width * bounds.width,
-            height: anchor.height * bounds.height
-        )
+        guard let pageRect = anchor.pageRect(in: bounds) else { return nil }
         return renderRegionJPEG(page: page, rect: pageRect)
     }
 
