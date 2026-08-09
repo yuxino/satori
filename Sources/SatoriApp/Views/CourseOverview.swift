@@ -653,20 +653,30 @@ private struct DocumentWorkspace: View {
                 isSearchPresented = true
                 isSearchFieldFocused = true
             } label: {
-                Label("查找", systemImage: "magnifyingglass")
+                if router.inspectorFloats {
+                    Image(systemName: "magnifyingglass")
+                } else {
+                    Label("查找", systemImage: "magnifyingglass")
+                }
             }
             .keyboardShortcut("f", modifiers: .command)
             .popover(isPresented: $isSearchPresented, arrowEdge: .bottom) {
                 pdfSearchPopover
             }
+            .accessibilityLabel("查找")
             .help("在这本书中查找（⌘F）")
 
             if !router.isImmersiveReading {
                 Button {
                     showsInspector.toggle()
                 } label: {
-                    Label(showsInspector ? "隐藏理解" : "打开理解", systemImage: "sparkles.rectangle.stack")
+                    if router.inspectorFloats {
+                        Image(systemName: "sparkles.rectangle.stack")
+                    } else {
+                        Label(showsInspector ? "隐藏理解" : "打开理解", systemImage: "sparkles.rectangle.stack")
+                    }
                 }
+                .accessibilityLabel(showsInspector ? "隐藏理解" : "打开理解")
                 .help(showsInspector ? "隐藏理解面板" : "打开理解面板")
                 .tint(SatoriTheme.accent)
             }
@@ -675,11 +685,16 @@ private struct DocumentWorkspace: View {
                 Button {
                     isRegionCaptureEnabled.toggle()
                 } label: {
-                    Label(
-                        isRegionCaptureEnabled ? "取消框选" : "框选理解",
-                        systemImage: isRegionCaptureEnabled ? "xmark" : "viewfinder"
-                    )
+                    if router.inspectorFloats {
+                        Image(systemName: isRegionCaptureEnabled ? "xmark" : "viewfinder")
+                    } else {
+                        Label(
+                            isRegionCaptureEnabled ? "取消框选" : "框选理解",
+                            systemImage: isRegionCaptureEnabled ? "xmark" : "viewfinder"
+                        )
+                    }
                 }
+                .accessibilityLabel(isRegionCaptureEnabled ? "取消框选" : "框选理解")
                 .help(isRegionCaptureEnabled ? "取消框选（Esc）" : "拖住扫描页的一块区域，直接问 Satori")
                 .tint(isRegionCaptureEnabled ? SatoriTheme.gold : SatoriTheme.accent)
             }
@@ -687,12 +702,17 @@ private struct DocumentWorkspace: View {
             Button {
                 router.isImmersiveReading.toggle()
             } label: {
-                Label(
-                    router.isImmersiveReading ? "退出沉浸" : "沉浸阅读",
-                    systemImage: router.isImmersiveReading ? "arrow.down.right.and.arrow.up.left" : "viewfinder"
-                )
+                if router.inspectorFloats {
+                    Image(systemName: router.isImmersiveReading ? "arrow.down.right.and.arrow.up.left" : "viewfinder")
+                } else {
+                    Label(
+                        router.isImmersiveReading ? "退出沉浸" : "沉浸阅读",
+                        systemImage: router.isImmersiveReading ? "arrow.down.right.and.arrow.up.left" : "viewfinder"
+                    )
+                }
             }
             .keyboardShortcut("f", modifiers: [.command, .shift])
+            .accessibilityLabel(router.isImmersiveReading ? "退出沉浸" : "沉浸阅读")
             .help(router.isImmersiveReading ? "退出沉浸阅读（⌘⇧F）" : "进入沉浸阅读（⌘⇧F）")
             .tint(router.isImmersiveReading ? SatoriTheme.gold : SatoriTheme.accent)
         }
