@@ -6,17 +6,44 @@ public struct CodeRunResult: Equatable, Sendable {
     public let stdout: String
     public let stderr: String
     public let timedOut: Bool
+    public let cancelled: Bool
 
-    public init(exitCode: Int32, stdout: String, stderr: String, timedOut: Bool) {
+    public init(
+        exitCode: Int32,
+        stdout: String,
+        stderr: String,
+        timedOut: Bool,
+        cancelled: Bool = false
+    ) {
         self.exitCode = exitCode
         self.stdout = stdout
         self.stderr = stderr
         self.timedOut = timedOut
+        self.cancelled = cancelled
     }
 }
 
-/// Runs a small code snippet locally so a learning answer's example can be
-/// executed and inspected. Deliberately conservative:
+/// Experiments are intentionally narrower than a general-purpose terminal.
+/// The reader should be able to manipulate a concept from the book without
+/// giving an AI-generated snippet network access or a convenient path to the
+/// user's files and shell.
+public enum ExperimentSafety: Equatable, Sendable {
+    case allowed
+    case blocked(String)
+
+    public var isAllowed: Bool {
+        if case .allowed = self { return true }
+        return false
+    }
+
+    public var message: String? {
+        if case let .blocked(message) = self { return message }
+        return nil
+    }
+}
+
+/// Runs a small, pure-computation concept experiment locally so a learning
+/// answer's example can be executed and inspected. Deliberately conservative:
 ///   • each run works in its own temp directory,
 ///   • a wall-clock timeout guards against infinite loops (SIGTERM, then
 ///     SIGKILL if the process ignores it),
@@ -25,12 +52,19 @@ public struct CodeRunResult: Equatable, Sendable {
 ///   • compilation and execution are timed separately (compiles get a more
 ///     generous budget).
 ///
-/// The user chose "run directly on this machine", so snippets run with the
-/// user's own toolchain (python3 / clang / bash / swift). C is compiled then
-/// executed; interpreted languages run directly.
+/// Allowed snippets use the local Python/Clang toolchain, but the actual
+/// experiment is launched with no network and no writes to user directories.
 public enum CodeRunner {
     public static let defaultTimeout: TimeInterval = 8
     public static let defaultCompileTimeout: TimeInterval = 30
+    private static let restrictedSandboxProfile = """
+    (version 1)
+    (allow default)
+    (deny network*)
+    (deny file-write*)
+    (deny file-read* (subpath "/Users"))
+    (deny file-read* (subpath "/Volumes"))
+    """
 
     /// How long to wait after SIGTERM before escalating to SIGKILL.
     fileprivate static let killEscalationDelay: TimeInterval = 1.5
@@ -79,10 +113,10 @@ public enum CodeRunner {
                 return .swift
             default:
                 return nil
-            }
         }
+    }
 
-        var executable: String {
+    var executable: String {
             switch self {
             case .c: "/usr/bin/clang"
             case .cpp: "/usr/bin/clang++"
@@ -100,13 +134,161 @@ public enum CodeRunner {
         }
     }
 
+    /// Languages useful for small, local concept experiments. Shell and Swift
+    /// remain decodable for older callers, but are deliberately not offered as
+    /// experiment languages.
+    public static let experimentLanguages: [Language] = [.python, .c, .cpp]
+
+    /// Gives the selection-to-experiment route a conservative language hint.
+    /// It is intentionally only a hint: `safety(for:language:)` remains the
+    /// final gate, and the reader still has to press Run.
+    public static func languageHint(for code: String) -> Language? {
+        let normalized = code.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return nil }
+        // OCR and PDF text selection often insert spaces between punctuation
+        // and tokens ("# include" / "printf (" / "c i n >>"). Keep the
+        // original form for conservative Python detection, but use a compact
+        // form for the C-family markers so a direct selection can enter the
+        // right experiment language without making the reader switch it by
+        // hand.
+        let compact = normalized.replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+        if compact.contains("std::") || compact.contains("cout<<") || compact.contains("cin>>") {
+            return .cpp
+        }
+        if compact.contains("#include")
+            || compact.contains("intmain")
+            || compact.contains("printf(")
+            || compact.contains("scanf(") {
+            return .c
+        }
+        if normalized.contains("def ")
+            || compact.contains("print(")
+            || compact.contains("importmath")
+            || compact.contains("input(") {
+            return .python
+        }
+        return nil
+    }
+
+    /// Distinguishes a short request to launch the selected snippet from a
+    /// conceptual question such as “运行机制” or “运行过程”. The UI uses
+    /// this to enter the experiment space without spending an AI turn.
+    public static func isRunIntent(_ request: String) -> Bool {
+        let normalized = request
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+        guard normalized.count <= 20,
+              !["为什么", "怎么写", "如何写", "运行过程", "执行过程"].contains(where: normalized.contains)
+        else { return false }
+        if ["运行", "执行", "跑一下", "跑跑看"].contains(normalized) {
+            return true
+        }
+        return [
+            "运行一下", "执行一下", "试着运行", "帮我运行", "帮我执行",
+            "运行这段", "执行这段", "跑一下这段"
+        ].contains { normalized.contains($0) }
+    }
+
+    /// Whether the snippet expects stdin. This is not a general interactive
+    /// terminal: the UI may provide one bounded, fixed input payload and then
+    /// closes stdin so a program cannot wait for another prompt.
+    public static func requiresStandardInput(for code: String, language: Language) -> Bool {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch language {
+        case .python:
+            return trimmed.range(of: #"\binput\s*\("#, options: .regularExpression) != nil
+        case .c, .cpp:
+            let patterns = [
+                #"\b(scanf|fscanf|getchar|fgetc|fgets|gets)\s*\("#,
+                #"\b(std::)?cin\s*>>"#,
+                #"\b(std::)?getline\s*\("#
+            ]
+            return patterns.contains { trimmed.range(of: $0, options: .regularExpression) != nil }
+        case .shell, .swift:
+            return false
+        }
+    }
+
+    /// Defense-in-depth gate for both the answer-card runner and the secondary
+    /// experiment space. A blocked snippet can still be copied out, but Satori
+    /// will not execute it locally. `allowsStandardInput` is only used after
+    /// the reader has supplied one bounded fixed input payload.
+    public static func safety(
+        for code: String,
+        language: Language,
+        allowsStandardInput: Bool = false
+    ) -> ExperimentSafety {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return .blocked("实验内容不能为空。")
+        }
+        guard trimmed.count <= 20_000 else {
+            return .blocked("实验内容太长；请只保留当前概念需要的几行。")
+        }
+
+        switch language {
+        case .shell:
+            return .blocked("Shell 命令暂不作为 Satori 实验运行；可以复制到你自己的终端中执行。")
+        case .swift:
+            return .blocked("Swift 代码暂不作为 Satori 实验运行；先用 Python 或 C 做小实验。")
+        case .python:
+            let blockedPatterns = [
+                #"(?m)^\s*(import|from)\s+(os|pathlib|shutil|subprocess|socket|urllib|requests|ctypes|multiprocessing|importlib|pty)\b"#,
+                #"\b(__import__|open|eval|exec|compile|system|popen)\s*\("#
+            ]
+            if blockedPatterns.contains(where: { trimmed.range(of: $0, options: .regularExpression) != nil }) {
+                return .blocked("检测到文件、网络或动态执行接口；实验只能做纯计算。")
+            }
+            if requiresStandardInput(for: trimmed, language: language), !allowsStandardInput {
+                return .blocked("这段代码需要输入；请先填写一组固定输入，Satori 不开放持续交互终端。")
+            }
+        case .c, .cpp:
+            let blockedPatterns = [
+                #"\b(fopen|freopen|remove|unlink|rename|system|popen|fork|exec\w*|socket|connect|getaddrinfo|open|creat|mkdir|rmdir|chdir|getenv)\s*\("#,
+                #"https?://"#,
+                #"\bcurl\b"#,
+                #"\b(ifstream|ofstream|fstream)\b"#,
+                #"\b(std::filesystem|filesystem)\b"#
+            ]
+            if blockedPatterns.contains(where: { trimmed.range(of: $0, options: .regularExpression) != nil }) {
+                return .blocked("检测到文件、网络或进程接口；实验只能做纯计算。")
+            }
+            if requiresStandardInput(for: trimmed, language: language), !allowsStandardInput {
+                return .blocked("这段代码需要输入；请先填写一组固定输入，Satori 不开放持续交互终端。")
+            }
+        }
+
+        return .allowed
+    }
+
     public static func run(
         code: String,
         language: Language,
-        configuration: Configuration = Configuration()
+        configuration: Configuration = Configuration(),
+        standardInput: String? = nil
     ) async -> CodeRunResult {
-        // Host the snippet in its own directory so any file the code writes
-        // stays contained and we can compile C next to it.
+        if let standardInput, standardInput.utf8.count > 4_096 {
+            return CodeRunResult(
+                exitCode: 1,
+                stdout: "",
+                stderr: "实验未运行：固定输入不能超过 4 KB。",
+                timedOut: false
+            )
+        }
+        if case let .blocked(message) = safety(
+            for: code,
+            language: language,
+            allowsStandardInput: standardInput != nil
+        ) {
+            return CodeRunResult(exitCode: 1, stdout: "", stderr: "实验未运行：\(message)", timedOut: false)
+        }
+        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/sandbox-exec") else {
+            return CodeRunResult(exitCode: 1, stdout: "", stderr: "实验未运行：本机没有可用的实验沙箱。", timedOut: false)
+        }
+
+        // Host source and compiler artifacts in their own temporary directory;
+        // the restricted execution phase cannot write there or elsewhere.
         let dir = FileManager.default.temporaryDirectory
             .appending(path: "satori-run-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -126,15 +308,38 @@ public enum CodeRunner {
             // name sits in the temp dir. Use a unique binary name too.
             let compileArgs = [sourceURL.path, "-o", binaryURL.path]
             // Compilation gets a more generous budget than the run itself.
-            let compile = await launch(executable, args: compileArgs, in: dir, configuration: configuration, timeout: configuration.compileTimeout)
+            let compile = await launch(
+                executable,
+                args: compileArgs,
+                in: dir,
+                configuration: configuration,
+                timeout: configuration.compileTimeout,
+                sandbox: .noNetwork
+            )
             guard compile.exitCode == 0 else {
                 return CodeRunResult(exitCode: compile.exitCode, stdout: "", stderr: compile.stderr.isEmpty ? "编译失败。" : compile.stderr, timedOut: compile.timedOut)
             }
             // Run the compiled binary directly — NOT `clang <binary>`, which
             // would make the linker consume the executable as an input.
-            return await launch(binaryURL.path, args: [], in: dir, configuration: configuration, timeout: configuration.timeout)
+            return await launch(
+                binaryURL.path,
+                args: [],
+                in: dir,
+                configuration: configuration,
+                timeout: configuration.timeout,
+                sandbox: .restricted,
+                standardInput: standardInput
+            )
         case .python, .shell, .swift:
-            return await launch(executable, args: language.arguments + [sourceURL.path], in: dir, configuration: configuration, timeout: configuration.timeout)
+            return await launch(
+                executable,
+                args: language.arguments + [sourceURL.path],
+                in: dir,
+                configuration: configuration,
+                timeout: configuration.timeout,
+                sandbox: .restricted,
+                standardInput: standardInput
+            )
         }
     }
 
@@ -148,22 +353,44 @@ public enum CodeRunner {
         }
     }
 
+    private enum SandboxMode {
+        case noNetwork
+        case restricted
+    }
+
     private static func launch(
         _ executable: String,
         args: [String],
         in directory: URL,
         configuration: Configuration,
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        sandbox: SandboxMode,
+        standardInput: String? = nil
     ) async -> CodeRunResult {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = args
+        // Compilation needs to write the temporary binary, so it uses the
+        // built-in no-network profile. The actual experiment additionally
+        // denies writes and access to the user's home/volumes.
+        if FileManager.default.isExecutableFile(atPath: "/usr/bin/sandbox-exec") {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
+            switch sandbox {
+            case .noNetwork:
+                process.arguments = ["-n", "no-network", executable] + args
+            case .restricted:
+                process.arguments = ["-p", restrictedSandboxProfile, executable] + args
+            }
+        } else {
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = args
+        }
         process.currentDirectoryURL = directory
 
         let outPipe = Pipe()
         let errPipe = Pipe()
+        let inputPipe: Pipe? = standardInput == nil ? nil : Pipe()
         process.standardOutput = outPipe
         process.standardError = errPipe
+        process.standardInput = inputPipe
 
         let monitor = RunMonitor(
             process: process,
@@ -177,6 +404,10 @@ public enum CodeRunner {
 
         do {
             try process.run()
+            if let inputPipe, let standardInput {
+                inputPipe.fileHandleForWriting.write(Data(standardInput.utf8))
+                inputPipe.fileHandleForWriting.closeFile()
+            }
         } catch {
             outPipe.fileHandleForReading.readabilityHandler = nil
             errPipe.fileHandleForReading.readabilityHandler = nil
@@ -222,6 +453,7 @@ private final class RunMonitor: @unchecked Sendable {
     private var processFinished = false
     private var terminationRequested = false
     private var timedOut = false
+    private var cancelled = false
     private var resumed = false
     private var timeoutTask: Task<Void, Never>?
     private var escalationTask: Task<Void, Never>?
@@ -280,7 +512,14 @@ private final class RunMonitor: @unchecked Sendable {
             checkFinish()
             return
         }
-        if reason == .timeout { timedOut = true }
+        switch reason {
+        case .timeout:
+            timedOut = true
+        case .cancelled:
+            cancelled = true
+        case .outputLimit:
+            break
+        }
         if !terminationRequested {
             terminationRequested = true
             process.terminate()
@@ -359,7 +598,8 @@ private final class RunMonitor: @unchecked Sendable {
             exitCode: process.terminationStatus,
             stdout: decode(stdoutData, overLimit: stdoutOverLimit),
             stderr: decode(stderrData, overLimit: stderrOverLimit),
-            timedOut: timedOut
+            timedOut: timedOut,
+            cancelled: cancelled
         )
         let continuation = self.continuation
         let timeoutTask = self.timeoutTask

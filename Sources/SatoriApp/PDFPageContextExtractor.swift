@@ -12,33 +12,116 @@ enum PDFPageContextExtractor {
         case page(Int)
         /// 连续多页（0 起、含两端）：逐页提取并拼接，扫描页走 OCR。
         case pageRange(ClosedRange<Int>)
+        /// 建立章节路线图：抽取章节首尾、均匀代表页和目录锚点，避免
+        /// 为了一张地图把几十页正文全部搬进同一次请求。
+        case chapterMap(ClosedRange<Int>)
         /// The whole book, as concatenated page text.
         case wholeDocument
         /// 不带任何页上下文。
         case none
+
+        var cacheToken: String {
+            switch self {
+            case let .selection(text): "selection:\(text.hashValue)"
+            case let .page(index): "page:\(index)"
+            case let .pageRange(range): "range:\(range.lowerBound)-\(range.upperBound)"
+            case let .chapterMap(range): "chapterMap:\(range.lowerBound)-\(range.upperBound)"
+            case .wholeDocument: "whole"
+            case .none: "none"
+            }
+        }
     }
+
+    /// 页面提取是阅读追问的本地前置步骤。PDFKit 每次重新打开 294 页的
+    /// 文档会让用户误以为 Qwen 没响应；缓存已经提取的内容，让同一文档的
+    /// 追问、验证和“接上文”直接进入模型请求。文件签名变化时自然换 key，
+    /// 不会把替换后的 PDF 内容带进旧回答。
+    private actor ContentCache {
+        private var values: [String: LearningPageContent] = [:]
+        private let capacity = 24
+
+        func value(for key: String) -> LearningPageContent? {
+            values[key]
+        }
+
+        func insert(_ value: LearningPageContent, for key: String) {
+            if values.count >= capacity, values[key] == nil,
+               let oldestKey = values.keys.first {
+                values.removeValue(forKey: oldestKey)
+            }
+            values[key] = value
+        }
+    }
+
+    private static let contentCache = ContentCache()
 
     /// 提取页面内容。配置了 Qwen 时，扫描页优先走 Qwen OCR；
     /// 未配置或 Qwen 失败时回退本地 Vision OCR，最后退回高清页图。
     static func extract(
         from url: URL,
         scope: Scope,
-        qwenConfiguration: QwenConfiguration? = nil
+        qwenConfiguration: QwenConfiguration? = nil,
+        anchorPage: Int? = nil
     ) async -> LearningPageContent? {
         switch scope {
         case let .selection(text):
             let cleaned = ExtractedTextNormalizer.normalize(text)
             guard !cleaned.isEmpty else { return nil }
             return .text(String(cleaned.prefix(24_000)))
-        case let .page(pageIndex):
-            return await extractPage(from: url, pageIndex: pageIndex, qwenConfiguration: qwenConfiguration)
-        case let .pageRange(range):
-            return await extractPageRange(from: url, range: range, qwenConfiguration: qwenConfiguration)
-        case .wholeDocument:
-            return await extractWholeDocument(from: url)
         case .none:
             return nil
+        case .page, .pageRange, .chapterMap, .wholeDocument:
+            let key = cacheKey(
+                for: url,
+                scope: scope,
+                qwenConfiguration: qwenConfiguration,
+                anchorPage: anchorPage
+            )
+            if let cached = await contentCache.value(for: key) {
+                return cached
+            }
+
+            let extracted: LearningPageContent?
+            switch scope {
+            case let .page(pageIndex):
+                extracted = await extractPage(from: url, pageIndex: pageIndex, qwenConfiguration: qwenConfiguration)
+            case let .pageRange(range):
+                extracted = await extractPageRange(
+                    from: url,
+                    range: range,
+                    qwenConfiguration: qwenConfiguration,
+                    anchorPage: anchorPage
+                )
+            case let .chapterMap(range):
+                extracted = await extractChapterMap(from: url, range: range)
+            case .wholeDocument:
+                extracted = await extractWholeDocument(
+                    from: url,
+                    anchorPage: anchorPage,
+                    qwenConfiguration: qwenConfiguration
+                )
+            case .selection, .none:
+                extracted = nil
+            }
+            if let extracted {
+                await contentCache.insert(extracted, for: key)
+            }
+            return extracted
         }
+    }
+
+    private static func cacheKey(
+        for url: URL,
+        scope: Scope,
+        qwenConfiguration: QwenConfiguration?,
+        anchorPage: Int?
+    ) -> String {
+        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        let modification = values?.contentModificationDate?.timeIntervalSince1970 ?? -1
+        let size = values?.fileSize ?? -1
+        let model = qwenConfiguration?.modelID ?? "local"
+        let anchor = anchorPage.map(String.init) ?? "none"
+        return "\(url.standardizedFileURL.path)|\(modification)|\(size)|\(scope.cacheToken)|\(anchor)|\(model)"
     }
 
     /// 多页范围：并发取各页文字层，扫描页按需 Qwen OCR / 本地 Vision，
@@ -46,7 +129,8 @@ enum PDFPageContextExtractor {
     private static func extractPageRange(
         from url: URL,
         range: ClosedRange<Int>,
-        qwenConfiguration: QwenConfiguration?
+        qwenConfiguration: QwenConfiguration?,
+        anchorPage: Int?
     ) async -> LearningPageContent? {
         let didAccess = url.startAccessingSecurityScopedResource()
         defer {
@@ -60,12 +144,19 @@ enum PDFPageContextExtractor {
         let clampedEnd = min(range.upperBound, document.pageCount - 1)
         guard range.lowerBound <= clampedEnd else { return nil }
 
-        // 扫描页 OCR 是最大的耗时点，4 路并发显著加快整章/多页理解。
+        // 扫描页 OCR 是最大的耗时点。前后页桥接通常只有 2–3 页，远程
+        // Qwen OCR 能换来更高的术语准确度；但“看本章路线”可能覆盖几十页，
+        // 不应为了建立阅读地图发起几十次远程请求。长范围先用本地 Vision
+        // 批量提取，远程能力留给当前页的精确核对。
+        let useRemoteOCR = ReadingOCRPolicy.usesRemoteOCR(
+            forPageRangeCount: range.count,
+            hasQwenConfiguration: qwenConfiguration != nil
+        )
         let pages = await extractPagesConcurrently(
             document: document,
             indices: Array(range.lowerBound...clampedEnd),
-            qwenConfiguration: qwenConfiguration,
-            useQwenOCR: true,
+            qwenConfiguration: useRemoteOCR ? qwenConfiguration : nil,
+            useQwenOCR: useRemoteOCR,
             ocrBudget: nil,
             concurrency: 4
         )
@@ -78,8 +169,128 @@ enum PDFPageContextExtractor {
         }
 
         let trimmed = assembled.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A short bridge is allowed to carry a couple of visual pages. This
+        // catches textbook layouts where the preceding page says “见图 6-2”
+        // but the actual figure starts at the top of the next page. Chapter
+        // maps deliberately stay text-only to protect first-answer latency.
+        if range.count <= 4 {
+            let textByPage = Dictionary(uniqueKeysWithValues: pages)
+            var visualPages: [LearningPageImage] = []
+            let prioritizedIndices = ReadingSamplePlan.pageIndicesPrioritizingAnchor(
+                in: range.lowerBound...clampedEnd,
+                anchorPage: anchorPage
+            )
+            for pageIndex in prioritizedIndices {
+                let currentText = textByPage[pageIndex] ?? ""
+                let previousText: String
+                if let inRange = textByPage[pageIndex - 1] {
+                    previousText = inRange
+                } else if pageIndex > 0 {
+                    previousText = ExtractedTextNormalizer.normalize(
+                        document.page(at: pageIndex - 1)?.string ?? ""
+                    )
+                } else {
+                    previousText = ""
+                }
+                // For a short scan bridge, an OCR miss must not turn into a
+                // dead end. The original page image is the only reliable
+                // evidence left, especially for a flowchart or a code block.
+                let needsImage = ReadingVisualEvidence.requiresPageImage(
+                    currentText: currentText,
+                    previousText: previousText,
+                    nativePageText: document.page(at: pageIndex)?.string ?? ""
+                )
+                guard needsImage,
+                      let page = document.page(at: pageIndex),
+                      let jpeg = renderPageJPEG(page) else { continue }
+                visualPages.append(.init(pageIndex: pageIndex, jpegData: jpeg))
+                if visualPages.count == ReadingSamplePlan.maximumVisualPages(forShortRangeCount: range.count) {
+                    break
+                }
+            }
+            if !visualPages.isEmpty {
+                return .textAndImages(
+                    String(trimmed.prefix(limit)),
+                    visualPages.sorted { $0.pageIndex < $1.pageIndex }
+                )
+            }
+        }
+        // OCR can fail for a whole short bridge (blurred scan, unusual font,
+        // or a page made only of a diagram). Do not discard the only reliable
+        // evidence just because the text layer is empty; the image path above
+        // is intentionally the final fallback for these pages.
         guard !trimmed.isEmpty else { return nil }
         return .text(String(trimmed.prefix(limit)))
+    }
+
+    /// A chapter route should answer “这章怎么读” quickly. It only needs the
+    /// chapter's shape, not every paragraph: keep the first/last pages,
+    /// evenly spaced representatives, and PDF outline anchors. Long scanned
+    /// chapters use local OCR plus at most two representative page images so
+    /// diagrams/code survive the route map; precise page questions still use
+    /// the normal page/range path and can opt into Qwen OCR.
+    private static func extractChapterMap(
+        from url: URL,
+        range: ClosedRange<Int>
+    ) async -> LearningPageContent? {
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess { url.stopAccessingSecurityScopedResource() }
+        }
+
+        guard let document = PDFDocument(url: url), document.pageCount > 0 else { return nil }
+        let clampedStart = max(0, range.lowerBound)
+        let clampedEnd = min(range.upperBound, document.pageCount - 1)
+        guard clampedStart <= clampedEnd else { return nil }
+        let boundedRange = clampedStart...clampedEnd
+        let indices = ReadingSamplePlan.representativePageIndices(
+            in: boundedRange,
+            outlinePageIndices: outlinePageIndices(in: document)
+        )
+        let pages = await extractPagesConcurrently(
+            document: document,
+            indices: indices,
+            qwenConfiguration: nil,
+            useQwenOCR: false,
+            ocrBudget: OCRBudget(20),
+            concurrency: 4
+        )
+
+        // A scan often has no usable PDF text layer. The OCR route is still
+        // useful for headings, but it can flatten a flowchart, code block, or
+        // table into misleading prose. Detect that case from the sampled
+        // pages and carry only two original page images into the chapter map.
+        // Native text PDFs remain text-only, keeping their first answer light.
+        let nativeTextPageCount = indices.reduce(into: 0) { count, pageIndex in
+            let text = ExtractedTextNormalizer.normalize(document.page(at: pageIndex)?.string ?? "")
+            if text.count >= 40, !ExtractedTextNormalizer.likelyDegraded(text) {
+                count += 1
+            }
+        }
+        let isScanLike = !indices.isEmpty && nativeTextPageCount < max(1, indices.count / 2)
+        let visualIndices = isScanLike
+            ? ReadingSamplePlan.representativeImagePageIndices(from: indices, maxCount: 2)
+            : []
+        let visualPages: [LearningPageImage] = visualIndices.compactMap { pageIndex in
+            guard let page = document.page(at: pageIndex),
+                  let jpeg = renderPageJPEG(page) else { return nil }
+            return LearningPageImage(pageIndex: pageIndex, jpegData: jpeg)
+        }
+
+        let limit = 30_000
+        var assembled = "【章节路线抽样页】\n"
+        for (pageIndex, text) in pages {
+            guard !text.isEmpty else { continue }
+            assembled += "【第 \(pageIndex + 1) 页】\n\(text)\n\n"
+            if assembled.count >= limit { break }
+        }
+        let trimmed = assembled.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != "【章节路线抽样页】" || !visualPages.isEmpty else { return nil }
+        let boundedText = String(trimmed.prefix(limit))
+        if !visualPages.isEmpty {
+            return .textAndImages(boundedText, visualPages)
+        }
+        return .text(boundedText)
     }
 
     private static func extractPage(
@@ -96,27 +307,64 @@ enum PDFPageContextExtractor {
               let page = document.page(at: pageIndex) else { return nil }
 
         let text = ExtractedTextNormalizer.normalize(page.string ?? "")
-        if text.count >= 40 {
+        let needsVisualVerification = text.count < 40 || ExtractedTextNormalizer.likelyDegraded(text)
+        if text.count >= 40, !needsVisualVerification {
             // 带页码标注返回，和整章/多页提取的格式一致，模型能明确知道是哪一页。
-            return .text("【第 \(pageIndex + 1) 页】\n" + String(text.prefix(24_000)))
+            let pageText = "【第 \(pageIndex + 1) 页】\n" + String(text.prefix(24_000))
+            let previousText = pageIndex > 0
+                ? ExtractedTextNormalizer.normalize(document.page(at: pageIndex - 1)?.string ?? "")
+                : ""
+            if ReadingVisualEvidence.requiresPageImage(
+                currentText: text,
+                previousText: previousText
+            ),
+               let jpeg = renderPageJPEG(page) {
+                var visualPages = [LearningPageImage(pageIndex: pageIndex, jpegData: jpeg)]
+                // In real textbooks a sentence such as “如图 6-2 所示” often
+                // lands at the bottom of one page while the figure starts at
+                // the top of the next. A current-page question should still
+                // let the model see that figure, without expanding the text
+                // scope or making every page request multi-page.
+                if ReadingVisualEvidence.mentionsVisualReference(in: text),
+                   let nextPage = document.page(at: pageIndex + 1),
+                   let nextJPEG = renderPageJPEG(nextPage) {
+                    visualPages.append(.init(pageIndex: pageIndex + 1, jpegData: nextJPEG))
+                }
+                return .textAndImages(
+                    pageText,
+                    visualPages
+                )
+            }
+            return .text(pageText)
         }
 
-        // 扫描版 / 图片页：先 Qwen OCR（识别质量更好），失败再本地 Vision，
-        // 都识别不出就退回高清页图，让模型直接看图。
+        // 扫描版 / 疑似 OCR 损坏页：先 Qwen OCR（识别质量更好），失败再本地
+        // Vision；扫描页即使 OCR 成功也保留原图，让回答模型能核对标题、公式、
+        // 符号和版式，不把一轮 OCR 当成唯一事实。
         guard let image = renderPageImage(page, maximumLongestSide: Self.ocrRenderLongestSide) else { return nil }
         if let qwenConfiguration,
            let jpeg = jpegData(from: image),
            let recognized = await QwenOCRService.recognizeText(in: jpeg, configuration: qwenConfiguration),
            recognized.count >= 40 {
-            return .text(String(recognized.prefix(24_000)))
+            // Qwen OCR can repair the text layer, but it is still a second
+            // interpretation of the page. Keep the rendered page beside it
+            // for both genuinely scanned and suspicious pages.
+            return .textAndImage(String(recognized.prefix(24_000)), jpeg)
         }
         if let recognized = recognizeText(in: image),
            recognized.count >= 40 {
+            if let jpeg = jpegData(from: image) {
+                return .textAndImage(String(recognized.prefix(24_000)), jpeg)
+            }
             return .text(String(recognized.prefix(24_000)))
         }
 
-        // OCR 也没读到内容（纯图/公式页）：退回高清页图，让模型看图。
+        // OCR 也没读到内容（纯图/公式页）：退回高清页图，让模型直接看图；
+        // 对疑似损坏的文字层则保留原文，避免丢掉可检索的部分。
         guard let jpeg = renderPageJPEG(page) else { return nil }
+        if text.count >= 40 {
+            return .textAndImage(String(text.prefix(24_000)), jpeg)
+        }
         return .imageJPEG(jpeg)
     }
 
@@ -160,19 +408,54 @@ enum PDFPageContextExtractor {
         } catch {
             return nil
         }
-        // Vision 的 boundingBox 原点在左下角：先按行（y 中心从高到低），
-        // 同行内再按 x 从左到右，还原真实的阅读顺序。
-        let observations = (request.results ?? []).sorted { lhs, rhs in
-            let dy = lhs.boundingBox.midY - rhs.boundingBox.midY
-            if abs(dy) > 0.02 { return dy > 0 }
-            return lhs.boundingBox.minX < rhs.boundingBox.minX
+        let observations = request.results ?? []
+
+        // Vision returns fragments, not logical lines. Rebuild lines first so
+        // punctuation and page numbers stay with the heading. A page is
+        // treated as two-column only when there are substantial,
+        // non-overlapping left/right columns; ordinary single-column pages
+        // often have long lines crossing the midpoint and must stay whole.
+        func lines(in column: [VNRecognizedTextObservation]) -> [String] {
+            let sorted = column.sorted { lhs, rhs in
+                let dy = lhs.boundingBox.midY - rhs.boundingBox.midY
+                return abs(dy) > 0.02 ? dy > 0 : lhs.boundingBox.minX < rhs.boundingBox.minX
+            }
+            var result: [String] = []
+            var currentY: CGFloat?
+            for observation in sorted {
+                guard let candidate = observation.topCandidates(1).first?.string,
+                      !candidate.isEmpty else { continue }
+                if let currentY, abs(observation.boundingBox.midY - currentY) <= 0.01,
+                   !result.isEmpty {
+                    result[result.count - 1] += " " + candidate
+                } else {
+                    result.append(candidate)
+                    currentY = observation.boundingBox.midY
+                }
+            }
+            return result
         }
-        let text = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+
+        let leftColumn = observations.filter { $0.boundingBox.maxX <= 0.5 }
+        let rightColumn = observations.filter { $0.boundingBox.minX >= 0.5 }
+        let isTwoColumn = leftColumn.count >= 8 && rightColumn.count >= 8
+        let text: String
+        if isTwoColumn {
+            let left = observations.filter { $0.boundingBox.midX < 0.5 }
+            let right = observations.filter { $0.boundingBox.midX >= 0.5 }
+            text = (lines(in: left) + lines(in: right)).joined(separator: "\n")
+        } else {
+            text = lines(in: observations).joined(separator: "\n")
+        }
         let normalized = ExtractedTextNormalizer.normalize(text)
         return normalized.isEmpty ? nil : normalized
     }
 
-    private static func extractWholeDocument(from url: URL) async -> LearningPageContent? {
+    private static func extractWholeDocument(
+        from url: URL,
+        anchorPage: Int?,
+        qwenConfiguration: QwenConfiguration?
+    ) async -> LearningPageContent? {
         let didAccess = url.startAccessingSecurityScopedResource()
         defer {
             if didAccess { url.stopAccessingSecurityScopedResource() }
@@ -181,20 +464,71 @@ enum PDFPageContextExtractor {
         guard let document = PDFDocument(url: url), document.pageCount > 0 else { return nil }
 
         let limit = 60_000
-        // 扫描版全书 OCR 很耗时，最多识别前 40 页就够撑满上下文；
-        // 有文字层的页不 OCR；本地 Vision 3 路并发。
-        let pages = await extractPagesConcurrently(
+        let nearbyPages: [Int] = {
+            guard let anchorPage else { return [] }
+            let clamped = min(max(anchorPage, 0), document.pageCount - 1)
+            let start = max(0, clamped - 2)
+            let end = min(document.pageCount - 1, clamped + 2)
+            return Array(start...end)
+        }()
+        let nearbySet = Set(nearbyPages)
+        let allPages = Array(0..<document.pageCount)
+        let representativePages = ReadingSamplePlan.representativePageIndices(
+            pageCount: document.pageCount,
+            outlinePageIndices: outlinePageIndices(in: document),
+            excluding: nearbySet
+        )
+        let representativeSet = Set(representativePages)
+        let remainingPages = allPages.filter {
+            !nearbySet.contains($0) && !representativeSet.contains($0)
+        }
+        // 整本书也必须先保证当前阅读位置附近和全书结构代表页在上下文里；
+        // 否则 6 万字符会被书的开头吃完，用户问“这本书难吗”时看不到后半本。
+        // 代表页优先取 PDF 目录的一级条目，再补全书均匀采样；剩余页面最后
+        // 填充，保持上下文覆盖面，同时不让整本扫描版触发无限 OCR。
+        let nearbyResults = await extractPagesConcurrently(
             document: document,
-            indices: Array(0..<document.pageCount),
-            qwenConfiguration: nil,
-            useQwenOCR: false,
-            ocrBudget: OCRBudget(40),
+            indices: nearbyPages,
+            qwenConfiguration: qwenConfiguration,
+            useQwenOCR: qwenConfiguration != nil,
+            ocrBudget: nil,
             concurrency: 3
         )
+        let wholeBookOCRBudget = OCRBudget(40)
+        let representativeResults = await extractPagesConcurrently(
+            document: document,
+            indices: representativePages,
+            qwenConfiguration: nil,
+            useQwenOCR: false,
+            ocrBudget: wholeBookOCRBudget,
+            concurrency: 3
+        )
+        let remainingResults = await extractPagesConcurrently(
+            document: document,
+            indices: remainingPages,
+            qwenConfiguration: nil,
+            useQwenOCR: false,
+            ocrBudget: wholeBookOCRBudget,
+            concurrency: 3
+        )
+        let pages = nearbyResults + representativeResults + remainingResults
 
-        var assembled = ""
-        for (pageIndex, text) in pages {
+        let orderedPages = nearbyPages.compactMap { index in
+            pages.first { $0.pageIndex == index }
+        } + representativePages.compactMap { index in
+            pages.first { $0.pageIndex == index }
+        } + pages.filter {
+            !nearbySet.contains($0.pageIndex) && !representativeSet.contains($0.pageIndex)
+        }
+
+        var assembled = nearbyPages.isEmpty ? "" : "【当前阅读位置附近】\n"
+        var insertedRepresentativeHeader = false
+        for (pageIndex, text) in orderedPages {
             guard !text.isEmpty else { continue }
+            if !nearbySet.contains(pageIndex), representativeSet.contains(pageIndex), !insertedRepresentativeHeader {
+                assembled += "【全书结构代表页】\n"
+                insertedRepresentativeHeader = true
+            }
             assembled += "【第 \(pageIndex + 1) 页】\n\(text)\n\n"
             if assembled.count >= limit { break }
         }
@@ -202,6 +536,24 @@ enum PDFPageContextExtractor {
         let trimmed = assembled.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         return .text(String(trimmed.prefix(limit)))
+    }
+
+    private static func outlinePageIndices(in document: PDFDocument) -> [Int] {
+        guard let root = document.outlineRoot else { return [] }
+        var pageIndices = Set<Int>()
+
+        func visit(_ outline: PDFOutline) {
+            for index in 0..<outline.numberOfChildren {
+                guard let child = outline.child(at: index) else { continue }
+                if let page = child.destination?.page {
+                    let pageIndex = document.index(for: page)
+                    if pageIndex >= 0 { pageIndices.insert(pageIndex) }
+                }
+                visit(child)
+            }
+        }
+        visit(root)
+        return pageIndices.sorted()
     }
 
     // MARK: - 并发提取
@@ -269,7 +621,8 @@ enum PDFPageContextExtractor {
     ) async -> String {
         guard let page = document.page(at: pageIndex) else { return "" }
         var text = ExtractedTextNormalizer.normalize(page.string ?? "")
-        guard text.count < 40, (await ocrBudget?.take()) ?? true else { return text }
+        let needsOCR = text.count < 40 || ExtractedTextNormalizer.likelyDegraded(text)
+        guard needsOCR, (await ocrBudget?.take()) ?? true else { return text }
 
         if useQwenOCR, let qwenConfiguration,
            let image = renderPageImage(page, maximumLongestSide: Self.ocrRenderLongestSide),
@@ -278,7 +631,11 @@ enum PDFPageContextExtractor {
            recognized.count >= 40 {
             text = ExtractedTextNormalizer.normalize(recognized)
         }
-        if text.count < 40,
+        // A long but damaged text layer still needs local OCR after Qwen OCR
+        // fails (or is unavailable). Previously this branch only ran for
+        // short pages, so broken scan text could be sent onward as confident-
+        // looking garbage.
+        if (text.count < 40 || ExtractedTextNormalizer.likelyDegraded(text)),
            let image = renderPageImage(page, maximumLongestSide: Self.ocrRenderLongestSide),
            let recognized = recognizeText(in: image),
            recognized.count >= 40 {

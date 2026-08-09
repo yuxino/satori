@@ -10,7 +10,7 @@ Satori needs one affordable model path that can understand extracted PDF text, i
 
 ## Decision
 
-Use Alibaba Cloud Model Studio's OpenAI-compatible Responses API. Default to `qwen3.8-max`, the current high-capability multimodal model, while allowing the user to select `qwen3.7-plus` or `qwen3.7-flash` when balancing quality, latency, and cost. Satori targets the China (Beijing) region and internally uses Alibaba's supported shared endpoint, `https://dashscope.aliyuncs.com/compatible-mode/v1`, so the user supplies only the API Key. Store the key in macOS Keychain and the model ID as a local preference.
+Use Alibaba Cloud Model Studio's OpenAI-compatible Responses API. Default to `qwen3.7-max-2026-06-08`, the strongest listed Qwen3.7 snapshot with visual understanding, while allowing the user to select `qwen3.7-plus` or `qwen3.7-flash` when balancing quality, latency, and cost. Satori targets the China (Beijing) region and internally uses Alibaba's supported shared endpoint, `https://dashscope.aliyuncs.com/compatible-mode/v1`, so the user supplies only the API Key. Store the key in macOS Keychain and the model ID as a local preference. Older installations that stored the pre-release `qwen3.8-max` label migrate automatically.
 
 ## Consequences
 

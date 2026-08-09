@@ -3,25 +3,35 @@ import PDFKit
 import SwiftUI
 import SatoriCore
 
-/// Notification posted by the selection toolbar's「问 AI」button. The learning
-/// panel consumes it via ContentView → ReaderSelectionRouter.pendingAskSelection
-/// to ask about the selected passage. userInfo: text, pageIndex, url.
+/// Notification posted by the selection toolbar's reading actions. The
+/// learning panel consumes it via ContentView → ReaderSelectionRouter and
+/// immediately starts the selected intent. userInfo: text, pageIndex, url,
+/// intent.
 extension Notification.Name {
     static let satoriAskSelectionRequested = Notification.Name("satori.askSelectionRequested")
     static let satoriRunSelectionRequested = Notification.Name("satori.runSelectionRequested")
-    /// userInfo: url (the PDF), position (ReadingPosition with page + offset).
+    /// userInfo: documentID, url, pageIndex, jpegData (a cropped page region).
+    static let satoriPageRegionCaptured = Notification.Name("satori.pageRegionCaptured")
+    /// userInfo: documentID, url (the PDF), position (ReadingPosition with page + offset).
     static let satoriReaderJumpRequested = Notification.Name("satori.readerJumpRequested")
+    /// userInfo: documentID, url, query, direction (-1 previous / 1 next).
+    static let satoriReaderSearchRequested = Notification.Name("satori.readerSearchRequested")
 }
 
-/// The reading canvas. Text selection raises a floating「问 AI / 运行 / 复制」
+/// The reading canvas. Text selection raises a floating「理解 / 接上文 / 举例 /
+/// 试试看 / 复制」
 /// toolbar (AppKit overlay, theme-colored); the page's visible position is
 /// reported as a real 0…1 offset instead of a constant 0, and jumps can be
 /// targeted at a (page, offset) pair via the satoriReaderJumpRequested channel.
 struct PDFReaderView: NSViewRepresentable {
+    let documentID: UUID
     let url: URL
     let initialPosition: ReadingPosition
     @Binding var currentPageIndex: Int
+    @Binding var isRegionCaptureEnabled: Bool
     let onPositionChanged: (Int, Double) -> Void
+    var onPageRegionCaptured: ((Data, Int, ReadingRegionAnchor) -> Void)? = nil
+    var onSearchResult: ((Int, Int) -> Void)? = nil
 
     /// Selection toolbar callbacks, in addition to the notification channel:
     /// (selectedText, pageIndex). Defaults keep existing call sites working.
@@ -30,10 +40,13 @@ struct PDFReaderView: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
+            documentID: documentID,
             currentPageIndex: $currentPageIndex,
+            onPageRegionCaptured: onPageRegionCaptured,
             onPositionChanged: onPositionChanged,
             onAskSelection: onAskSelection,
-            onRunSelection: onRunSelection
+            onRunSelection: onRunSelection,
+            onSearchResult: onSearchResult
         )
     }
 
@@ -60,6 +73,7 @@ struct PDFReaderView: NSViewRepresentable {
             }
         }
         context.coordinator.observe(view)
+        context.coordinator.setRegionCaptureEnabled(isRegionCaptureEnabled, in: view)
         context.coordinator.restoreInitialPosition(in: view)
         return view
     }
@@ -67,6 +81,9 @@ struct PDFReaderView: NSViewRepresentable {
     func updateNSView(_ view: PDFView, context: Context) {
         context.coordinator.onAskSelection = onAskSelection
         context.coordinator.onRunSelection = onRunSelection
+        context.coordinator.onPageRegionCaptured = onPageRegionCaptured
+        context.coordinator.onSearchResult = onSearchResult
+        context.coordinator.setRegionCaptureEnabled(isRegionCaptureEnabled, in: view)
         guard let document = view.document, document.pageCount > 0 else { return }
         let targetIndex = min(max(currentPageIndex, 0), document.pageCount - 1)
         let visibleIndex = view.currentPage.map(document.index(for:))
@@ -85,10 +102,14 @@ struct PDFReaderView: NSViewRepresentable {
         coordinator.stopObserving()
     }
 
+    @MainActor
     final class Coordinator: NSObject {
+        private let documentID: UUID
         private weak var observedView: PDFView?
         private let currentPageIndex: Binding<Int>
         private let onPositionChanged: (Int, Double) -> Void
+        var onPageRegionCaptured: ((Data, Int, ReadingRegionAnchor) -> Void)?
+        var onSearchResult: ((Int, Int) -> Void)?
         var onAskSelection: ((String, Int) -> Void)?
         var onRunSelection: ((String, Int) -> Void)?
 
@@ -109,20 +130,31 @@ struct PDFReaderView: NSViewRepresentable {
         /// Scrolling reports offsets continuously; only the settle matters.
         private var offsetDebounce: Timer?
         private var jumpObserverToken: NSObjectProtocol?
+        private var searchObserverToken: NSObjectProtocol?
+        private var searchQuery = ""
+        private var searchMatches: [PDFSelection] = []
+        private var searchMatchIndex: Int?
         /// 最近一次上报的 (页, 偏移)，用于滤掉同一位置导航触发的重复上报。
         private var lastReportedPageIndex: Int?
         private var lastReportedOffset: Double = -1
+        private var regionCaptureView: RegionCaptureView?
 
         init(
+            documentID: UUID,
             currentPageIndex: Binding<Int>,
+            onPageRegionCaptured: ((Data, Int, ReadingRegionAnchor) -> Void)?,
             onPositionChanged: @escaping (Int, Double) -> Void,
             onAskSelection: ((String, Int) -> Void)?,
-            onRunSelection: ((String, Int) -> Void)?
+            onRunSelection: ((String, Int) -> Void)?,
+            onSearchResult: ((Int, Int) -> Void)?
         ) {
+            self.documentID = documentID
             self.currentPageIndex = currentPageIndex
+            self.onPageRegionCaptured = onPageRegionCaptured
             self.onPositionChanged = onPositionChanged
             self.onAskSelection = onAskSelection
             self.onRunSelection = onRunSelection
+            self.onSearchResult = onSearchResult
         }
 
         func observe(_ view: PDFView) {
@@ -146,9 +178,36 @@ struct PDFReaderView: NSViewRepresentable {
                 // Extract Sendable payloads before crossing isolation; the
                 // Notification itself is not Sendable.
                 let position = note.userInfo?["position"] as? ReadingPosition
+                let requestedDocumentID = note.userInfo?["documentID"] as? UUID
                 let requestedURL = note.userInfo?["url"] as? URL
-                MainActor.assumeIsolated {
-                    self?.handleJumpRequest(position: position, requestedURL: requestedURL)
+                let selectionText = note.userInfo?["selectionText"] as? String
+                let selectionOffsetIsExact = note.userInfo?["selectionOffsetIsExact"] as? Bool ?? false
+                Task { @MainActor [weak self] in
+                    self?.handleJumpRequest(
+                        position: position,
+                        requestedDocumentID: requestedDocumentID,
+                        requestedURL: requestedURL,
+                        selectionText: selectionText,
+                        selectionOffsetIsExact: selectionOffsetIsExact
+                    )
+                }
+            }
+            searchObserverToken = center.addObserver(
+                forName: .satoriReaderSearchRequested,
+                object: nil,
+                queue: .main
+            ) { [weak self] note in
+                let query = note.userInfo?["query"] as? String ?? ""
+                let direction = note.userInfo?["direction"] as? Int ?? 1
+                let requestedDocumentID = note.userInfo?["documentID"] as? UUID
+                let requestedURL = note.userInfo?["url"] as? URL
+                Task { @MainActor [weak self] in
+                    self?.handleSearchRequest(
+                        query: query,
+                        direction: direction,
+                        requestedDocumentID: requestedDocumentID,
+                        requestedURL: requestedURL
+                    )
                 }
             }
         }
@@ -159,11 +218,161 @@ struct PDFReaderView: NSViewRepresentable {
                 NotificationCenter.default.removeObserver(jumpObserverToken)
                 self.jumpObserverToken = nil
             }
+            if let searchObserverToken {
+                NotificationCenter.default.removeObserver(searchObserverToken)
+                self.searchObserverToken = nil
+            }
             offsetDebounce?.invalidate()
             offsetDebounce = nil
+            regionCaptureView?.removeFromSuperview()
+            regionCaptureView = nil
             toolbar?.removeFromSuperview()
             toolbar = nil
             observedView = nil
+        }
+
+        // MARK: In-document search
+
+        @MainActor private func handleSearchRequest(
+            query: String,
+            direction: Int,
+            requestedDocumentID: UUID?,
+            requestedURL: URL?
+        ) {
+            guard let view = observedView,
+                  let document = view.document else { return }
+            if let requestedDocumentID, requestedDocumentID != documentID { return }
+            if let requestedURL, let documentURL = document.documentURL,
+               requestedURL.standardizedFileURL != documentURL.standardizedFileURL { return }
+
+            let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalizedQuery.isEmpty else {
+                onSearchResult?(0, 0)
+                return
+            }
+
+            if normalizedQuery != searchQuery {
+                searchQuery = normalizedQuery
+                searchMatches = document.findString(normalizedQuery, withOptions: [.caseInsensitive])
+                searchMatchIndex = nil
+            }
+            guard !searchMatches.isEmpty else {
+                onSearchResult?(0, 0)
+                return
+            }
+
+            let step = direction < 0 ? -1 : 1
+            let nextIndex: Int
+            if let searchMatchIndex {
+                nextIndex = (searchMatchIndex + step + searchMatches.count) % searchMatches.count
+            } else if let currentPage = view.currentPage {
+                let currentPageIndex = document.index(for: currentPage)
+                if step > 0 {
+                    nextIndex = searchMatches.firstIndex { match in
+                        match.pages.contains { document.index(for: $0) >= currentPageIndex }
+                    } ?? 0
+                } else {
+                    nextIndex = searchMatches.lastIndex { match in
+                        match.pages.contains { document.index(for: $0) <= currentPageIndex }
+                    } ?? searchMatches.count - 1
+                }
+            } else {
+                nextIndex = step > 0 ? 0 : searchMatches.count - 1
+            }
+
+            searchMatchIndex = nextIndex
+            let match = searchMatches[nextIndex]
+            view.setCurrentSelection(match, animate: true)
+            view.scrollSelectionToVisible(nil)
+            onSearchResult?(nextIndex + 1, searchMatches.count)
+        }
+
+        /// Scanned PDFs have no PDFKit text selection. A temporary drag layer
+        /// lets the reader isolate a diagram/code/formula region without
+        /// leaving Satori to take a separate screenshot and paste it back.
+        func setRegionCaptureEnabled(_ enabled: Bool, in view: PDFView) {
+            if enabled {
+                if regionCaptureView?.superview !== view {
+                    regionCaptureView?.removeFromSuperview()
+                    let capture = RegionCaptureView(frame: view.bounds)
+                    capture.autoresizingMask = [.width, .height]
+                    capture.onComplete = { [weak self, weak view] rect in
+                        guard let self, let view else { return }
+                        self.captureRegion(rect, in: view)
+                    }
+                    capture.onCancel = { [weak self] in
+                        self?.regionCaptureView?.removeFromSuperview()
+                        self?.regionCaptureView = nil
+                    }
+                    view.addSubview(capture)
+                    regionCaptureView = capture
+                }
+            } else if let regionCaptureView {
+                regionCaptureView.removeFromSuperview()
+                self.regionCaptureView = nil
+            }
+        }
+
+        private func captureRegion(_ viewRect: NSRect, in view: PDFView) {
+            defer {
+                regionCaptureView?.removeFromSuperview()
+                regionCaptureView = nil
+            }
+            guard let document = view.document else { return }
+            let page = view.page(
+                for: NSPoint(x: viewRect.midX, y: viewRect.midY),
+                nearest: true
+            )
+            guard let page else { return }
+            let pageRectInView = view.convert(page.bounds(for: .mediaBox), from: page)
+            let clipped = viewRect.intersection(pageRectInView)
+            guard clipped.width >= 24, clipped.height >= 24 else { return }
+            let pageRect = view.convert(clipped, to: page)
+            let pageIndex = document.index(for: page)
+            guard pageIndex >= 0 else { return }
+            let bounds = page.bounds(for: .mediaBox).standardized
+            guard let anchor = ReadingRegionAnchor(
+                pageIndex: pageIndex,
+                pageRect: pageRect,
+                pageBounds: bounds
+            ), let anchoredRect = anchor.pageRect(in: bounds),
+               let jpeg = Self.renderRegionJPEG(page: page, rect: anchoredRect) else { return }
+            onPageRegionCaptured?(jpeg, pageIndex, anchor)
+        }
+
+        private static func renderRegionJPEG(page: PDFPage, rect: NSRect) -> Data? {
+            let bounds = page.bounds(for: .mediaBox).standardized
+            let clipped = rect.standardized.intersection(bounds)
+            guard clipped.width >= 1, clipped.height >= 1,
+                  bounds.width > 0, bounds.height > 0 else { return nil }
+
+            let longestSide: CGFloat = 2_200
+            let scale = longestSide / max(bounds.width, bounds.height)
+            let fullSize = NSSize(width: bounds.width * scale, height: bounds.height * scale)
+            let image = page.thumbnail(of: fullSize, for: .mediaBox)
+            var proposedRect = NSRect(origin: .zero, size: image.size)
+            guard let fullImage = image.cgImage(
+                forProposedRect: &proposedRect,
+                context: nil,
+                hints: nil
+            ) else { return nil }
+
+            let imageBounds = CGRect(
+                x: 0,
+                y: 0,
+                width: CGFloat(fullImage.width),
+                height: CGFloat(fullImage.height)
+            )
+            let cropRect = CGRect(
+                x: (clipped.minX - bounds.minX) / bounds.width * imageBounds.width,
+                y: (bounds.maxY - clipped.maxY) / bounds.height * imageBounds.height,
+                width: clipped.width / bounds.width * imageBounds.width,
+                height: clipped.height / bounds.height * imageBounds.height
+            ).integral.intersection(imageBounds)
+            guard cropRect.width >= 2, cropRect.height >= 2,
+                  let cropped = fullImage.cropping(to: cropRect) else { return nil }
+            let bitmap = NSBitmapImageRep(cgImage: cropped)
+            return bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.86])
         }
 
         func consumePendingJump() -> ReadingPosition? {
@@ -177,26 +386,36 @@ struct PDFReaderView: NSViewRepresentable {
             guard let view = observedView, let document = view.document, let page = view.currentPage else { return }
             let pageIndex = document.index(for: page)
             currentPageIndex.wrappedValue = pageIndex
-            reportPosition(in: view, pageIndex: pageIndex)
+            reportPosition(in: view, page: page, pageIndex: pageIndex)
         }
 
         /// Fires on scroll/zoom too; debounce so a long scroll within a tall
         /// page still lands a real offset without spamming saves.
         @MainActor @objc private func viewportChanged() {
-            guard let view = observedView, let page = view.currentPage else { return }
-            let pageIndex = view.document?.index(for: page) ?? currentPageIndex.wrappedValue
+            guard observedView != nil else { return }
             offsetDebounce?.invalidate()
             offsetDebounce = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
                 Task { @MainActor in
                     guard let self, let observed = self.observedView else { return }
-                    self.reportPosition(in: observed, pageIndex: pageIndex)
+                    // Resolve page and offset together after the debounce.
+                    // Capturing the page index before the delay can pair page A
+                    // with page B's offset when a fast scroll crosses a boundary.
+                    self.reportPosition(in: observed)
                     self.settleToolbar(in: observed)
                 }
             }
         }
 
-        @MainActor private func reportPosition(in view: PDFView, pageIndex: Int) {
-            let offset = visibleOffset(in: view)
+        @MainActor private func reportPosition(in view: PDFView) {
+            guard let document = view.document, let page = view.currentPage else { return }
+            reportPosition(in: view, page: page, pageIndex: document.index(for: page))
+        }
+
+        /// Keep the page and offset from the same PDFKit snapshot. This is
+        /// important in continuous mode, where visible-page notifications and
+        /// scroll notifications can arrive in different orders.
+        @MainActor private func reportPosition(in view: PDFView, page: PDFPage, pageIndex: Int) {
+            let offset = visibleOffset(in: view, page: page)
             // 一次翻页会先后触发 PDFViewPageChanged 与滚动/可见页通知；偏移未变时
             // 跳过，避免重复写盘和重复记录「已读页」。
             if pageIndex == lastReportedPageIndex, abs(offset - lastReportedOffset) < 0.001 { return }
@@ -262,6 +481,10 @@ struct PDFReaderView: NSViewRepresentable {
         /// viewport top. PDFView is non-flipped, so y grows upward.
         private func visibleOffset(in view: PDFView) -> Double {
             guard let page = view.currentPage else { return 0 }
+            return visibleOffset(in: view, page: page)
+        }
+
+        private func visibleOffset(in view: PDFView, page: PDFPage) -> Double {
             let pageRect = view.convert(page.bounds(for: .mediaBox), from: page)
             let viewport = view.visibleRect
             let pageHeight = max(pageRect.height, 1)
@@ -271,14 +494,96 @@ struct PDFReaderView: NSViewRepresentable {
 
         // MARK: Offset-aware jumps
 
-        @MainActor private func handleJumpRequest(position: ReadingPosition?, requestedURL: URL?) {
+        @MainActor private func handleJumpRequest(
+            position: ReadingPosition?,
+            requestedDocumentID: UUID?,
+            requestedURL: URL?,
+            selectionText: String?,
+            selectionOffsetIsExact: Bool
+        ) {
             guard let position, let view = observedView else { return }
+            if let requestedDocumentID, requestedDocumentID != documentID {
+                return // Another document's jump; ignore.
+            }
             if let requestedURL, let documentURL = view.document?.documentURL,
                requestedURL.standardizedFileURL != documentURL.standardizedFileURL {
                 return // Another document's jump; ignore.
             }
             pendingJump = position
             jump(to: position, in: view)
+            if let selectionText {
+                // PDFDestination 只负责把视口送到附近；下一帧再用 PDFKit 的文本
+                // 搜索恢复真正的选区，让“回到原文”不再要求用户二次寻找句子。
+                DispatchQueue.main.async { [weak self, weak view] in
+                    guard let self, let view else { return }
+                    self.restoreSelection(
+                        selectionText,
+                        pageIndex: position.pageIndex,
+                        normalizedOffset: position.normalizedPageOffset,
+                        offsetIsExact: selectionOffsetIsExact,
+                        in: view
+                    )
+                }
+            }
+        }
+
+        @MainActor private func restoreSelection(
+            _ text: String,
+            pageIndex: Int,
+            normalizedOffset: Double?,
+            offsetIsExact: Bool,
+            in view: PDFView
+        ) {
+            guard let document = view.document else { return }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            let firstLine = trimmed.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).first.map(String.init) ?? trimmed
+            let queries = [trimmed, firstLine, String(firstLine.prefix(120))]
+            var matches: [PDFSelection] = []
+            for query in queries where !query.isEmpty {
+                for match in document.findString(query, withOptions: [.literal])
+                    where match.pages.contains(where: { document.index(for: $0) == pageIndex }) {
+                    // The full selection and its first-line fallback can find
+                    // the same occurrence. Keep one candidate per geometry so
+                    // the offset comparison below is deterministic.
+                    let isDuplicate = matches.contains { existing in
+                        guard let existingPage = existing.pages.first,
+                              let matchPage = match.pages.first,
+                              document.index(for: existingPage) == document.index(for: matchPage)
+                        else { return false }
+                        let existingBounds = existing.bounds(for: existingPage)
+                        let matchBounds = match.bounds(for: matchPage)
+                        return existingBounds.insetBy(dx: -0.5, dy: -0.5).intersects(matchBounds)
+                    }
+                    if !isDuplicate { matches.append(match) }
+                }
+            }
+            guard !matches.isEmpty else { return }
+
+            // A page can contain the same short phrase several times. The
+            // saved offset is the selected passage's vertical position, so use
+            // it to choose the nearest occurrence instead of the first match.
+            let selection = matches.min { lhs, rhs in
+                guard offsetIsExact,
+                      let expected = normalizedOffset,
+                      let lhsPage = lhs.pages.first,
+                      let rhsPage = rhs.pages.first else { return false }
+                return abs(selectionOffset(lhs, on: lhsPage) - expected)
+                    < abs(selectionOffset(rhs, on: rhsPage) - expected)
+            } ?? matches[0]
+            view.setCurrentSelection(selection, animate: true)
+            view.scrollSelectionToVisible(nil)
+        }
+
+        /// Offset of a selection's vertical center from the top of its page.
+        /// It deliberately shares ReadingPosition's 0…1 convention: 0 is the
+        /// page top and 1 is the page bottom.
+        private func selectionOffset(_ selection: PDFSelection, on page: PDFPage) -> Double {
+            let bounds = page.bounds(for: .mediaBox)
+            let selectedBounds = selection.bounds(for: page)
+            guard bounds.height > 0 else { return 0 }
+            let fromTop = bounds.maxY - selectedBounds.midY
+            return min(max(fromTop / bounds.height, 0), 1)
         }
 
         /// Positions the viewport so the page's `normalizedPageOffset` sits at
@@ -368,28 +673,20 @@ struct PDFReaderView: NSViewRepresentable {
 
         @MainActor private func makeToolbar() -> SelectionToolbarView {
             let bar = SelectionToolbarView()
-            bar.onAsk = { [weak self] in
-                self?.deliverPinnedSelection { text, pageIndex in
-                    self?.onAskSelection?(text, pageIndex)
-                    NotificationCenter.default.post(
-                        name: .satoriAskSelectionRequested,
-                        object: nil,
-                        userInfo: ["text": text, "pageIndex": pageIndex, "url": self?.observedView?.document?.documentURL as Any]
-                    )
-                }
+            bar.onExplain = { [weak self] in
+                self?.deliverSelection(intent: .explain)
             }
-            bar.onRun = { [weak self] in
-                self?.deliverPinnedSelection { text, pageIndex in
-                    self?.onRunSelection?(text, pageIndex)
-                    NotificationCenter.default.post(
-                        name: .satoriRunSelectionRequested,
-                        object: nil,
-                        userInfo: ["text": text, "pageIndex": pageIndex, "url": self?.observedView?.document?.documentURL as Any]
-                    )
-                }
+            bar.onContext = { [weak self] in
+                self?.deliverSelection(intent: .context)
+            }
+            bar.onExample = { [weak self] in
+                self?.deliverSelection(intent: .example)
+            }
+            bar.onExperiment = { [weak self] in
+                self?.deliverSelection(intent: .experiment)
             }
             bar.onCopy = { [weak self] in
-                self?.deliverPinnedSelection { text, _ in
+                self?.deliverPinnedSelection { text, _, _ in
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
                 }
@@ -398,23 +695,50 @@ struct PDFReaderView: NSViewRepresentable {
             return bar
         }
 
+        @MainActor private func deliverSelection(intent: ReaderSelectionIntent) {
+            deliverPinnedSelection { [weak self] text, pageIndex, position in
+                self?.onAskSelection?(text, pageIndex)
+                NotificationCenter.default.post(
+                    name: .satoriAskSelectionRequested,
+                    object: nil,
+                    userInfo: [
+                        "documentID": self?.documentID as Any,
+                        "text": text,
+                        "pageIndex": pageIndex,
+                        "position": position,
+                        "url": self?.observedView?.document?.documentURL as Any,
+                        "intent": intent.rawValue
+                    ]
+                )
+            }
+        }
+
         /// The page of the pinned selection (first selected page), falling
         /// back to the reader's current page when the selection is gone.
-        @MainActor private func deliverPinnedSelection(_ action: (String, Int) -> Void) {
+        @MainActor private func deliverPinnedSelection(_ action: (String, Int, ReadingPosition) -> Void) {
             let text = pinnedSelection
             // Capture the selection's page before the click clears it.
             let pageIndex: Int
+            let position: ReadingPosition
             if let view = observedView, let document = view.document,
                let firstPage = view.currentSelection?.pages.first ?? view.currentPage {
                 pageIndex = document.index(for: firstPage)
+                let selectionOffset = view.currentSelection.map {
+                    self.selectionOffset($0, on: firstPage)
+                }
+                position = ReadingPosition(
+                    pageIndex: pageIndex,
+                    normalizedPageOffset: selectionOffset ?? visibleOffset(in: view, page: firstPage)
+                )
             } else {
                 pageIndex = currentPageIndex.wrappedValue
+                position = ReadingPosition(pageIndex: pageIndex)
             }
             guard !text.isEmpty else { return }
             // 不清除选区：像 Cursor 一样保留高亮，用户能看见自己问了什么，
             // 也能继续在同一段上补充操作。
             hideToolbar()
-            action(text, pageIndex)
+            action(text, pageIndex, position)
         }
 
         @MainActor private func hideToolbar() {
@@ -423,13 +747,122 @@ struct PDFReaderView: NSViewRepresentable {
     }
 }
 
+/// Rebuilds a persisted region anchor from the original PDF. The crop itself is
+/// deliberately not saved in the learning archive; reopening a book can make
+/// the same visual evidence again from this small normalized rectangle.
+enum PDFRegionRenderer {
+    static func renderJPEG(from url: URL, anchor: ReadingRegionAnchor) -> Data? {
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess { url.stopAccessingSecurityScopedResource() }
+        }
+        guard let document = PDFDocument(url: url),
+              let page = document.page(at: anchor.pageIndex) else { return nil }
+        let bounds = page.bounds(for: .mediaBox).standardized
+        guard let pageRect = anchor.pageRect(in: bounds) else { return nil }
+        return renderRegionJPEG(page: page, rect: pageRect)
+    }
+
+    static func renderRegionJPEG(page: PDFPage, rect: NSRect) -> Data? {
+        let bounds = page.bounds(for: .mediaBox).standardized
+        let clipped = rect.standardized.intersection(bounds)
+        guard clipped.width >= 1, clipped.height >= 1,
+              bounds.width > 0, bounds.height > 0 else { return nil }
+
+        let longestSide: CGFloat = 2_200
+        let scale = longestSide / max(bounds.width, bounds.height)
+        let fullSize = NSSize(width: bounds.width * scale, height: bounds.height * scale)
+        let image = page.thumbnail(of: fullSize, for: .mediaBox)
+        var proposedRect = NSRect(origin: .zero, size: image.size)
+        guard let fullImage = image.cgImage(
+            forProposedRect: &proposedRect,
+            context: nil,
+            hints: nil
+        ) else { return nil }
+
+        let imageBounds = CGRect(x: 0, y: 0, width: fullImage.width, height: fullImage.height)
+        let cropRect = CGRect(
+            x: (clipped.minX - bounds.minX) / bounds.width * imageBounds.width,
+            y: (bounds.maxY - clipped.maxY) / bounds.height * imageBounds.height,
+            width: clipped.width / bounds.width * imageBounds.width,
+            height: clipped.height / bounds.height * imageBounds.height
+        ).integral.intersection(imageBounds)
+        guard cropRect.width >= 2, cropRect.height >= 2,
+              let cropped = fullImage.cropping(to: cropRect) else { return nil }
+        let bitmap = NSBitmapImageRep(cgImage: cropped)
+        return bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.86])
+    }
+}
+
+/// A temporary, non-persistent drag layer for isolating part of a scanned PDF
+/// page. It disappears as soon as the crop is delivered or cancelled.
+private final class RegionCaptureView: NSView {
+    var onComplete: ((NSRect) -> Void)?
+    var onCancel: (() -> Void)?
+
+    private var startPoint: NSPoint?
+    private var selectionRect: NSRect = .zero
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .crosshair)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        startPoint = convert(event.locationInWindow, from: nil)
+        selectionRect = .zero
+        needsDisplay = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let startPoint else { return }
+        let current = convert(event.locationInWindow, from: nil)
+        selectionRect = NSRect(
+            x: min(startPoint.x, current.x),
+            y: min(startPoint.y, current.y),
+            width: abs(current.x - startPoint.x),
+            height: abs(current.y - startPoint.y)
+        )
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer {
+            startPoint = nil
+            selectionRect = .zero
+            needsDisplay = true
+        }
+        guard selectionRect.width >= 24, selectionRect.height >= 24 else { return }
+        onComplete?(selectionRect)
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        onCancel?()
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard !selectionRect.isEmpty else { return }
+        SatoriThemeAppKit.accentWash.withAlphaComponent(0.24).setFill()
+        NSBezierPath(rect: selectionRect).fill()
+        SatoriThemeAppKit.accent.setStroke()
+        let border = NSBezierPath(rect: selectionRect)
+        border.lineWidth = 2
+        border.stroke()
+    }
+}
+
 /// A small floating bar shown above a PDF text selection — Cursor-style
 /// "select and ask". It lives as a direct subview of the PDFView so it can be
 /// positioned in the view's coordinate space. Surfaces use the shared theme
 /// tokens (SatoriThemeAppKit) so it tracks light/dark automatically.
 final class SelectionToolbarView: NSView {
-    var onAsk: (() -> Void)?
-    var onRun: (() -> Void)?
+    var onExplain: (() -> Void)?
+    var onContext: (() -> Void)?
+    var onExample: (() -> Void)?
+    var onExperiment: (() -> Void)?
     var onCopy: (() -> Void)?
 
     init() {
@@ -445,10 +878,12 @@ final class SelectionToolbarView: NSView {
         layer?.shadowRadius = 12
         layer?.shadowOffset = CGSize(width: 0, height: -4)
 
-        let ask = makeButton(title: "问 AI", symbol: "sparkles", action: #selector(askTapped), prominent: true)
-        let run = makeButton(title: "运行", symbol: "play.fill", action: #selector(runTapped), prominent: false)
+        let explain = makeButton(title: "理解", symbol: "sparkles", action: #selector(explainTapped), prominent: true)
+        let context = makeButton(title: "接上文", symbol: "arrow.turn.up.left", action: #selector(contextTapped), prominent: false)
+        let example = makeButton(title: "举例", symbol: "lightbulb", action: #selector(exampleTapped), prominent: false)
+        let experiment = makeButton(title: "试试看", symbol: "wand.and.stars", action: #selector(experimentTapped), prominent: false)
         let copy = makeButton(title: "复制", symbol: "doc.on.doc", action: #selector(copyTapped), prominent: false)
-        let stack = NSStackView(views: [ask, run, copy])
+        let stack = NSStackView(views: [explain, context, example, experiment, copy])
         stack.orientation = .horizontal
         stack.spacing = 2
         stack.edgeInsets = NSEdgeInsets(top: 4, left: 5, bottom: 4, right: 5)
@@ -501,8 +936,10 @@ final class SelectionToolbarView: NSView {
         layer.add(group, forKey: "appear")
     }
 
-    @objc private func askTapped() { onAsk?() }
-    @objc private func runTapped() { onRun?() }
+    @objc private func explainTapped() { onExplain?() }
+    @objc private func contextTapped() { onContext?() }
+    @objc private func exampleTapped() { onExample?() }
+    @objc private func experimentTapped() { onExperiment?() }
     @objc private func copyTapped() { onCopy?() }
 }
 
@@ -524,6 +961,11 @@ private final class SelectionHighlightView: NSView {
         super.viewDidChangeEffectiveAppearance()
         layer?.backgroundColor = SatoriThemeAppKit.selectionHighlight.cgColor
     }
+
+    /// The highlight is purely visual. Let PDFKit continue receiving mouse
+    /// drags and clicks so a reader can immediately replace the selection
+    /// without first dismissing an invisible interaction layer.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 /// A custom-styled button for `SelectionToolbarView`. System bezels are

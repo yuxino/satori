@@ -2,13 +2,39 @@ import AppKit
 import SwiftUI
 import SatoriCore
 
-/// A text selection the reader routed to the learning panel (「问 AI」) or the
-/// code runner (「运行」). `id` makes repeated identical selections distinct so
-/// `onChange` consumers fire every time the same passage is picked again.
+/// The next useful thing to do with a selected passage. Keep this small and
+/// reading-first: a selection is usually a request for understanding, not a
+/// request to manage a note or open a code workspace.
+enum ReaderSelectionIntent: String, Equatable, Sendable {
+    case explain
+    case context
+    case example
+    case experiment
+}
+
+/// A text selection the reader routed to the learning panel. `id` makes
+/// repeated identical selections distinct so `onChange` consumers fire every
+/// time the same passage is picked again.
 struct ReaderSelectionRequest: Equatable, Sendable {
     let id = UUID()
+    let documentID: UUID
     let text: String
     let pageIndex: Int
+    /// 选中原文时的页内阅读位置；旧请求没有该值时仍可退回页首。
+    let position: ReadingPosition?
+    let url: URL?
+    let intent: ReaderSelectionIntent
+}
+
+/// A cropped region from a scanned PDF page. The JPEG stays in memory for the
+/// active request; the normalized anchor can be persisted and re-cropped from
+/// the original PDF for a later follow-up.
+struct ReaderPageRegionRequest: Equatable, Sendable {
+    let id = UUID()
+    let documentID: UUID
+    let jpegData: Data
+    let pageIndex: Int
+    let anchor: ReadingRegionAnchor
     let url: URL?
 }
 
@@ -20,21 +46,22 @@ struct ReaderSelectionRequest: Equatable, Sendable {
 final class ReaderSelectionRouter: ObservableObject {
     static let shared = ReaderSelectionRouter()
 
-    /// 划选即问 channel: PDFReaderView's「问 AI」posts .satoriAskSelectionRequested,
-    /// ContentView stores it here.
-    /// TODO(LearningInspector 施工队): consume `pendingAskSelection` in
-    /// LearningInspector — match `url` against documentURL, then ask with the
-    /// selected text as the anchor and `pageIndex` as the page.
+    /// 划选即理解 channel: PDFReaderView's selection actions post
+    /// .satoriAskSelectionRequested, ContentView stores the typed request here.
     @Published var pendingAskSelection: ReaderSelectionRequest?
     /// Same channel for「运行」: selected code should land in the run space.
-    /// TODO(LearningInspector 施工队): consume `pendingRunSelection` and fill
-    /// the run composer (or run directly) with the selected text.
     @Published var pendingRunSelection: ReaderSelectionRequest?
+    /// Same reading loop for scanned-page region crops.
+    @Published var pendingPageRegion: ReaderPageRegionRequest?
     /// True when the window is below the wide threshold (< 1240): the learning
     /// panel should float over the PDF instead of squeezing it.
-    /// TODO(布局施工队): read `inspectorFloats` in DocumentWorkspace
-    /// (CourseOverview.swift) and render LearningInspector as an overlay.
     @Published var inspectorFloats = false
+
+    /// Protect the reading flow by temporarily removing course chrome and the
+    /// learning inspector while keeping the document, page position, and
+    /// selection routing alive. This is intentionally session-scoped: opening
+    /// the app should never strand a user in a mode with hidden navigation.
+    @Published var isImmersiveReading = false
 }
 
 struct ContentView: View {
@@ -52,12 +79,15 @@ struct ContentView: View {
                     CourseOverview(course: course)
                         .id(course.id)
                 } else {
-                    ContentUnavailableView("选择一门课程", systemImage: "books.vertical", description: Text("从左侧开始你的学习项目。"))
+                    ContentUnavailableView("选择一个阅读空间", systemImage: "books.vertical", description: Text("从左侧打开一本书，直接开始理解。"))
                 }
             }
             .navigationSplitViewStyle(.balanced)
             .onChange(of: width) { _, newWidth in
                 applyLayout(for: newWidth)
+            }
+            .onChange(of: router.isImmersiveReading) { _, _ in
+                applyLayout(for: width)
             }
             .task(id: width) {
                 applyLayout(for: width)
@@ -65,24 +95,56 @@ struct ContentView: View {
         }
         .environmentObject(router)
         .onReceive(NotificationCenter.default.publisher(for: .satoriAskSelectionRequested)) { note in
-            guard let text = note.userInfo?["text"] as? String,
+            guard let documentID = note.userInfo?["documentID"] as? UUID,
+                  let text = note.userInfo?["text"] as? String,
                   let pageIndex = note.userInfo?["pageIndex"] as? Int else { return }
             Task { @MainActor in
+                // An explicit selection action is a request to see an answer,
+                // not a background bookmark. Leave flow mode so the reader
+                // gets visible feedback instead of a silently queued question.
+                router.isImmersiveReading = false
                 router.pendingAskSelection = ReaderSelectionRequest(
+                    documentID: documentID,
                     text: text,
                     pageIndex: pageIndex,
-                    url: note.userInfo?["url"] as? URL
+                    position: note.userInfo?["position"] as? ReadingPosition,
+                    url: note.userInfo?["url"] as? URL,
+                    intent: ReaderSelectionIntent(
+                        rawValue: note.userInfo?["intent"] as? String ?? ""
+                    ) ?? .explain
                 )
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .satoriRunSelectionRequested)) { note in
-            guard let text = note.userInfo?["text"] as? String,
+            guard let documentID = note.userInfo?["documentID"] as? UUID,
+                  let text = note.userInfo?["text"] as? String,
                   let pageIndex = note.userInfo?["pageIndex"] as? Int else { return }
             Task { @MainActor in
+                router.isImmersiveReading = false
                 router.pendingRunSelection = ReaderSelectionRequest(
+                    documentID: documentID,
                     text: text,
                     pageIndex: pageIndex,
-                    url: note.userInfo?["url"] as? URL
+                    position: note.userInfo?["position"] as? ReadingPosition,
+                    url: note.userInfo?["url"] as? URL,
+                    intent: .explain
+                )
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .satoriPageRegionCaptured)) { note in
+            guard let documentID = note.userInfo?["documentID"] as? UUID,
+                  let jpegData = note.userInfo?["jpegData"] as? Data,
+                  let pageIndex = note.userInfo?["pageIndex"] as? Int,
+                  let anchor = note.userInfo?["anchor"] as? ReadingRegionAnchor else { return }
+            let requestedURL = note.userInfo?["url"] as? URL
+            Task { @MainActor in
+                router.isImmersiveReading = false
+                router.pendingPageRegion = ReaderPageRegionRequest(
+                    documentID: documentID,
+                    jpegData: jpegData,
+                    pageIndex: pageIndex,
+                    anchor: anchor,
+                    url: requestedURL
                 )
             }
         }
@@ -110,7 +172,7 @@ struct ContentView: View {
         } else if width < Self.floatThreshold {
             router.inspectorFloats = true
         }
-        let visibility: NavigationSplitViewVisibility = width < 960 ? .detailOnly : .all
+        let visibility: NavigationSplitViewVisibility = router.isImmersiveReading || width < 960 ? .detailOnly : .all
         guard columnVisibility != visibility else { return }
         withAnimation(SatoriTheme.Motion.quick) {
             columnVisibility = visibility
@@ -125,18 +187,16 @@ struct ContentView: View {
 /// redesign 4.5 course API therefore persists an updated plan through a fresh
 /// LearningPlanStore and reloads it into AppModel via `load()` (write →
 /// reload), which keeps AppModel as the single source of truth.
-/// TODO(P0 持久化施工队): if AppModel grows internal course mutators (or the
-/// plan setter is widened), these methods can be simplified to mutate directly.
 @MainActor
 extension AppModel {
-    /// Creates a course (default title「新课程 N」) and selects it.
+    /// Creates a reading space (default title「阅读空间 N」) and selects it.
     @discardableResult
     func addCourse(title: String? = nil) async -> UUID? {
         let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         var updated = plan
         let course = CourseWorkspace(
-            title: trimmed.isEmpty ? "新课程 \(plan.courses.count + 1)" : trimmed,
-            subtitle: "自定义学习项目"
+            title: trimmed.isEmpty ? "阅读空间 \(plan.courses.count + 1)" : trimmed,
+            subtitle: "个人阅读"
         )
         updated.courses.append(course)
         do {

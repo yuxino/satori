@@ -210,7 +210,10 @@ private struct CodeBlockView: View {
     let content: String
 
     @State private var runState: RunState = .idle
+    @State private var runTask: Task<Void, Never>?
+    @State private var runGeneration = UUID()
     @State private var copied = false
+    @State private var standardInput = ""
 
     private enum RunState {
         case idle
@@ -219,7 +222,37 @@ private struct CodeBlockView: View {
     }
 
     private var runnable: CodeRunner.Language? {
-        CodeRunner.Language.recognized(language)
+        guard let language = CodeRunner.Language.recognized(language),
+              CodeRunner.safety(
+                  for: content,
+                  language: language,
+                  allowsStandardInput: CodeRunner.requiresStandardInput(for: content, language: language)
+              ).isAllowed else { return nil }
+        return language
+    }
+
+    private var requiresInput: Bool {
+        guard let language = CodeRunner.Language.recognized(language) else { return false }
+        return CodeRunner.requiresStandardInput(for: content, language: language)
+    }
+
+    private var canRun: Bool {
+        guard runnable != nil else { return false }
+        return !requiresInput || !standardInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var blockedRunReason: String? {
+        guard let language = CodeRunner.Language.recognized(language) else { return nil }
+        return CodeRunner.safety(
+            for: content,
+            language: language,
+            allowsStandardInput: CodeRunner.requiresStandardInput(for: content, language: language)
+        ).message
+    }
+
+    private var blockedRunLabel: String {
+        guard let blockedRunReason else { return "仅复制" }
+        return blockedRunReason.contains("交互输入") ? "仅复制 · 需要输入" : "仅复制"
     }
 
     var body: some View {
@@ -236,7 +269,25 @@ private struct CodeBlockView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.mini)
                         .tint(SatoriTheme.accent)
-                        .help("在本机运行这段代码")
+                        .disabled(!canRun)
+                        .help(requiresInput && standardInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                              ? "先填写一组固定输入"
+                              : "在本机运行这段代码")
+                }
+                if isRunning {
+                    Button("停止", systemImage: "stop.fill") { stop() }
+                        .font(.caption2.weight(.semibold))
+                        .labelStyle(.titleAndIcon)
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .tint(.orange)
+                        .help("停止这个实验")
+                }
+                if let blockedRunReason {
+                    Label(blockedRunLabel, systemImage: "lock.slash")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .help(blockedRunReason)
                 }
                 if isRunning {
                     HStack(spacing: 4) {
@@ -274,6 +325,23 @@ private struct CodeBlockView: View {
                     .padding(11)
             }
 
+            if requiresInput {
+                HStack(spacing: 8) {
+                    Label("固定输入", systemImage: "keyboard")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    TextField("例如：3 4", text: $standardInput)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .disabled(isRunning)
+                    Text("运行一次后即关闭输入")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 11)
+                .padding(.bottom, 9)
+            }
+
             if let result = finishedResult {
                 Divider()
                 runOutputView(result)
@@ -282,6 +350,7 @@ private struct CodeBlockView: View {
         .background(Color(nsColor: .textBackgroundColor).opacity(0.7))
         .clipShape(RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous).stroke(.quaternary))
+        .onDisappear { stop() }
     }
 
     private var isRunning: Bool {
@@ -296,23 +365,45 @@ private struct CodeBlockView: View {
 
     private func run() {
         guard let runnable else { return }
+        guard canRun else { return }
         runState = .running
         let code = content
-        Task {
-            let result = await CodeRunner.run(code: code, language: runnable)
+        let input = requiresInput ? standardInput : nil
+        let generation = UUID()
+        runGeneration = generation
+        runTask = Task { @MainActor in
+            let result = await CodeRunner.run(code: code, language: runnable, standardInput: input)
+            guard generation == runGeneration else { return }
             runState = .finished(result)
+            runTask = nil
         }
+    }
+
+    private func stop() {
+        guard isRunning else { return }
+        runGeneration = UUID()
+        runTask?.cancel()
+        runTask = nil
+        runState = .finished(
+            CodeRunResult(
+                exitCode: 130,
+                stdout: "",
+                stderr: "实验已停止。",
+                timedOut: false,
+                cancelled: true
+            )
+        )
     }
 
     private func runOutputView(_ result: CodeRunResult) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Image(systemName: result.exitCode == 0 ? "checkmark.circle" : "xmark.octagon")
-                    .foregroundStyle(result.exitCode == 0 ? .green : .red)
-                Text(result.timedOut ? "运行超时，已停止" : (result.exitCode == 0 ? "运行完成" : "运行出错"))
+                Image(systemName: result.cancelled ? "stop.circle" : (result.exitCode == 0 ? "checkmark.circle" : "xmark.octagon"))
+                    .foregroundStyle(result.cancelled ? .orange : (result.exitCode == 0 ? .green : .red))
+                Text(result.cancelled ? "已停止" : (result.timedOut ? "运行超时，已停止" : (result.exitCode == 0 ? "运行完成" : "运行出错")))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                if result.exitCode != 0 && !result.timedOut {
+                if result.exitCode != 0 && !result.timedOut && !result.cancelled {
                     Text("退出码 \(result.exitCode)")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.tertiary)
@@ -330,10 +421,10 @@ private struct CodeBlockView: View {
             if !result.stderr.isEmpty {
                 Text(result.stderr)
                     .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(result.cancelled ? Color.secondary : Color.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
-                    .background(Color.red.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+                    .background((result.cancelled ? Color.primary : Color.red).opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
             }
         }
         .padding(10)

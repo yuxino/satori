@@ -134,6 +134,27 @@ public struct ReadingPosition: Codable, Hashable, Sendable {
     }
 }
 
+/// Compares a chapter/title anchor with the reader's current viewport.
+/// Offsets use the same convention as `ReadingPosition`: 0 is the page top,
+/// 1 is the page bottom. A missing chapter offset is conservatively treated
+/// as the page top, which keeps old outline/scanned caches useful.
+public enum ReadingPositionOrdering {
+    public static func isAtOrBefore(
+        pageIndex: Int,
+        normalizedOffset: Double?,
+        currentPageIndex: Int,
+        currentNormalizedOffset: Double,
+        tolerance: Double = 0.03
+    ) -> Bool {
+        if pageIndex != currentPageIndex {
+            return pageIndex < currentPageIndex
+        }
+        let chapterOffset = min(max(normalizedOffset ?? 0, 0), 1)
+        let currentOffset = min(max(currentNormalizedOffset, 0), 1)
+        return chapterOffset <= currentOffset + max(tolerance, 0)
+    }
+}
+
 public enum RelatedResourceKind: String, Codable, Sendable {
     case web
     case document

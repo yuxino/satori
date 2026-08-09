@@ -38,7 +38,7 @@
 
 在阿里云百炼的**华北 2（北京）**地域创建按量付费 API Key。创建成功后请立即保存完整的 **API Key**，再粘贴到 Satori 设置；API Host 无需填写，应用已使用阿里官方仍支持的北京共享地址。
 
-默认使用当前高能力档的 `qwen3.8-max`；也可以在设置里改为更均衡的 `qwen3.7-plus` 或更节省的 `qwen3.7-flash`。模型选择保存在本机，API Key 只进入 macOS 钥匙串；应用升级或重启后会自动读取。
+默认使用支持视觉输入的高能力档 `qwen3.7-max-2026-06-08`；也可以在设置里改为更均衡的 `qwen3.7-plus` 或更节省的 `qwen3.7-flash`。模型选择保存在本机，API Key 只进入 macOS 钥匙串；应用升级或重启后会自动读取。旧版本显示的 `qwen3.8-max` 会自动迁移到当前可用的高能力档。
 
 获取方式见[百炼 API Key 官方文档](https://help.aliyun.com/zh/model-studio/get-api-key/)；内置地址依据[百炼 Base URL 总览](https://help.aliyun.com/zh/model-studio/base-url)。密钥不会写入仓库，也不要通过聊天、截图或提交记录分享。
 

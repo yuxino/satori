@@ -14,7 +14,7 @@ struct PlanSidebar: View {
 
     var body: some View {
         List(selection: $selection) {
-            Section(isCompact ? "" : "学习计划") {
+            Section(isCompact ? "" : "阅读空间") {
                 if store.plan.courses.isEmpty {
                     emptyStateRow
                 }
@@ -26,7 +26,7 @@ struct PlanSidebar: View {
                                 courseToRename = course
                                 renameText = course.title
                             }
-                            Button("删除课程", systemImage: "trash", role: .destructive) {
+                            Button("删除阅读空间", systemImage: "trash", role: .destructive) {
                                 courseToRemove = course
                             }
                         }
@@ -48,16 +48,13 @@ struct PlanSidebar: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 0) {
-                newCourseButton
-                StreakCard(isCompact: isCompact)
-            }
+            newCourseButton
         }
-        .alert("重命名课程", isPresented: Binding(
+        .alert("重命名阅读空间", isPresented: Binding(
             get: { courseToRename != nil },
             set: { if !$0 { courseToRename = nil } }
         )) {
-            TextField("课程名称", text: $renameText)
+            TextField("阅读空间名称", text: $renameText)
             Button("取消", role: .cancel) { courseToRename = nil }
             Button("保存") {
                 if let course = courseToRename {
@@ -68,9 +65,9 @@ struct PlanSidebar: View {
             }
             .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         } message: {
-            Text("修改后学习计划会同步更新。")
+            Text("修改后阅读空间会同步更新。")
         }
-        .alert("删除「\(courseToRemove?.title ?? "这门课程")」？", isPresented: Binding(
+        .alert("删除「\(courseToRemove?.title ?? "这个阅读空间")」？", isPresented: Binding(
             get: { courseToRemove != nil },
             set: { if !$0 { courseToRemove = nil } }
         )) {
@@ -83,9 +80,9 @@ struct PlanSidebar: View {
                 courseToRemove = nil
             }
         } message: {
-            Text("课程及其 PDF 引用、学习记录会一并移除；电脑上的原始 PDF 不会删除。")
+            Text("阅读空间及其 PDF 引用、学习记录会一并移除；电脑上的原始 PDF 不会删除。")
         }
-        .alert("学习计划加载失败", isPresented: Binding(
+        .alert("阅读空间加载失败", isPresented: Binding(
             get: { store.persistenceIssue != nil },
             set: { if !$0 { store.acknowledgePersistenceIssue() } }
         )) {
@@ -118,7 +115,7 @@ struct PlanSidebar: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
-    /// 空计划（用户删光课程）时的起步引导，避免列表区一片空白。
+    /// 空阅读空间列表时的起步引导，避免列表区一片空白。
     private var emptyStateRow: some View {
         Group {
             if isCompact {
@@ -127,15 +124,15 @@ struct PlanSidebar: View {
                     .foregroundStyle(SatoriTheme.accent)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
-                    .help("还没有课程：点下方 + 新建")
+                    .help("还没有阅读空间：点下方 + 新建")
             } else {
                 VStack(alignment: .leading, spacing: 5) {
                     Image(systemName: "books.vertical")
                         .font(.system(size: 20))
                         .foregroundStyle(SatoriTheme.accent)
-                    Text("还没有课程")
+                    Text("还没有阅读空间")
                         .font(.callout.weight(.medium))
-                    Text("点下方「新建课程」，导入第一本教材。")
+                    Text("点下方「新建阅读空间」，加入第一本书。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -208,7 +205,7 @@ struct PlanSidebar: View {
                 Image(systemName: "plus")
                     .frame(maxWidth: .infinity)
             } else {
-                Label("新建课程", systemImage: "plus")
+                Label("新建阅读空间", systemImage: "plus")
                     .frame(maxWidth: .infinity)
             }
         }
@@ -218,7 +215,7 @@ struct PlanSidebar: View {
         .padding(.vertical, 10)
         .background(.bar)
         .overlay(alignment: .bottom) { Divider() }
-        .help("新建课程")
+        .help("新建阅读空间")
     }
 }
 
@@ -226,33 +223,12 @@ private struct CourseRow: View {
     let course: CourseWorkspace
     var isCompact = false
 
-    @State private var stats: LearningStats?
-    @State private var dueReviewCount = 0
-
-    private var aggregateProgress: Double {
-        guard let stats, !course.documents.isEmpty else { return 0 }
-        var pagesRead = 0
-        var totalPages = 0
-        for document in course.documents {
-            let activity = stats.documentCounts[document.id]
-            pagesRead += activity?.pagesRead.count ?? 0
-            totalPages += max(document.pageCount, activity?.pageCount ?? 0)
+    private var documentSummary: String {
+        guard !course.documents.isEmpty else { return "还没有书" }
+        if course.documents.count == 1 {
+            return course.documents[0].displayName
         }
-        guard totalPages > 0 else { return 0 }
-        return min(Double(pagesRead) / Double(totalPages), 1)
-    }
-
-    private var pagesReadText: String {
-        guard let stats, !course.documents.isEmpty else { return "尚未导入教材" }
-        var pagesRead = 0
-        var totalPages = 0
-        for document in course.documents {
-            let activity = stats.documentCounts[document.id]
-            pagesRead += activity?.pagesRead.count ?? 0
-            totalPages += max(document.pageCount, activity?.pageCount ?? 0)
-        }
-        guard totalPages > 0 else { return "尚未导入教材" }
-        return "已读 \(pagesRead) / \(totalPages) 页"
+        return "\(course.documents.count) 本书"
     }
 
     var body: some View {
@@ -267,226 +243,17 @@ private struct CourseRow: View {
                         Text(course.title)
                             .font(.callout.weight(.medium))
                             .lineLimit(1)
-                        HStack(spacing: 6) {
-                            Text(pagesReadText)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                            if dueReviewCount > 0 {
-                                Label("\(dueReviewCount) 复习", systemImage: "arrow.counterclockwise")
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(SatoriTheme.gold)
-                                    .lineLimit(1)
-                                    .help("有 \(dueReviewCount) 道复习题到期")
-                            }
-                        }
+                        Text(documentSummary)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                     Spacer(minLength: 0)
-                    if !course.documents.isEmpty {
-                        Text("\(Int(aggregateProgress * 100))%")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.tertiary)
-                    }
                 }
-            }
-            if !isCompact, !course.documents.isEmpty {
-                ProgressView(value: aggregateProgress)
-                    .tint(SatoriTheme.accent)
-                    .controlSize(.mini)
             }
         }
         .padding(.vertical, SatoriTheme.Spacing.xs + 2)
         .contentShape(Rectangle())
-        .help(isCompact ? "\(course.title) · \(Int(aggregateProgress * 100))%" : "")
-        .task(id: course.id) { await load() }
-        .onReceive(NotificationCenter.default.publisher(for: .learningStatsDidChange)) { _ in
-            Task { await load() }
-        }
+        .help(isCompact ? "\(course.title) · \(documentSummary)" : "")
     }
-
-    /// Course-level progress uses LearningStatsStore's deduplicated
-    /// pages-read accounting, aggregated across ALL of the course's documents
-    /// (not just the last book, as before). Due reviews are summed per
-    /// document from ReviewStore.
-    private func load() async {
-        stats = try? await LearningStatsStore.shared.current()
-        var due = 0
-        for document in course.documents {
-            due += (try? await ReviewStore.shared.dueQuestions(for: document.id))?.count ?? 0
-        }
-        dueReviewCount = due
-    }
-}
-
-/// A compact progress card pinned to the sidebar's bottom: today's streak and
-/// how many badges you've earned — visible every time the app opens. Clicking
-/// it expands the badge wall: unlocked badges plus「下一徽章还需 X」.
-private struct StreakCard: View {
-    var isCompact = false
-    @State private var stats: LearningStats?
-    @State private var isExpanded = false
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Button {
-                // The 56pt icon-strip tier is too narrow for the badge wall.
-                guard !isCompact else { return }
-                withAnimation(SatoriTheme.Motion.quick) { isExpanded.toggle() }
-            } label: {
-                summaryRow
-            }
-            .buttonStyle(.plain)
-            .help(compactHelpText)
-
-            if isExpanded {
-                Divider()
-                badgeWall
-            }
-        }
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
-        .task { await load() }
-        .onReceive(NotificationCenter.default.publisher(for: .learningStatsDidChange)) { _ in
-            Task { await load() }
-        }
-    }
-
-    /// Compact 图标条里按钮不可点（徽章墙放不下），提示改报实际数据而非
-    /// 误导性的「展开徽章墙」。
-    private var compactHelpText: String {
-        if !isCompact {
-            return isExpanded ? "收起徽章墙" : "展开徽章墙"
-        }
-        let days = stats?.streakDays ?? 0
-        let badges = stats?.unlockedBadges.count ?? 0
-        return "连续学习 \(days) 天 · \(badges) 枚徽章"
-    }
-
-    private var summaryRow: some View {
-        HStack(spacing: SatoriTheme.Spacing.sm) {
-            // Flame: the current streak.
-            HStack(spacing: 6) {
-                Image(systemName: "flame.fill")
-                    .foregroundStyle((stats?.streakDays ?? 0) > 0 ? SatoriTheme.gold : Color.secondary.opacity(0.5))
-                    .font(.system(size: 15))
-                if !isCompact {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("\(stats?.streakDays ?? 0) 天")
-                            .font(.callout.weight(.semibold))
-                            .monospacedDigit()
-                        Text("连续学习")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            Spacer(minLength: 0)
-
-            // Badges earned count.
-            HStack(spacing: 6) {
-                Image(systemName: "medal.fill")
-                    .foregroundStyle(SatoriTheme.accent)
-                    .font(.system(size: 13))
-                if !isCompact {
-                    Text("\(stats?.unlockedBadges.count ?? 0) 徽章")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .padding(.horizontal, isCompact ? 10 : 14)
-        .padding(.vertical, 10)
-        .contentShape(Rectangle())
-    }
-
-    private var badgeWall: some View {
-        VStack(alignment: .leading, spacing: SatoriTheme.Spacing.md) {
-            if let stats {
-                let unlocked = BadgeID.allCases.filter { stats.unlockedBadges.contains($0) }
-                if unlocked.isEmpty {
-                    Text("还没有解锁徽章，读完一本书或坚持几天就会有。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 64), spacing: 8)], spacing: 10) {
-                        ForEach(unlocked) { badge in
-                            VStack(spacing: 4) {
-                                Image(systemName: badge.systemImage)
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(SatoriTheme.accent)
-                                    .frame(width: 34, height: 34)
-                                    .background(SatoriTheme.accentWash, in: Circle())
-                                Text(badge.title)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
-                        }
-                    }
-                }
-
-                nextBadgeSection(stats)
-            }
-        }
-        .padding(SatoriTheme.Spacing.md)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private func nextBadgeSection(_ stats: LearningStats) -> some View {
-        let next = BadgeID.allCases.first { !stats.unlockedBadges.contains($0) }
-        if let next {
-            let (current, target) = badgeProgress(next, stats: stats)
-            let remaining = max(1, Int(target.rounded()) - Int(current.rounded()))
-            VStack(alignment: .leading, spacing: SatoriTheme.Spacing.xs + 1) {
-                HStack {
-                    Label("下一徽章：\(next.title)", systemImage: next.systemImage)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(SatoriTheme.gold)
-                    Spacer()
-                    Text("还需 \(remaining)")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                ProgressView(value: current, total: target)
-                    .tint(SatoriTheme.gold)
-                    .controlSize(.mini)
-            }
-        } else {
-            Label("徽章全部解锁，了不起", systemImage: "crown.fill")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(SatoriTheme.gold)
-        }
-    }
-
-    /// Progress toward a badge, mirroring LearningStatsStore.evaluateBadges'
-    /// thresholds so the wall never contradicts the unlock rules.
-    private func badgeProgress(_ badge: BadgeID, stats: LearningStats) -> (current: Double, target: Double) {
-        let questions = stats.documentCounts.values.reduce(0) { $0 + $1.questionsAsked }
-        let runs = stats.documentCounts.values.reduce(0) { $0 + $1.codeRuns }
-        let booksDone = stats.documentCounts.values.filter { $0.progress >= 1 }.count
-        switch badge {
-        case .firstQuestion: return (min(Double(questions), 1), 1)
-        case .tenQuestions: return (min(Double(questions), 10), 10)
-        case .firstCodeRun: return (min(Double(runs), 1), 1)
-        case .tenCodeRuns: return (min(Double(runs), 10), 10)
-        case .threeDayStreak: return (min(Double(stats.streakDays), 3), 3)
-        case .sevenDayStreak: return (min(Double(stats.streakDays), 7), 7)
-        case .firstBook: return (min(Double(booksDone), 1), 1)
-        }
-    }
-
-    private func load() async {
-        stats = try? await LearningStatsStore.shared.current()
-    }
-}
-
-extension BadgeID: Identifiable {
-    public var id: String { rawValue }
-}
-
-extension Notification.Name {
-    static let learningStatsDidChange = Notification.Name("satori.learningStatsDidChange")
 }
