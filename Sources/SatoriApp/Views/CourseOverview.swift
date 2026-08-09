@@ -284,10 +284,12 @@ private struct DocumentWorkspace: View {
             }
         }
         .task(id: "visual-\(url.standardizedFileURL.path)-\(currentPageIndex)") {
-            currentPageHasVisualEvidence = await Self.pageHasVisualEvidence(
+            let hasVisualEvidence = await Self.pageHasVisualEvidence(
                 at: currentPageIndex,
                 in: url
             )
+            guard !Task.isCancelled else { return }
+            currentPageHasVisualEvidence = hasVisualEvidence
         }
         .task(id: document.id) {
             // 这本书一被打开就记住「课程 + 书」，重启后回到同一本；
