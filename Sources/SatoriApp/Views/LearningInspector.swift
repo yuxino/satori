@@ -1711,6 +1711,8 @@ struct LearningInspector: View {
                 .pickerStyle(.inline)
             } label: {
                 Label(contextModePickerTitle, systemImage: contextModeSystemImage)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
             .menuStyle(.borderlessButton)
             .font(.caption)
