@@ -723,7 +723,10 @@ struct LearningInspector: View {
         guard pageIndex > 0,
               currentPageTurns.isEmpty,
               !turns.isEmpty else { return false }
-        return turns.contains { $0.pageIndex == pageIndex - 1 }
+        // 只认最近一轮问答，避免用户从“回看”或阅读位置恢复到旧页时，
+        // 把几天前的上一页记录误包装成刚刚发生的续读动作。
+        guard let latestTurn = turns.max(by: { $0.createdAt < $1.createdAt }) else { return false }
+        return latestTurn.pageIndex == pageIndex - 1
     }
 
     private var pageEntryPrompt: some View {
@@ -740,7 +743,7 @@ struct LearningInspector: View {
                      : (exerciseRange == nil ? "刚到第 \(pageIndex + 1) 页" : "这里进入习题区"))
                     .font(.caption.weight(.semibold))
                 Text(isContinuation
-                     ? "上一页刚讲过，先把主线接到这里。"
+                     ? "上一页最近有一轮讨论，先把主线接到这里。"
                      : (exerciseRange == nil
                         ? (chapterRange == nil ? "先抓主线，卡住了再追问。" : "先看本章路线，卡住了再追问。")
                         : "先看题型和起手顺序，卡住了再选一道题。"))
