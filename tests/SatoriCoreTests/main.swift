@@ -689,6 +689,104 @@ struct SatoriCoreTests {
             coherentEntries.map(\.printedPage) == [21, 21, 35],
             "Expected a chapter-number reset to select the final coherent TOC run"
         )
+
+        // 扫描书没有原生 outline：目录 OCR 恢复出的条目要把页码写回课程阅读目录，
+        // 与原生 outline 走同一套模糊匹配。空条目时目录保持原样（全 nil）。
+        precondition(
+            DirectoryPageLinker.linkedPageIndices(titles: [], entries: []) == [],
+            "Expected no directory titles to produce no linked pages"
+        )
+        precondition(
+            DirectoryPageLinker.linkedPageIndices(
+                titles: ["软件工程概述"],
+                entries: []
+            ) == [nil],
+            "Expected an empty recovered TOC to leave the directory unlinked"
+        )
+        let softwareDirectory = ["软件工程概述", "需求工程", "软件设计", "实现与测试", "软件项目管理", "软件维护"]
+        // 用真实 software.pdf 目录 OCR 恢复出的完整条目（含小节）做回归：
+        // 目录 OCR 恢复后要把这些页码写回课程阅读目录，6 项都必须得到页码。
+        let softwareScannedChapters: [(title: String, pageIndex: Int, depth: Int, normalizedOffset: Double?)] = [
+            ("第1章 软件工程概述", 26, 0, nil),
+            ("第1节 软件", 26, 1, nil),
+            ("第2节 软件工程", 27, 1, nil),
+            ("第3节 软件过程", 28, 1, nil),
+            ("第4节 软件过程模型", 29, 1, nil),
+            ("第5节 敏捷开发⋯", 33, 1, nil),
+            ("第2章 结构化软件开发方法", 40, 0, nil),
+            ("第1节 软件需求分析⋯", 40, 1, nil),
+            ("第2节 软件设计⋯", 51, 1, 0.54),
+            ("第3节 结构化系统设计", 63, 1, nil),
+            ("第4节 详细设计", 68, 1, nil),
+            ("第3章 面向对象的软件开发方法", 79, 0, nil),
+            ("第1节 面向对象的基本概念", 80, 1, nil),
+            ("第2节 统一建模语言", 84, 1, nil),
+            ("第3节 面向对象的需求分析", 90, 1, nil),
+            ("第4节 面向对象的设计", 110, 1, nil),
+            ("第4章 移动应用的设计与测试", 133, 0, nil),
+            ("第1节 移动应用的特点", 133, 1, nil),
+            ("第2节 移动应用开发的软件过程", 135, 1, nil),
+            ("第3节 移动计算环境", 137, 1, nil),
+            ("第4节 环境感知ApP", 138, 1, nil),
+            ("第5节 WebApp设计", 139, 1, nil),
+            ("第6节 移动软件的测试", 144, 1, nil),
+            ("第5章 软件测试", 157, 0, nil),
+            ("第1节 软件测试概述", 157, 1, nil),
+            ("第2节 软件测试的方法与技术", 159, 1, nil),
+            ("第3节 单元测试", 166, 1, nil),
+            ("第4节 组装测试", 169, 1, nil),
+            ("第5节 确认测试", 172, 1, nil),
+            ("第6节 静态测试", 176, 1, nil),
+            ("第7节 调试技术", 179, 1, nil),
+            ("第8节 软件测试工具", 183, 1, nil),
+            ("第6章 软件维护", 189, 0, nil),
+            ("第1节 软件维护概述", 189, 1, nil),
+            ("第2节 软件维护的过程", 192, 1, nil),
+            ("第3节 软件的可维护性", 197, 1, nil),
+            ("第4节 提高软件可维护性的方法⋯", 200, 1, nil),
+            ("第7章 软件项目管理", 206, 0, nil),
+            ("第1节 软件项目管理概述", 206, 1, nil),
+            ("第2节 软件项目中的度量", 211, 1, nil),
+            ("第3节 软件项目的评估", 214, 1, nil),
+            ("第4节 进度计划及管理", 220, 1, nil)
+        ]
+        precondition(
+            DirectoryPageLinker.linkedPageIndices(
+                titles: softwareDirectory,
+                entries: softwareScannedChapters
+            ) == [26, 26, 51, 63, 206, 206],
+            "Expected scanned TOC recovery to link every editable directory item to a page"
+        )
+        precondition(
+            DirectoryPageLinker.normalize("第3章 数据类型、运算符和表达式") == "数据类型、运算符和表达式"
+                && DirectoryPageLinker.normalize("第二章 C语言基础知识") == "c语言基础知识"
+                && DirectoryPageLinker.normalize("Chapter 6 Memory") == "memory"
+                && DirectoryPageLinker.normalize("第6节 软件测试") == "软件测试",
+            "Expected chapter/section prefixes to normalize for fuzzy directory matching"
+        )
+        // 模糊包含匹配：目录标题是候选标题的子串时也能命中，且优先最短候选，
+        // 即使最短候选排在后面（保证书序单调、取最贴合的标题）。
+        precondition(
+            DirectoryPageLinker.linkedPageIndices(
+                titles: ["调度"],
+                entries: [
+                    ("第4章 进程与线程调度", 40, 0, nil),
+                    ("第3章 进程调度", 30, 0, nil)
+                ]
+            ) == [30],
+            "Expected the shortest contained candidate to win when several headings contain the directory title"
+        )
+        // 精确匹配优先于顺延：目录项“软件维护”必须落到第 6 章而不是前一章。
+        precondition(
+            DirectoryPageLinker.linkedPageIndices(
+                titles: ["软件维护"],
+                entries: [
+                    ("第5章 软件测试", 157, 0, nil),
+                    ("第6章 软件维护", 189, 0, nil)
+                ]
+            ) == [189],
+            "Expected an exact recovered heading to beat sequential fallback"
+        )
         precondition(
             !ReadingScopeInference.inheritsRecentScope(for: "这一页主要讲什么"),
             "Expected ordinary explanations not to inherit a stale scope"

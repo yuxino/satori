@@ -22,6 +22,7 @@ Both failures are dangerous because the UI still looks fluent while the model is
 - If no chapter boundary can be resolved, Satori asks the reader to select a multi-page range instead of pretending the request was about one page.
 - Deterministic page-count answers refuse to call an unresolved chapter “one page.”
 - Scanned-text search uses a compact accurate OCR pass and can keep a typical whole textbook's page text in its bounded memory cache. It no longer trades away Chinese recall for a fast but misleading negative.
+- Recovered scanned TOC pages are written back into the course's editable learning directory with the same fuzzy matcher native outlines use (`DirectoryPageLinker` in SatoriCore), so the recovered table of contents is durable in the learning plan instead of living only in a bounded OCR cache.
 
 ## Verification
 
@@ -29,3 +30,4 @@ Both failures are dangerous because the UI still looks fluent while the model is
 - Release build and packaged-app signing must pass.
 - Reopen the real page-54 crop in `lang.pdf` and compare the attachment preview before and after restart.
 - Search “数据流图” from the real `software.pdf` chapter opener and verify that the current page is found instead of reporting a whole-book miss.
+- Reopen `software.pdf` with the scanned-outline cache cleared and confirm the course directory still navigates via the linked pages, and that `learning-plan.json` now carries the directory page indexes after one successful recovery.

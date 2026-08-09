@@ -285,6 +285,15 @@ private struct DocumentWorkspace: View {
                 chapters = scannedEntries.isEmpty
                     ? Self.makeChapters(entries: [], directory: course.learningDirectory)
                     : Self.makeScannedChapters(entries: scannedEntries)
+                // 扫描书没有原生 outline，目录 OCR 恢复出来的页码只存在内存和
+                // 有界缓存里。把它写回课程阅读目录（同一套模糊匹配），让恢复的
+                // 目录成为可编辑学习计划的一部分：下次 OCR 失效时目录回退仍有页码，
+                // 之后若做目录编辑 UI，也已经有了这份数据。
+                if !scannedEntries.isEmpty {
+                    await linkDirectoryPages(
+                        entries: scannedEntries.map { ($0.title, $0.pageIndex, $0.depth, $0.normalizedOffset) }
+                    )
+                }
             } else {
                 chapters = Self.makeChapters(entries: outlineEntries, directory: course.learningDirectory)
                 await linkDirectoryPages(entries: outlineEntries)
@@ -1489,33 +1498,13 @@ private enum OutlinePageMatcher {
     }
 
     /// 返回与输入目录标题一一对应的页索引；无匹配且无剩余 outline 节点时为 nil。
+    /// 匹配算法在 SatoriCore 里（`DirectoryPageLinker`），原生 outline 与
+    /// 扫描目录 OCR 复用同一套模糊匹配，保证两类书的目录页码行为一致。
     static func linkedPageIndices(
         titles: [String],
         entries: [(title: String, pageIndex: Int, depth: Int, normalizedOffset: Double?)]
     ) -> [Int?] {
-        guard !entries.isEmpty else { return Array(repeating: nil, count: titles.count) }
-        let normalized = entries.map { (normalize($0.title), $0.pageIndex) }
-        var cursor = 0
-        var result: [Int?] = []
-        result.reserveCapacity(titles.count)
-        for title in titles {
-            let target = normalize(title)
-            guard !target.isEmpty else {
-                result.append(nil)
-                continue
-            }
-            if let index = bestMatchIndex(for: target, in: normalized, from: cursor) {
-                result.append(normalized[index].1)
-                cursor = index + 1
-            } else if cursor < normalized.count {
-                // 退而求其次：按 outline 在书中的顺序映射到下一个节点。
-                result.append(normalized[cursor].1)
-                cursor += 1
-            } else {
-                result.append(nil)
-            }
-        }
-        return result
+        DirectoryPageLinker.linkedPageIndices(titles: titles, entries: entries)
     }
 
     private static func extractOutlineEntries(url: URL) -> [(title: String, pageIndex: Int, depth: Int, normalizedOffset: Double?)] {
@@ -1602,55 +1591,4 @@ private enum OutlinePageMatcher {
         return nil
     }
 
-    /// 精确相等最优先，其次模糊包含；取标题最短的候选取代最贴合，保证书序单调。
-    private static func bestMatchIndex(for target: String, in entries: [(title: String, pageIndex: Int)], from start: Int) -> Int? {
-        var bestIndex: Int?
-        var bestTitleLength = Int.max
-        for index in start..<entries.count {
-            let candidate = entries[index].title
-            guard !candidate.isEmpty else { continue }
-            if candidate == target {
-                return index
-            }
-            let shorterSide = min(candidate.count, target.count)
-            guard shorterSide >= 2,
-                  candidate.contains(target) || target.contains(candidate),
-                  candidate.count < bestTitleLength else { continue }
-            bestIndex = index
-            bestTitleLength = candidate.count
-        }
-        return bestIndex
-    }
-
-    /// 去空白、忽略「第X章/节/部分」等前缀，用于模糊标题匹配。
-    private static func normalize(_ title: String) -> String {
-        var result = title.lowercased().filter { !$0.isWhitespace }
-        if result.hasPrefix("第") {
-            var rest = result.dropFirst()
-            while let first = rest.first, Self.isChapterNumber(first) {
-                rest = rest.dropFirst()
-            }
-            if let first = rest.first, Self.isChapterUnit(first) {
-                result = String(rest.dropFirst())
-            }
-        } else {
-            for prefix in ["chapter", "chap", "unit", "part", "lesson", "ch"] {
-                guard result.hasPrefix(prefix) else { continue }
-                let rest = result.dropFirst(prefix.count)
-                if let first = rest.first, Self.isChapterNumber(first) {
-                    result = String(rest.drop(while: Self.isChapterNumber))
-                    break
-                }
-            }
-        }
-        return result
-    }
-
-    private static func isChapterNumber(_ character: Character) -> Bool {
-        character.isNumber || "一二三四五六七八九十百千万零〇两".contains(character)
-    }
-
-    private static func isChapterUnit(_ character: Character) -> Bool {
-        "章节部分讲篇课".contains(character)
-    }
 }
