@@ -204,6 +204,16 @@ struct SatoriCoreTests {
             QwenLearningAssistant.defaultLearningInstructions.contains("可能只是 OCR/排版问题"),
             "Expected textbook correctness checks to separate OCR doubts from factual errors"
         )
+        let corruptedUnitPageText = "这一页介绍光盘和闪存等外存设备，光盘容量约为 600乂8，且不能重新写入；同时还比较了不同设备的速度、容量和可靠性。"
+        precondition(
+            ExtractedTextNormalizer.likelyDegraded(corruptedUnitPageText)
+                && ReadingVisualEvidence.requiresPageImage(
+                    currentText: corruptedUnitPageText,
+                    nativePageText: corruptedUnitPageText
+                )
+                && !ExtractedTextNormalizer.likelyDegraded("这一页介绍本章有 6 个核心概念以及它们之间的关系，帮助读者快速建立整体理解并继续阅读后面的内容。"),
+            "Expected suspicious digit replacement glyphs to trigger visual verification without flagging normal numbers"
+        )
         precondition(
             ReadingOCRPolicy.usesRemoteOCR(forPageRangeCount: 2, hasQwenConfiguration: true),
             "Expected short page bridges to use high-fidelity remote OCR"

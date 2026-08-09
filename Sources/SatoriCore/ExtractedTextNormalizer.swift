@@ -39,6 +39,14 @@ public enum ExtractedTextNormalizer {
             return true
         }
 
+        // In the real system textbook, OCR rendered the unit in “600 MB” as
+        // “600乂8”. A suspicious replacement glyph between digits is not safe
+        // to explain as if it were a real number or unit; the caller should
+        // attach the original page image for verification.
+        if normalized.range(of: #"[0-9]\s*乂\s*[0-9]"#, options: .regularExpression) != nil {
+            return true
+        }
+
         // Two full stops in a row are unusual in this Chinese textbook and
         // are a reliable signal for the punctuation/character substitutions
         // seen in its OCR layer. Keep normal Chinese ellipses (“……” ) alone.
