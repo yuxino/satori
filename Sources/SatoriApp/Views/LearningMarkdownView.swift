@@ -231,6 +231,11 @@ private struct CodeBlockView: View {
         return CodeRunner.safety(for: content, language: language).message
     }
 
+    private var blockedRunLabel: String {
+        guard let blockedRunReason else { return "仅复制" }
+        return blockedRunReason.contains("交互输入") ? "仅复制 · 需要输入" : "仅复制"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -257,7 +262,7 @@ private struct CodeBlockView: View {
                         .help("停止这个实验")
                 }
                 if let blockedRunReason {
-                    Label("仅复制", systemImage: "lock.slash")
+                    Label(blockedRunLabel, systemImage: "lock.slash")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .help(blockedRunReason)
