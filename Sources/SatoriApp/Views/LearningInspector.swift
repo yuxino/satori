@@ -356,13 +356,13 @@ struct LearningInspector: View {
         activeSelectionOffset = nil
         attachments.append(
             LearningImageAttachment(
-                name: "第 \(request.pageIndex + 1) 页框选",
+                name: "\(readingPageLabel(request.pageIndex)) · 框选",
                 jpegData: request.jpegData,
                 preview: preview
             )
         )
         pendingSelectionPage = request.pageIndex
-        attachmentStatus = "已框选第 \(request.pageIndex + 1) 页的一块区域。"
+        attachmentStatus = "已框选\(readingPageLabel(request.pageIndex))的一块区域。"
 
         if question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isThinking {
             question = "解释我刚框选的这部分内容，并说明它在这一页中起什么作用。"
@@ -615,13 +615,14 @@ struct LearningInspector: View {
 
     private func selectionAnchorBanner(text: String, pageIndex: Int) -> some View {
         let isCurrentPage = pageIndex == self.pageIndex
+        let pageLabel = readingPageLabel(pageIndex)
         return HStack(alignment: .top, spacing: SatoriTheme.Spacing.sm) {
             Image(systemName: "text.quote")
                 .foregroundStyle(SatoriTheme.accent)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text(isCurrentPage ? "原文选区 · 第 \(pageIndex + 1) 页" : "上次卡在第 \(pageIndex + 1) 页")
+                    Text(isCurrentPage ? "原文选区 · \(pageLabel)" : "上次卡在\(pageLabel)")
                         .font(.caption.weight(.semibold))
                     Text(isCurrentPage ? "回答会围绕这段内容" : "可返回这段原文")
                         .font(.caption)
@@ -736,14 +737,15 @@ struct LearningInspector: View {
         let chapterRange = chapterStartRange
         let exerciseRange = exerciseStartRange
         let isContinuation = isContinuationEntry && chapterRange == nil && exerciseRange == nil
+        let pageLabel = readingPageLabel(pageIndex)
         return HStack(alignment: .center, spacing: SatoriTheme.Spacing.sm) {
             Image(systemName: "arrow.down.right.circle")
                 .foregroundStyle(SatoriTheme.accent)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: isContinuation
-                     ? "刚翻到第 \(pageIndex + 1) 页"
-                     : (exerciseRange == nil ? "刚到第 \(pageIndex + 1) 页" : "这里进入习题区"))
+                     ? "刚翻到\(pageLabel)"
+                     : (exerciseRange == nil ? "刚到\(pageLabel)" : "这里进入习题区"))
                     .font(.caption.weight(.semibold))
                 Text(isContinuation
                      ? "上一页最近有一轮讨论，先把主线接到这里。"
@@ -1147,11 +1149,16 @@ struct LearningInspector: View {
 
     private var pageSections: [PageSection] {
         let grouped = Dictionary(grouping: turns, by: \.pageIndex)
-        // 最近有问答的页排前面：像成长记录，而不是按页码归档的档案。
+        // 当前阅读页优先，其余页面按最近讨论排序。读者从当前页进入「回看」
+        // 时应该先看到眼前这页，而不是被别处最近的一轮问答带走。
         return grouped.keys.sorted { lhs, rhs in
+            let lhsIsCurrent = lhs == pageIndex
+            let rhsIsCurrent = rhs == pageIndex
+            if lhsIsCurrent != rhsIsCurrent { return lhsIsCurrent }
             let lastA = grouped[lhs]?.last?.createdAt ?? .distantPast
             let lastB = grouped[rhs]?.last?.createdAt ?? .distantPast
-            return lastA > lastB
+            if lastA != lastB { return lastA > lastB }
+            return lhs > rhs
         }.map { PageSection(pageIndex: $0, turns: grouped[$0] ?? []) }
     }
 
@@ -1476,9 +1483,10 @@ struct LearningInspector: View {
         completion: LearningTurnCompletion,
         pageIndex: Int
     ) -> some View {
-        HStack {
+        let pageLabel = readingPageLabel(pageIndex)
+        return HStack {
             Label(
-                isStreaming ? "Qwen 正在回答第 \(pageIndex + 1) 页" : sourceKind.localizedTitle,
+                isStreaming ? "Qwen 正在回答\(pageLabel)" : sourceKind.localizedTitle,
                 systemImage: isStreaming ? "sparkles" : "checkmark.seal"
             )
             .font(.caption.weight(.semibold))
@@ -2047,7 +2055,7 @@ struct LearningInspector: View {
     private var preparingStatusText: String {
         switch draftContextScope {
         case .none: "正在准备问题…"
-        case .page: "正在读取第 \(draftPageIndex + 1) 页…"
+        case .page: "正在读取\(readingPageLabel(draftPageIndex))…"
         case .pageRange: "正在整理所选页面…"
         case .wholeDocument: "正在整理全书内容…"
         }
@@ -2492,7 +2500,7 @@ struct LearningInspector: View {
     private func scopeExtractionFailureMessage(_ scope: LearningContextScope, pageIndex: Int) -> String {
         switch scope {
         case .none: ""
-        case .page: "暂时无法读取第 \(pageIndex + 1) 页。请确认 PDF 文件仍然可以打开。"
+        case .page: "暂时无法读取\(readingPageLabel(pageIndex))。请确认 PDF 文件仍然可以打开。"
         case .pageRange: "所选页里没有读到可用的文字（可能是纯图片页）。可以改选“当前页”，Satori 会把该页作为图片交给 AI。"
         case .wholeDocument: "这本书里没有可提取的文字（可能是扫描版）。可以改用“当前页”，Satori 会把该页作为图片交给 AI。"
         }
