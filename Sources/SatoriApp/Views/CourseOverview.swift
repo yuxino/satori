@@ -188,9 +188,11 @@ private struct DocumentWorkspace: View {
     @State private var panelHeight: CGFloat
     @State private var isDraggingDivider = false
     @State private var isDraggingHeightDivider = false
-    /// Scanned pages have no PDFKit text selection; this temporary mode lets
-    /// the reader drag a diagram/code/formula region into the next question.
+    /// Scanned pages have no PDFKit text selection; native pages can also need
+    /// this for a diagram/table that is not meaningfully selectable. Keep the
+    /// action contextual so ordinary prose does not gain another control.
     @State private var isRegionCaptureEnabled = false
+    @State private var currentPageHasVisualEvidence = false
 
     init(
         course: CourseWorkspace,
@@ -216,6 +218,26 @@ private struct DocumentWorkspace: View {
     }
 
     private var pageCount: Int { max(document.pageCount, 1) }
+
+    private static func pageHasVisualEvidence(at pageIndex: Int, in url: URL) async -> Bool {
+        await Task.detached(priority: .utility) {
+            let didAccess = url.startAccessingSecurityScopedResource()
+            defer {
+                if didAccess { url.stopAccessingSecurityScopedResource() }
+            }
+
+            guard let pdf = PDFDocument(url: url),
+                  let page = pdf.page(at: pageIndex) else { return false }
+            let currentText = ExtractedTextNormalizer.normalize(page.string ?? "")
+            let previousText = pageIndex > 0
+                ? ExtractedTextNormalizer.normalize(pdf.page(at: pageIndex - 1)?.string ?? "")
+                : ""
+            return ReadingVisualEvidence.requiresPageImage(
+                currentText: currentText,
+                previousText: previousText
+            )
+        }.value
+    }
 
     var body: some View {
         Group {
@@ -261,6 +283,12 @@ private struct DocumentWorkspace: View {
                 await linkDirectoryPages(entries: outlineEntries)
             }
         }
+        .task(id: "visual-\(url.standardizedFileURL.path)-\(currentPageIndex)") {
+            currentPageHasVisualEvidence = await Self.pageHasVisualEvidence(
+                at: currentPageIndex,
+                in: url
+            )
+        }
         .task(id: document.id) {
             // 这本书一被打开就记住「课程 + 书」，重启后回到同一本；
             // 不依赖用户点书单菜单（只读书不切书时也要能记住）。
@@ -272,6 +300,10 @@ private struct DocumentWorkspace: View {
         }
         .onChange(of: showsInspector) { _, visible in
             UserDefaults.standard.set(visible, forKey: Self.inspectorVisibleKey)
+        }
+        .onChange(of: currentPageIndex) { _, _ in
+            isRegionCaptureEnabled = false
+            currentPageHasVisualEvidence = false
         }
     }
 
@@ -681,7 +713,9 @@ private struct DocumentWorkspace: View {
                 .tint(SatoriTheme.accent)
             }
 
-            if document.contentKind == .scanned || document.contentKind == .mixed {
+            if document.contentKind == .scanned
+                || document.contentKind == .mixed
+                || currentPageHasVisualEvidence {
                 Button {
                     isRegionCaptureEnabled.toggle()
                 } label: {
@@ -695,7 +729,7 @@ private struct DocumentWorkspace: View {
                     }
                 }
                 .accessibilityLabel(isRegionCaptureEnabled ? "取消框选" : "框选理解")
-                .help(isRegionCaptureEnabled ? "取消框选（Esc）" : "拖住扫描页的一块区域，直接问 Satori")
+                .help(isRegionCaptureEnabled ? "取消框选（Esc）" : "拖住图、表或公式的一块区域，直接问 Satori")
                 .tint(isRegionCaptureEnabled ? SatoriTheme.gold : SatoriTheme.accent)
             }
 
