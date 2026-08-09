@@ -854,7 +854,7 @@ struct LearningInspector: View {
                 .font(.callout.weight(.medium))
             Spacer()
             Button("去看看") {
-                onNavigateToPage(pageIndex)
+                navigateToPage(pageIndex)
                 completedElsewherePage = nil
             }
             .buttonStyle(.borderedProminent)
@@ -1391,7 +1391,7 @@ struct LearningInspector: View {
     private func pageSectionView(_ section: PageSection) -> some View {
         VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
             Button {
-                onNavigateToPage(section.pageIndex)
+                navigateToPage(section.pageIndex)
             } label: {
                 HStack(spacing: SatoriTheme.Spacing.sm) {
                     Text("第 \(section.pageIndex + 1) 页")
@@ -2058,6 +2058,12 @@ struct LearningInspector: View {
                 trimmedSelection = nil
             }
         } else {
+            // A generic history/page jump is not a request to keep explaining
+            // the previous passage. Remove the old visual anchor so the panel
+            // cannot claim that an unrelated page is still the active hurdle.
+            activeSelectionText = nil
+            activeSelectionPage = nil
+            activeSelectionOffset = nil
             trimmedSelection = nil
         }
         onNavigateToPage(targetPageIndex)
