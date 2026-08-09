@@ -167,6 +167,7 @@ private struct DocumentWorkspace: View {
     @State private var isSearchPresented = false
     @State private var searchQuery = ""
     @State private var searchNotice = ""
+    @FocusState private var isSearchFieldFocused: Bool
     /// 这本书的章节导览（PDF outline 优先，扫描目录 OCR 次之，课程目录回退）；打开时一次性加载。
     @State private var chapters: [BookChapter] = []
     /// 目录快速跳转浮层是否显示（⌘T 或点目录按钮）。
@@ -466,9 +467,14 @@ private struct DocumentWorkspace: View {
                     },
                     onSearchResult: { matchIndex, matchCount in
                         if matchCount == 0 {
-                            searchNotice = document.contentKind == .scanned
-                                ? "这本扫描书没有可搜索的文字层，可以用“框选理解”。"
-                                : "没有找到“\(searchQuery)”。"
+                            switch document.contentKind {
+                            case .scanned:
+                                searchNotice = "这本扫描书没有可搜索的文字层，可以用“框选理解”。"
+                            case .mixed:
+                                searchNotice = "文字层里没有找到“\(searchQuery)”；扫描页请用“框选理解”。"
+                            default:
+                                searchNotice = "没有找到“\(searchQuery)”。"
+                            }
                         } else {
                             searchNotice = "第 \(matchIndex) / \(matchCount) 处"
                         }
@@ -617,6 +623,7 @@ private struct DocumentWorkspace: View {
             Button {
                 searchNotice = ""
                 isSearchPresented = true
+                isSearchFieldFocused = true
             } label: {
                 Label("查找", systemImage: "magnifyingglass")
             }
@@ -673,6 +680,7 @@ private struct DocumentWorkspace: View {
             HStack(spacing: 6) {
                 TextField("术语、标题或文件名", text: $searchQuery)
                     .textFieldStyle(.roundedBorder)
+                    .focused($isSearchFieldFocused)
                     .onSubmit { requestSearch(direction: 1) }
                 Button("上一个", systemImage: "chevron.up") {
                     requestSearch(direction: -1)
@@ -702,6 +710,11 @@ private struct DocumentWorkspace: View {
         }
         .padding(14)
         .frame(width: 330)
+        .onAppear {
+            DispatchQueue.main.async {
+                isSearchFieldFocused = true
+            }
+        }
     }
 
     private func requestSearch(direction: Int) {

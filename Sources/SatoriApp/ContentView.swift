@@ -49,15 +49,11 @@ final class ReaderSelectionRouter: ObservableObject {
     /// .satoriAskSelectionRequested, ContentView stores the typed request here.
     @Published var pendingAskSelection: ReaderSelectionRequest?
     /// Same channel for「运行」: selected code should land in the run space.
-    /// TODO(LearningInspector 施工队): consume `pendingRunSelection` and fill
-    /// the run composer (or run directly) with the selected text.
     @Published var pendingRunSelection: ReaderSelectionRequest?
     /// Same reading loop for scanned-page region crops.
     @Published var pendingPageRegion: ReaderPageRegionRequest?
     /// True when the window is below the wide threshold (< 1240): the learning
     /// panel should float over the PDF instead of squeezing it.
-    /// TODO(布局施工队): read `inspectorFloats` in DocumentWorkspace
-    /// (CourseOverview.swift) and render LearningInspector as an overlay.
     @Published var inspectorFloats = false
 
     /// Protect the reading flow by temporarily removing course chrome and the
@@ -182,8 +178,6 @@ struct ContentView: View {
 /// redesign 4.5 course API therefore persists an updated plan through a fresh
 /// LearningPlanStore and reloads it into AppModel via `load()` (write →
 /// reload), which keeps AppModel as the single source of truth.
-/// TODO(P0 持久化施工队): if AppModel grows internal course mutators (or the
-/// plan setter is widened), these methods can be simplified to mutate directly.
 @MainActor
 extension AppModel {
     /// Creates a reading space (default title「阅读空间 N」) and selects it.
