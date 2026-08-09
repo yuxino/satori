@@ -183,6 +183,10 @@ private struct DocumentWorkspace: View {
     /// 最近一次上报的页内偏移（0…1），随 onPositionChanged 更新；布局切换
     /// 重建 PDFReaderView 时用它恢复位置，避免回落到持久化里的旧页码。
     @State private var currentOffset: Double
+    /// Text-native books can print a page number inside the page even when
+    /// the PDF index includes front matter. Keep that mapping local so a
+    /// textbook citation such as “书内第 180 页” lines up with PDF 第 187 页.
+    @State private var nativePrintedPages: [Int: Int] = [:]
     /// 宽窗口下面板宽度、窄窗口下面板高度；分隔条可拖调整，互不遮挡。
     @State private var panelWidth: CGFloat
     @State private var panelHeight: CGFloat
@@ -291,6 +295,17 @@ private struct DocumentWorkspace: View {
             guard !Task.isCancelled else { return }
             currentPageHasVisualEvidence = hasVisualEvidence
         }
+        .task(id: "printed-pages-\(url.standardizedFileURL.path)") {
+            guard document.contentKind == .text else {
+                nativePrintedPages = [:]
+                return
+            }
+            let mapping = await Task.detached(priority: .utility) {
+                NativePrintedPageExtractor.mapping(url: url)
+            }.value
+            guard !Task.isCancelled else { return }
+            nativePrintedPages = mapping
+        }
         .task(id: document.id) {
             // 这本书一被打开就记住「课程 + 书」，重启后回到同一本；
             // 不依赖用户点书单菜单（只读书不切书时也要能记住）。
@@ -380,14 +395,18 @@ private struct DocumentWorkspace: View {
         chapters.last { $0.depth == 0 && $0.pageIndex <= currentPageIndex }
     }
 
-    /// For scan-like books, carry the printed-page number forward from the
-    /// most recent mapped chapter/section. Front matter has no reliable
-    /// printed body-page mapping, so it keeps the normal PDF-only indicator.
+    /// Prefer a direct native-text mapping; scan-like books carry the
+    /// printed-page number forward from the most recent mapped chapter/section.
+    /// Front matter has no reliable printed body-page mapping, so it keeps the
+    /// normal PDF-only indicator.
     private var currentPrintedPage: Int? {
         printedPage(for: currentPageIndex)
     }
 
     private func printedPage(for pageIndex: Int) -> Int? {
+        if let nativePrintedPage = nativePrintedPages[pageIndex] {
+            return nativePrintedPage
+        }
         guard document.contentKind == .scanned || document.contentKind == .mixed,
               let anchor = chapters.last(where: {
                   $0.printedPage != nil && $0.pageIndex <= pageIndex
@@ -445,6 +464,7 @@ private struct DocumentWorkspace: View {
                     pageCount: pageCount,
                     documentURL: url,
                     chapters: chapters,
+                    printedPageForPage: { pageIndex in printedPage(for: pageIndex) },
                     onNavigateToPage: { targetPage in
                         currentPageIndex = min(max(targetPage, 0), pageCount - 1)
                     },
@@ -468,6 +488,7 @@ private struct DocumentWorkspace: View {
                     pageCount: pageCount,
                     documentURL: url,
                     chapters: chapters,
+                    printedPageForPage: { pageIndex in printedPage(for: pageIndex) },
                     onNavigateToPage: { targetPage in
                         currentPageIndex = min(max(targetPage, 0), pageCount - 1)
                     },
@@ -1084,6 +1105,41 @@ private struct TOCDrawer: View {
             return "PDF \(chapter.pageIndex + 1) · 书内 \(printedPage)"
         }
         return "\(chapter.pageIndex + 1)"
+    }
+}
+
+/// Native textbook PDFs often keep the printed page number as a standalone
+/// text line while PDFKit's page index also counts covers and front matter.
+/// Read only edge lines and accept a map only after several pages agree on a
+/// one-page-to-one-page progression; equations and numbered lists stay out.
+private enum NativePrintedPageExtractor {
+    static func mapping(url: URL) -> [Int: Int] {
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess { url.stopAccessingSecurityScopedResource() }
+        }
+
+        guard let document = PDFDocument(url: url), document.pageCount > 0 else { return [:] }
+        let candidates = (0..<document.pageCount).map { pageIndex in
+            candidate(from: document.page(at: pageIndex)?.string ?? "")
+        }
+        return PrintedPageMapping.map(from: candidates)
+    }
+
+    private static func candidate(from text: String) -> Int? {
+        let lines = text.split(whereSeparator: \.isNewline).map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard !lines.isEmpty else { return nil }
+
+        let edgeLines = lines.enumerated().filter { index, _ in
+            index < 4 || index >= max(0, lines.count - 4)
+        }
+        return edgeLines.compactMap { entry -> Int? in
+            let line = entry.element
+            guard let number = Int(line), (1...4_000).contains(number) else { return nil }
+            return number
+        }.first
     }
 }
 

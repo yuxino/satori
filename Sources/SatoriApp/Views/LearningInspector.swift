@@ -69,6 +69,9 @@ struct LearningInspector: View {
     let documentURL: URL
     /// 这本书的章节导览（PDF outline 优先，课程目录回退）；为空时「章节」选项隐藏。
     let chapters: [BookChapter]
+    /// Returns the textbook's printed page for a PDF page when a local map is
+    /// available. Scanned and native books can use different mapping sources.
+    let printedPageForPage: (Int) -> Int?
     let onNavigateToPage: (Int) -> Void
     let onClose: () -> Void
 
@@ -1271,23 +1274,36 @@ struct LearningInspector: View {
 
     /// 气泡里展示「这一轮问答依据什么」；nil 视为旧版本数据（按「当前页」理解）。
     private func contextAnchorLabel(_ scope: LearningContextScope?, pageIndex: Int) -> String? {
+        func pageLabel(_ index: Int) -> String {
+            let pdfLabel = "第 \(index + 1) 页"
+            guard let printedPage = printedPageForPage(index) else { return pdfLabel }
+            return "\(pdfLabel) · 书内 \(printedPage)"
+        }
+
         switch scope {
         case .some(.none):
             // 不带上下文：不显示页码锚点，避免误导。
             return nil
         case .some(.page), nil:
-            return "第 \(pageIndex + 1) 页"
+            return pageLabel(pageIndex)
         case let .some(.pageRange(start, end)):
-            let pageLabel = start == end ? "第 \(start + 1) 页" : "第 \(start + 1)–\(end + 1) 页"
+            let pdfLabel = start == end ? "第 \(start + 1) 页" : "第 \(start + 1)–\(end + 1) 页"
+            let printedLabel: String? = {
+                guard let printedStart = printedPageForPage(start) else { return nil }
+                guard start != end else { return "书内 \(printedStart)" }
+                guard let printedEnd = printedPageForPage(end) else { return nil }
+                return "书内 \(printedStart)–\(printedEnd)"
+            }()
+            let rangeLabel = printedLabel.map { "\(pdfLabel) · \($0)" } ?? pdfLabel
             if let chapter = chapters.first(where: { chapter in
                 guard chapter.depth == 0,
                       let chapterRange = BookChapter.pageRange(for: chapter, in: chapters, pageCount: pageCount)
                 else { return false }
                 return chapterRange.lowerBound == start && chapterRange.upperBound == end
             }) {
-                return "\(chapter.title) · \(pageLabel)"
+                return "\(chapter.title) · \(rangeLabel)"
             }
-            return pageLabel
+            return rangeLabel
         case .some(.wholeDocument):
             return "整本书"
         }

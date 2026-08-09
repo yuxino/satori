@@ -309,6 +309,19 @@ struct SatoriCoreTests {
             ) == nil,
             "Expected ordinary understanding requests to stay on the model path"
         )
+        let printedPageMap = PrintedPageMapping.map(from: [nil, nil, 177, 178, 179, nil, 181])
+        precondition(
+            printedPageMap[2] == 177
+                && printedPageMap[3] == 178
+                && printedPageMap[4] == 179
+                && printedPageMap[5] == 180
+                && printedPageMap[6] == 181,
+            "Expected consistent printed-page anchors to fill the missing page"
+        )
+        precondition(
+            PrintedPageMapping.map(from: [nil, 1, nil, 9, nil]).isEmpty,
+            "Expected isolated page-number candidates not to create a false map"
+        )
         precondition(
             ReadingScopeInference.scope(
                 for: "这一章在讲什么",
