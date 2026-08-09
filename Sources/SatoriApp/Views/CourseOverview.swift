@@ -238,7 +238,7 @@ private struct DocumentWorkspace: View {
             guard !Task.isCancelled else { return }
             if outlineEntries.isEmpty {
                 let scannedEntries = await Task.detached(priority: .utility) {
-                    ScannedOutlineExtractor.entries(url: url)
+                    await ScannedOutlineExtractor.entries(url: url)
                 }.value
                 guard !Task.isCancelled else { return }
                 chapters = Self.makeScannedChapters(entries: scannedEntries)
@@ -985,7 +985,7 @@ private enum ScannedOutlineExtractor {
         }
     }
 
-    static func entries(url: URL) -> [(title: String, pageIndex: Int, depth: Int, printedPage: Int)] {
+    static func entries(url: URL) async -> [(title: String, pageIndex: Int, depth: Int, printedPage: Int)] {
         let cacheKey = cacheKey(for: url)
         if let cached = cachedEntries(for: cacheKey) {
             return cached.map { ($0.title, $0.pageIndex, $0.depth, $0.printedPage) }
@@ -993,7 +993,7 @@ private enum ScannedOutlineExtractor {
 
         guard let document = PDFDocument(url: url), document.pageCount > 0 else { return [] }
         let tocEnd = min(document.pageCount, 20)
-        let tocPages = recognizePages(document: document, indices: Array(0..<tocEnd))
+        let tocPages = await recognizePages(document: document, indices: Array(0..<tocEnd))
         let parsed = ScannedOutlineParser.parseHierarchy(
             lines: tocPages.flatMap { $0.text.split(whereSeparator: \.isNewline).map(String.init) }
         )
@@ -1003,7 +1003,7 @@ private enum ScannedOutlineExtractor {
         // but keep a little headroom for long prefaces and exam outlines.
         let searchEnd = min(document.pageCount, max(48, min(96, first.printedPage + 40)))
         guard searchEnd > tocEnd else { return [] }
-        let bodyPages = recognizePages(
+        let bodyPages = await recognizePages(
             document: document,
             indices: Array(tocEnd..<searchEnd)
         )
@@ -1050,16 +1050,45 @@ private enum ScannedOutlineExtractor {
         return mapped.map { ($0.title, $0.pageIndex, $0.depth, $0.printedPage) }
     }
 
+    /// Vision OCR is CPU-heavy but each page is independent. Keep a small
+    /// bounded window so opening a scanned book is materially faster without
+    /// flooding the machine or changing the recovered reading order.
     private static func recognizePages(
         document: PDFDocument,
         indices: [Int]
-    ) -> [(pageIndex: Int, text: String)] {
-        indices.compactMap { index in
-            guard let page = document.page(at: index),
-                  let text = recognize(page: page),
-                  !text.isEmpty else { return nil }
-            return (index, text)
+    ) async -> [(pageIndex: Int, text: String)] {
+        guard !indices.isEmpty else { return [] }
+        let documentBox = ScannedPDFDocumentBox(document: document)
+        var results: [(pageIndex: Int, text: String)] = []
+        results.reserveCapacity(indices.count)
+
+        await withTaskGroup(of: (Int, String?).self) { group in
+            var iterator = indices.makeIterator()
+            let concurrency = min(4, indices.count)
+
+            func addNext() {
+                guard let index = iterator.next() else { return }
+                group.addTask {
+                    guard let page = documentBox.document.page(at: index),
+                          let text = recognize(page: page),
+                          !text.isEmpty else {
+                        return (index, nil)
+                    }
+                    return (index, text)
+                }
+            }
+
+            for _ in 0..<concurrency {
+                addNext()
+            }
+            while let result = await group.next() {
+                if let text = result.1 {
+                    results.append((result.0, text))
+                }
+                addNext()
+            }
         }
+        return results.sorted { $0.pageIndex < $1.pageIndex }
     }
 
     private static func recognize(page: PDFPage) -> String? {
@@ -1137,6 +1166,16 @@ private enum ScannedOutlineExtractor {
     private static func save(_ entries: [CachedEntry], for key: String) {
         guard let data = try? JSONEncoder().encode(entries) else { return }
         UserDefaults.standard.set(data, forKey: key)
+    }
+}
+
+/// PDFKit is read-only in this path; the wrapper lets the bounded OCR tasks
+/// access independent pages without pretending PDFDocument itself is Sendable.
+private final class ScannedPDFDocumentBox: @unchecked Sendable {
+    let document: PDFDocument
+
+    init(document: PDFDocument) {
+        self.document = document
     }
 }
 
