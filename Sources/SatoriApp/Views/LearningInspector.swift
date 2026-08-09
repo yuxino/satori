@@ -131,6 +131,10 @@ struct LearningInspector: View {
     /// 新翻到、还没有问答的页面只显示一次轻量入口；用户不想要时可收起，
     /// 避免在已有对话旁边重复堆快捷功能。
     @State private var dismissedPageEntryPage: Int?
+    /// Scanned textbooks often reopen on a foreword or exam-outline page.
+    /// Keep the shortcut to the first real chapter available once, then get
+    /// out of the reader's way for the rest of the front matter.
+    @State private var dismissedFrontMatterEntry = false
     @State private var attachments: [LearningImageAttachment] = []
     /// 发送中的这一轮贴的图（用于对话里即时展示缩略图；归档后历史只记张数）。
     @State private var activeAttachmentPreviews: [NSImage] = []
@@ -730,6 +734,7 @@ struct LearningInspector: View {
             || chapterStartRange != nil
             || exerciseStartRange != nil
             || isContinuationEntry
+            || isFrontMatterEntry
     }
 
     private var isContinuationEntry: Bool {
@@ -746,28 +751,56 @@ struct LearningInspector: View {
         let chapterRange = chapterStartRange
         let exerciseRange = exerciseStartRange
         let isContinuation = isContinuationEntry && chapterRange == nil && exerciseRange == nil
+        let isFrontMatter = isFrontMatterEntry
         let pageLabel = readingPageLabel(pageIndex)
         return HStack(alignment: .center, spacing: SatoriTheme.Spacing.sm) {
             Image(systemName: "arrow.down.right.circle")
                 .foregroundStyle(SatoriTheme.accent)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: isContinuation
-                     ? "刚翻到\(pageLabel)"
-                     : (exerciseRange == nil ? "刚到\(pageLabel)" : "这里进入习题区"))
+                Text(verbatim: isFrontMatter
+                     ? "现在是正文前的导读"
+                     : (isContinuation
+                        ? "刚翻到\(pageLabel)"
+                        : (exerciseRange == nil ? "刚到\(pageLabel)" : "这里进入习题区")))
                     .font(.caption.weight(.semibold))
-                Text(isContinuation
-                     ? "上一页最近有一轮讨论，先把主线接到这里。"
-                     : (exerciseRange == nil
-                        ? (chapterRange == nil ? "先抓主线，卡住了再追问。" : "先看本章路线，卡住了再追问。")
-                        : "先看题型和起手顺序，卡住了再选一道题。"))
+                Text(isFrontMatter
+                     ? "想快速掌握全书，可以先扫一眼目标，再从第一章开始。"
+                     : (isContinuation
+                        ? "上一页最近有一轮讨论，先把主线接到这里。"
+                        : (exerciseRange == nil
+                           ? (chapterRange == nil ? "先抓主线，卡住了再追问。" : "先看本章路线，卡住了再追问。")
+                           : "先看题型和起手顺序，卡住了再选一道题。")))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 2)
 
-            if isContinuation {
+            if isFrontMatter {
+                if let firstTopLevelChapter {
+                    Button("从第一章开始", systemImage: "arrow.forward.to.line") {
+                        dismissedFrontMatterEntry = true
+                        navigateToPage(firstTopLevelChapter.pageIndex)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(SatoriTheme.accent)
+                    .help("跳过前言和大纲，从第一章正文开始")
+                }
+
+                Button("先讲这一页") {
+                    dismissedFrontMatterEntry = true
+                    askAssistant(
+                        "这一页最重要的一个意思是什么？请用三句话告诉我：我现在先读懂什么、它在解决什么问题、哪些细节可以先放过。只依据当前页。",
+                        pageOverride: pageIndex,
+                        scope: .page
+                    )
+                }
+                .buttonStyle(.borderless)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(SatoriTheme.accent)
+            } else if isContinuation {
                 Button("接上文", systemImage: "arrow.left") {
                     askAssistant(
                         "把上一页和当前页接起来讲：上一页在解决什么，当前页新增了什么，哪些概念要连起来看？控制在 3 个短点以内。",
@@ -838,6 +871,9 @@ struct LearningInspector: View {
             }
 
             Button("收起", systemImage: "xmark") {
+                if isFrontMatter {
+                    dismissedFrontMatterEntry = true
+                }
                 dismissedPageEntryPage = pageIndex
             }
             .labelStyle(.iconOnly)
@@ -1182,6 +1218,22 @@ struct LearningInspector: View {
 
     private var groundedTurns: [LearningTurn] {
         turns.filter(ReadingConversationContextSelector.hasConsistentAnchor)
+    }
+
+    /// The first top-level recovered chapter is also a useful boundary between
+    /// book front matter and the content a fast reader actually came for.
+    /// Native-outline books and scanned books share this path, while books
+    /// without a recovered chapter simply keep the normal page entry.
+    private var firstTopLevelChapter: BookChapter? {
+        chapters.first(where: { $0.depth == 0 })
+    }
+
+    private var isFrontMatterEntry: Bool {
+        guard !dismissedFrontMatterEntry,
+              currentPageTurns.isEmpty,
+              let firstTopLevelChapter,
+              pageIndex < firstTopLevelChapter.pageIndex else { return false }
+        return true
     }
 
     private var staleHistoryCount: Int {

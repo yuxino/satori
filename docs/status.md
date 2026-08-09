@@ -135,6 +135,7 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Three-page reconstruction evidence: a short “完整代码/完整公式” bridge now keeps the previous, current, and next original page images together, so scanned symbols at a page break are not reconstructed from OCR text alone.
 - Interactive-code explanation: when a textbook code block is safely blocked because it needs `scanf`/`input()`-style interaction, the answer card now says “仅复制 · 需要输入” directly instead of hiding the reason in a tooltip.
 - One-step forward reading: an answer's overflow menu now offers “继续到下一页”, which jumps forward and sends the compact current-page/next-page bridge without adding another permanent toolbar button.
+- Front-matter fast start: when a recovered outline shows that the reader is still in a foreword or exam-outline section, the one-time reading entry explains the boundary and offers “从第一章开始”; choosing to stay keeps the normal page explanation path.
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 
