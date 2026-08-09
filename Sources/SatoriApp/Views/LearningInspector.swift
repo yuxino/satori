@@ -1820,9 +1820,17 @@ struct LearningInspector: View {
 
     private func chapterPageRangeLabel(_ chapter: BookChapter) -> String {
         if let range = BookChapter.pageRange(for: chapter, in: chapters, pageCount: pageCount) {
-            return "\(range.lowerBound + 1)–\(range.upperBound + 1)"
+            let pdfLabel = "PDF \(range.lowerBound + 1)–\(range.upperBound + 1)"
+            guard let printedStart = printedPageForPage(range.lowerBound),
+                  let printedEnd = printedPageForPage(range.upperBound) else {
+                return pdfLabel
+            }
+            return "\(pdfLabel) · 书内 \(printedStart)–\(printedEnd)"
         }
-        return "\(chapter.pageIndex + 1)"
+        if let printedPage = printedPageForPage(chapter.pageIndex) {
+            return "PDF \(chapter.pageIndex + 1) · 书内 \(printedPage)"
+        }
+        return "PDF \(chapter.pageIndex + 1)"
     }
 
     /// 当前页所属的章节（最后一个起始页 ≤ 当前页）。
@@ -1926,13 +1934,16 @@ struct LearningInspector: View {
         case .page: "当前页"
         case .chapter:
             if let activeChapter,
-               let range = BookChapter.pageRange(for: activeChapter, in: chapters, pageCount: pageCount) {
-                "章节 · \(activeChapter.title)（第 \(range.lowerBound + 1)–\(range.upperBound + 1) 页）"
+               BookChapter.pageRange(for: activeChapter, in: chapters, pageCount: pageCount) != nil {
+                "章节 · \(activeChapter.title)（\(chapterPageRangeLabel(activeChapter))）"
             } else {
                 "章节"
             }
         case .pageRange:
-            rangeStart == rangeEnd ? "第 \(rangeStart) 页" : "第 \(rangeStart)–\(rangeEnd) 页"
+            contextAnchorLabel(
+                .pageRange(start: rangeStart - 1, end: rangeEnd - 1),
+                pageIndex: pageIndex
+            ) ?? (rangeStart == rangeEnd ? "PDF \(rangeStart)" : "PDF \(rangeStart)–\(rangeEnd)")
         case .wholeDocument: "整本书"
         }
     }

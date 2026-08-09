@@ -271,7 +271,7 @@ struct SatoriCoreTests {
             "Expected scanned continuation images to prioritize the current and forward pages"
         )
         // Real system.pdf outline: Chapter 6 starts at PDF page 183 (index 182)
-        // and Chapter 7 starts at PDF page 228 (index 227).
+        // and Chapter 7 starts at PDF page 229 (index 228).
         precondition(
             ReadingFactAnswer.pageCountAnswer(
                 for: "这一章有多少页",
