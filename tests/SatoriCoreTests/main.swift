@@ -348,6 +348,53 @@ struct SatoriCoreTests {
             ) == .pageRange(start: 182, end: 227),
             "Expected numbered chapter language to expand naturally"
         )
+
+        let staleChapterTurn = LearningTurn(
+            question: "这一章在说什么",
+            answer: "旧章节回答",
+            pageIndex: 182,
+            sourceKind: .currentPDF,
+            contextScope: .pageRange(start: 145, end: 181)
+        )
+        let nearbyPageTurn = LearningTurn(
+            question: "上一页讲了什么",
+            answer: "相邻页回答",
+            pageIndex: 181,
+            sourceKind: .currentPDF,
+            contextScope: .page
+        )
+        let chapterMapTurn = LearningTurn(
+            question: "这一章在说什么",
+            answer: "正确章节路线",
+            pageIndex: 182,
+            sourceKind: .currentPDF,
+            contextScope: .pageRange(start: 182, end: 227)
+        )
+        let unrelatedPageTurn = LearningTurn(
+            question: "旧页面问题",
+            answer: "旧页面回答",
+            pageIndex: 33,
+            sourceKind: .currentPDF,
+            contextScope: .page
+        )
+        let selectedPageContext = ReadingConversationContextSelector.select(
+            turns: [staleChapterTurn, nearbyPageTurn, chapterMapTurn, unrelatedPageTurn],
+            targetPageIndex: 182,
+            scope: .page
+        )
+        precondition(
+            selectedPageContext.map(\.answer) == ["相邻页回答", "正确章节路线"],
+            "Expected nearby reading context to discard a stale self-contradictory range and distant pages"
+        )
+        let selectedChapterContext = ReadingConversationContextSelector.select(
+            turns: [staleChapterTurn, nearbyPageTurn, chapterMapTurn, unrelatedPageTurn],
+            targetPageIndex: 182,
+            scope: .pageRange(start: 182, end: 227)
+        )
+        precondition(
+            selectedChapterContext.map(\.answer) == ["正确章节路线"],
+            "Expected broad chapter context to prefer a grounded chapter map over local selection chatter"
+        )
         precondition(
             ReadingScopeInference.scope(
                 for: "这本书主要讲什么",
@@ -807,7 +854,7 @@ struct SatoriCoreTests {
             pageContent: .text("fixture page text"),
             additionalImagesJPEG: [Data([0xFF, 0xD8, 0xFF])],
             conversationContext: [
-                .init(question: "之前的问题", answer: "之前的回答")
+                .init(question: "之前的问题", answer: "之前的回答", selectionText: "之前卡住的原文")
             ],
             allowsWebSearch: false,
             transport: FixtureAssistantTransport(
@@ -815,7 +862,8 @@ struct SatoriCoreTests {
                 expectedModelID: "qwen3.8-max",
                 expectedImageCount: 1,
                 expectsWebSearch: false,
-                expectedHistoryTurnCount: 1
+                expectedHistoryTurnCount: 1,
+                expectsHistorySelectionText: true
             )
         )
         var streamUpdates: [LearningResponse] = []
@@ -1248,6 +1296,7 @@ private struct FixtureAssistantTransport: AssistantTransport {
     var expectsVisualEvidenceInstruction: Bool = false
     var expectsImageOnlyPageInstruction: Bool = false
     var expectsReconstructionGuard: Bool = false
+    var expectsHistorySelectionText: Bool = false
     var expectedMaxOutputTokens: Int?
     var maximumRequestBodyBytes: Int?
 
@@ -1297,6 +1346,11 @@ private struct FixtureAssistantTransport: AssistantTransport {
             precondition(input.dropFirst().first?["role"] as? String == "assistant", "Expected prior assistant message")
             let assistantContent = try XCTUnwrap(input.dropFirst().first?["content"] as? [[String: Any]])
             precondition(assistantContent.first?["type"] as? String == "output_text", "Expected prior answer output content")
+            if expectsHistorySelectionText {
+                let userContent = try XCTUnwrap(input.first?["content"] as? [[String: Any]])
+                let userText = userContent.compactMap { $0["text"] as? String }.joined(separator: "\n")
+                precondition(userText.contains("选中原文：之前卡住的原文"), "Expected prior selected passage to stay visible in conversation history")
+            }
         }
         let content = try XCTUnwrap(input.last?["content"] as? [[String: Any]])
         let pageText = content.filter { $0["type"] as? String == "input_text" }

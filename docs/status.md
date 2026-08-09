@@ -128,6 +128,8 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Reading-location consistency: page-entry prompts, selection anchors, streaming status, crop attachments, experiment source labels, extraction errors, and context-range pickers now reuse the same PDF/printed-page label; “回看” also puts the current reading page first before sorting older pages by recent discussion.
 - Priority-answer restraint: “有什么值得看 / 值得学习 / 核心考点” now uses the compact reading-map budget, and skip advice is explicitly scoped to the current reading goal so Satori does not turn “暂时可跳过” into “完全没用”。
 - Empty-reading-state cleanup: a first chapter page now shows only its focused reading entry instead of duplicating it with generic quick prompts; a page without local Q&A gets a quiet orientation hint instead of an unexplained blank panel, while ordinary page turns still avoid adding action buttons.
+- Context contamination guard: saved turns whose page range contradicts their own page anchor are ignored as stale history; current-page questions keep only nearby turns, while broad chapter/book requests prefer grounded broad maps over a pile of local selection explanations. This prevents an old mis-scoped chapter answer from steering a new reading pass.
+- Selection-history grounding: follow-up context now carries a short copy of the prior selected passage, so repeated “理解” actions remain distinguishable instead of becoming a list of identical generic questions; the same history-size budget accounts for that text before admitting it.
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 

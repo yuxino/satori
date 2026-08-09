@@ -348,7 +348,10 @@ public struct QwenLearningAssistant: LearningAssistant {
         var selected: [LearningConversationContext] = []
         var total = 0
         for turn in context.suffix(6).reversed() {
-            let estimated = min(turn.question.count, 800) + min(turn.answer.count, 2_200) + 80
+            let estimated = min(turn.question.count, 800)
+                + min(turn.answer.count, 2_200)
+                + min(turn.selectionText?.count ?? 0, 800)
+                + 80
             if !selected.isEmpty, total + estimated > maximumCharacters { continue }
             selected.append(turn)
             total += estimated
@@ -934,13 +937,18 @@ public struct QwenLearningAssistant: LearningAssistant {
 
     /// 复习场景的单轮历史：问（依据第 N 页）：…\n答：…
     private static func serializedTurn(_ turn: LearningConversationContext) -> String {
-        "\(turnPrefix(turn))：\(turn.question.prefix(800))\n答：\(turn.answer.prefix(2_200))"
+        "\(serializedQuestion(turn))\n\(serializedAnswer(turn))"
     }
 
     /// 追问场景：历史以独立的 user/assistant 消息发送，文字与
     /// `serializedTurn` 保持一致（问（依据第 N 页）：… / 答：…）。
     private static func serializedQuestion(_ turn: LearningConversationContext) -> String {
-        "\(turnPrefix(turn))：\(turn.question.prefix(800))"
+        var result = "\(turnPrefix(turn))：\(turn.question.prefix(800))"
+        if let selectionText = turn.selectionText?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !selectionText.isEmpty {
+            result += "\n选中原文：\(selectionText.prefix(800))"
+        }
+        return result
     }
 
     private static func serializedAnswer(_ turn: LearningConversationContext) -> String {

@@ -517,7 +517,7 @@ struct LearningInspector: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .padding(.vertical, 18)
-                        } else if turns.isEmpty, activeTurn == nil {
+                        } else if groundedTurns.isEmpty, activeTurn == nil {
                             // 第一次进入章节时，下面的 pageEntryPrompt 已经给出
                             // 唯一的阅读入口；不要再把通用快捷问题堆在上面。
                             if !showsPageEntry {
@@ -721,7 +721,7 @@ struct LearningInspector: View {
               !isThinking,
               activeSelectionPage != pageIndex,
               dismissedPageEntryPage != pageIndex else { return false }
-        guard !turns.contains(where: { $0.pageIndex == pageIndex }) else { return false }
+        guard !groundedTurns.contains(where: { $0.pageIndex == pageIndex }) else { return false }
         // Chapter/exercise transitions get a route prompt; a normal page only
         // gets a quiet continuation prompt when the immediately previous page
         // was just discussed. This keeps a long reading run calm without
@@ -735,10 +735,10 @@ struct LearningInspector: View {
     private var isContinuationEntry: Bool {
         guard pageIndex > 0,
               currentPageTurns.isEmpty,
-              !turns.isEmpty else { return false }
+              !groundedTurns.isEmpty else { return false }
         // 只认最近一轮问答，避免用户从“回看”或阅读位置恢复到旧页时，
         // 把几天前的上一页记录误包装成刚刚发生的续读动作。
-        guard let latestTurn = turns.max(by: { $0.createdAt < $1.createdAt }) else { return false }
+        guard let latestTurn = groundedTurns.max(by: { $0.createdAt < $1.createdAt }) else { return false }
         return latestTurn.pageIndex == pageIndex - 1
     }
 
@@ -962,14 +962,16 @@ struct LearningInspector: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, SatoriTheme.Spacing.xxl)
-                } else if turns.isEmpty {
+                } else if groundedTurns.isEmpty {
                     VStack(spacing: SatoriTheme.Spacing.sm) {
                         Image(systemName: "book.pages")
                             .font(.system(size: 32))
                             .foregroundStyle(.tertiary)
-                        Text("还没有问答记录")
+                        Text(staleHistoryCount > 0 ? "没有可用的问答记录" : "还没有问答记录")
                             .font(.callout.weight(.medium))
-                        Text("去「问」里和 AI 讨论这一页，问答会自动按页留在这里。")
+                        Text(staleHistoryCount > 0
+                             ? "旧记录的页码范围与所在页对不上，已暂时隐藏；它们没有被删除，也不会影响新的回答。"
+                             : "去「问」里和 AI 讨论这一页，问答会自动按页留在这里。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -977,6 +979,9 @@ struct LearningInspector: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, SatoriTheme.Spacing.xxl)
                 } else {
+                    if staleHistoryCount > 0 {
+                        staleHistoryNotice
+                    }
                     ForEach(pageSections) { section in
                         pageSectionView(section)
                     }
@@ -1157,7 +1162,7 @@ struct LearningInspector: View {
     }
 
     private var pageSections: [PageSection] {
-        let grouped = Dictionary(grouping: turns, by: \.pageIndex)
+        let grouped = Dictionary(grouping: groundedTurns, by: \.pageIndex)
         // 当前阅读页优先，其余页面按最近讨论排序。读者从当前页进入「回看」
         // 时应该先看到眼前这页，而不是被别处最近的一轮问答带走。
         return grouped.keys.sorted { lhs, rhs in
@@ -1172,7 +1177,28 @@ struct LearningInspector: View {
     }
 
     private var currentPageTurns: [LearningTurn] {
-        turns.filter { $0.pageIndex == pageIndex }
+        groundedTurns.filter { $0.pageIndex == pageIndex }
+    }
+
+    private var groundedTurns: [LearningTurn] {
+        turns.filter(ReadingConversationContextSelector.hasConsistentAnchor)
+    }
+
+    private var staleHistoryCount: Int {
+        max(0, turns.count - groundedTurns.count)
+    }
+
+    private var staleHistoryNotice: some View {
+        Label(
+            "\(staleHistoryCount) 条旧问答的页码范围与所在页不一致，已暂时隐藏；它们没有被删除，也不会影响新的回答。",
+            systemImage: "clock.arrow.circlepath"
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(SatoriTheme.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
     }
 
     private var promptStarter: some View {
@@ -1926,7 +1952,7 @@ struct LearningInspector: View {
         // meaningful range; otherwise the thread abruptly collapses to one
         // current page and loses the chapter map.
         guard ReadingScopeInference.inheritsRecentScope(for: request) else { return nil }
-        return turns.reversed().compactMap { turn -> LearningContextScope? in
+        return groundedTurns.reversed().compactMap { turn -> LearningContextScope? in
             guard let scope = turn.contextScope,
                   ReadingScopeInference.isRecentScopeRelevant(
                       scope,
@@ -2030,7 +2056,7 @@ struct LearningInspector: View {
         if pendingVerification && verificationAnswerMode {
             return "用自己的话回答上面的情境…"
         }
-        if turns.isEmpty {
+        if groundedTurns.isEmpty {
             return "想问什么？可以附上图片…"
         }
         if currentPageTurns.isEmpty {
@@ -2125,7 +2151,7 @@ struct LearningInspector: View {
             // 如果上次离开这本书时正围绕某段原文提问，恢复最近的选区。
             // 跨页也只显示成一行低干扰的「上次卡在第 N 页」，不抢当前页
             // 的阅读入口，但让用户能一键回到真正卡住的位置。
-            if let restoredSelection = turns.reversed().first(where: {
+            if let restoredSelection = groundedTurns.reversed().first(where: {
                 $0.selectionText?.isEmpty == false
             }) {
                 activeSelectionText = restoredSelection.selectionText
@@ -2305,14 +2331,18 @@ struct LearningInspector: View {
         let submittedAttachments = attachments
         submittedAttachmentsForActiveRequest = submittedAttachments
         activeAttachmentPreviews = submittedAttachments.map(\.preview)
-        let context = turns
-            .filter { $0.id != excludingTurnID }
-            .suffix(6)
+        let context = ReadingConversationContextSelector.select(
+            turns: turns,
+            targetPageIndex: targetPageIndex,
+            scope: effectiveScope,
+            excludingTurnID: excludingTurnID
+        )
             .map {
                 LearningConversationContext(
                     question: $0.question,
                     answer: $0.answer,
                     pageIndex: $0.contextScope == .none ? nil : $0.pageIndex,
+                    selectionText: $0.selectionText,
                     attachmentSummary: $0.attachmentCount > 0 ? "\($0.attachmentCount) 张附图" : nil
                 )
             }

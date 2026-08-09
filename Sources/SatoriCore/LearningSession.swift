@@ -169,6 +169,9 @@ public struct LearningConversationContext: Sendable, Equatable {
     public var answer: String
     /// 该轮问答依据的页码（0 起）；为 nil 表示没有锚定到具体页。
     public var pageIndex: Int?
+    /// 该轮如果来自 PDF 选区，保留短原文让后续追问知道“上一轮卡在哪句”。
+    /// 请求组装时还会再次截断，避免历史选区挤掉当前页面证据。
+    public var selectionText: String?
     /// 附件摘要（例如「2 张附图：示意图、公式截图」）；为 nil 表示没有附图。
     public var attachmentSummary: String?
 
@@ -176,11 +179,13 @@ public struct LearningConversationContext: Sendable, Equatable {
         question: String,
         answer: String,
         pageIndex: Int? = nil,
+        selectionText: String? = nil,
         attachmentSummary: String? = nil
     ) {
         self.question = question
         self.answer = answer
         self.pageIndex = pageIndex
+        self.selectionText = selectionText?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.attachmentSummary = attachmentSummary
     }
 }
