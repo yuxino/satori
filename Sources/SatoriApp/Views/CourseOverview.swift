@@ -167,6 +167,11 @@ private struct DocumentWorkspace: View {
     @State private var isSearchPresented = false
     @State private var searchQuery = ""
     @State private var searchNotice = ""
+    @State private var searchDirection = 1
+    @State private var scannedSearchQuery = ""
+    @State private var scannedSearchHasSearched = false
+    @State private var isScannedSearching = false
+    @State private var scannedSearchTask: Task<Void, Never>?
     @FocusState private var isSearchFieldFocused: Bool
     /// 这本书的章节导览（PDF outline 优先，扫描目录 OCR 次之，课程目录回退）；打开时一次性加载。
     @State private var chapters: [BookChapter] = []
@@ -260,6 +265,10 @@ private struct DocumentWorkspace: View {
             // 这本书一被打开就记住「课程 + 书」，重启后回到同一本；
             // 不依赖用户点书单菜单（只读书不切书时也要能记住）。
             store.rememberOpenedDocument(courseID: course.id, documentID: document.id)
+        }
+        .onDisappear {
+            scannedSearchTask?.cancel()
+            scannedSearchTask = nil
         }
         .onChange(of: showsInspector) { _, visible in
             UserDefaults.standard.set(visible, forKey: Self.inspectorVisibleKey)
@@ -474,9 +483,9 @@ private struct DocumentWorkspace: View {
                         if matchCount == 0 {
                             switch document.contentKind {
                             case .scanned:
-                                searchNotice = "这本扫描书没有可搜索的文字层，可以用“框选理解”。"
+                                startScannedSearch()
                             case .mixed:
-                                searchNotice = "文字层里没有找到“\(searchQuery)”；扫描页请用“框选理解”。"
+                                startScannedSearch()
                             default:
                                 searchNotice = "没有找到“\(searchQuery)”。"
                             }
@@ -729,16 +738,26 @@ private struct DocumentWorkspace: View {
                 .help("下一个匹配")
             }
             if !searchNotice.isEmpty {
-                Label(
-                    searchNotice,
-                    systemImage: searchNotice.hasPrefix("没有") ? "info.circle" : "text.magnifyingglass"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Label(
+                        searchNotice,
+                        systemImage: isScannedSearching
+                            ? "hourglass"
+                            : (searchNotice.hasPrefix("没有") || searchNotice.hasPrefix("整本书")
+                               ? "info.circle" : "text.magnifyingglass")
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    if isScannedSearching {
+                        Button("取消") { cancelScannedSearch() }
+                            .buttonStyle(.link)
+                            .font(.caption)
+                    }
+                }
             }
             Text(document.contentKind == .scanned
-                 ? "扫描页没有文字索引；找图、公式或代码请用“框选理解”。"
+                 ? "扫描书会在普通查找失败后，用本地 OCR 找文字；找图、公式或代码请用“框选理解”。"
                  : "Enter 查找下一处 · 从当前页继续查找")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -750,6 +769,9 @@ private struct DocumentWorkspace: View {
                 isSearchFieldFocused = true
             }
         }
+        .onDisappear {
+            if isScannedSearching { cancelScannedSearch() }
+        }
     }
 
     private func requestSearch(direction: Int) {
@@ -758,6 +780,14 @@ private struct DocumentWorkspace: View {
             searchNotice = "先输入要查找的内容。"
             return
         }
+        searchDirection = direction < 0 ? -1 : 1
+        scannedSearchTask?.cancel()
+        isScannedSearching = false
+        if scannedSearchQuery != query {
+            scannedSearchQuery = query
+            scannedSearchHasSearched = false
+        }
+        searchNotice = "正在查找…"
         NotificationCenter.default.post(
             name: .satoriReaderSearchRequested,
             object: nil,
@@ -768,6 +798,52 @@ private struct DocumentWorkspace: View {
                 "direction": direction
             ]
         )
+    }
+
+    /// PDFKit has no index for scanned pages. Start local OCR only after the
+    /// native search path misses, and keep the result in memory for the next
+    /// “上一个/下一个” action. The first query includes the current page;
+    /// repeated searches continue one page past the last hit.
+    private func startScannedSearch() {
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, !isScannedSearching else { return }
+
+        let direction = searchDirection
+        let isFirstSearch = !scannedSearchHasSearched || scannedSearchQuery != query
+        let startPage = isFirstSearch
+            ? currentPageIndex
+            : currentPageIndex + (direction > 0 ? 1 : -1)
+        scannedSearchQuery = query
+        scannedSearchHasSearched = true
+        isScannedSearching = true
+        searchNotice = "扫描书没有文字索引，正在本地查找…"
+
+        scannedSearchTask?.cancel()
+        let targetURL = url
+        scannedSearchTask = Task { @MainActor in
+            let result = await ScannedPDFSearch.find(
+                query: query,
+                in: targetURL,
+                startingAt: startPage,
+                direction: direction
+            )
+            guard !Task.isCancelled else { return }
+            isScannedSearching = false
+            if let result {
+                currentPageIndex = result.pageIndex
+                let wrapText = result.wrapped ? "（已从头继续查找）" : ""
+                searchNotice = "找到 PDF 第 \(result.pageIndex + 1) 页 · 本地 OCR\(wrapText)"
+            } else {
+                searchNotice = "整本书暂时没有找到“\(query)”；可以换个词，或用“框选理解”。"
+            }
+        }
+    }
+
+    private func cancelScannedSearch() {
+        scannedSearchTask?.cancel()
+        scannedSearchTask = nil
+        isScannedSearching = false
+        searchNotice = "已取消查找。"
     }
 
     /// 目录按钮：常驻显示当前章节，点击（或按 ⌘T）呼出可跳转任意章节/小节的浮层。
