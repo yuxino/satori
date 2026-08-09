@@ -701,79 +701,123 @@ struct LearningInspector: View {
         )
     }
 
-    /// 阅读入口只在打开书和进入新章时出现。正文连续翻页保持安静，避免
-    /// 每一页都变成一张待处理任务；选区工具条和输入框仍随时可用。
+    /// 阅读入口只在打开书、进入新章/习题区，或“上一页刚讲过、当前页还没问过”
+    /// 时出现。普通连续翻页保持安静，避免每一页都变成待处理任务。
     private var showsPageEntry: Bool {
         guard !isLoadingHistory,
               !isThinking,
               activeSelectionPage != pageIndex,
               dismissedPageEntryPage != pageIndex else { return false }
         guard !turns.contains(where: { $0.pageIndex == pageIndex }) else { return false }
-        return pageIndex == 0 || chapterStartRange != nil
+        // Chapter/exercise transitions get a route prompt; a normal page only
+        // gets a quiet continuation prompt when the immediately previous page
+        // was just discussed. This keeps a long reading run calm without
+        // leaving a returning reader in front of an unexplained empty panel.
+        return pageIndex == 0
+            || chapterStartRange != nil
+            || exerciseStartRange != nil
+            || isContinuationEntry
+    }
+
+    private var isContinuationEntry: Bool {
+        guard pageIndex > 0,
+              currentPageTurns.isEmpty,
+              !turns.isEmpty else { return false }
+        return turns.contains { $0.pageIndex == pageIndex - 1 }
     }
 
     private var pageEntryPrompt: some View {
         let chapterRange = chapterStartRange
         let exerciseRange = exerciseStartRange
+        let isContinuation = isContinuationEntry && chapterRange == nil && exerciseRange == nil
         return HStack(alignment: .center, spacing: SatoriTheme.Spacing.sm) {
             Image(systemName: "arrow.down.right.circle")
                 .foregroundStyle(SatoriTheme.accent)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: exerciseRange == nil ? "刚到第 \(pageIndex + 1) 页" : "这里进入习题区")
+                Text(verbatim: isContinuation
+                     ? "刚翻到第 \(pageIndex + 1) 页"
+                     : (exerciseRange == nil ? "刚到第 \(pageIndex + 1) 页" : "这里进入习题区"))
                     .font(.caption.weight(.semibold))
-                Text(exerciseRange == nil
-                     ? (chapterRange == nil ? "先抓主线，卡住了再追问。" : "先看本章路线，卡住了再追问。")
-                     : "先看题型和起手顺序，卡住了再选一道题。")
+                Text(isContinuation
+                     ? "上一页刚讲过，先把主线接到这里。"
+                     : (exerciseRange == nil
+                        ? (chapterRange == nil ? "先抓主线，卡住了再追问。" : "先看本章路线，卡住了再追问。")
+                        : "先看题型和起手顺序，卡住了再选一道题。"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 2)
 
-            Button(exerciseRange == nil
-                   ? (chapterRange == nil ? "先讲主线" : "看本章路线")
-                   : "看题型地图", systemImage: "sparkles") {
-                if let exerciseRange {
-                    askAssistant(
-                        "这里进入了本章的习题区。请先给我一张题型地图：这些题分别在考什么、建议先做哪一类、哪些细节可以第二遍再看。最多 5 点，不要逐题解答，也不要把题目逐条复述。",
-                        pageOverride: pageIndex,
-                        scope: .pageRange(start: exerciseRange.lowerBound, end: exerciseRange.upperBound),
-                        readingMap: true
-                    )
-                } else if let chapterRange {
-                    askAssistant(
-                        "我刚开始读这一章。请先给我一张阅读路线图：这章要解决哪几个问题、概念怎样递进、哪些是主干、哪些细节可以第二遍再看。控制在 5 点以内，依据本章内容，不要逐页复述。",
-                        pageOverride: pageIndex,
-                        scope: .pageRange(start: chapterRange.lowerBound, end: chapterRange.upperBound),
-                        readingMap: true
-                    )
-                } else {
-                    askAssistant(
-                        "这一页最重要的一个意思是什么？请用三句话告诉我：我现在先读懂什么、它在解决什么问题、哪些细节可以先放过。只依据当前页，不要猜测未提供的前文。",
-                        pageOverride: pageIndex,
-                        scope: .page
-                    )
-                }
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .tint(SatoriTheme.accent)
-            .help(exerciseRange == nil
-                  ? (chapterRange == nil ? "先抓住当前页的主线" : "先了解这一章的结构和阅读顺序")
-                  : "先了解习题的题型和起手顺序")
-
-            if pageIndex > 0 {
+            if isContinuation {
                 Button("接上文", systemImage: "arrow.left") {
                     askAssistant(
-                        "把这一页和前一页接起来讲：前一页在解决什么，这一页新增了什么，哪些概念要连起来看？请用容易理解的话说明。",
+                        "把上一页和当前页接起来讲：上一页在解决什么，当前页新增了什么，哪些概念要连起来看？控制在 3 个短点以内。",
                         pageOverride: pageIndex,
                         scope: .pageRange(start: pageIndex - 1, end: pageIndex)
                     )
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .help("同时参考前一页和当前页")
+                .tint(SatoriTheme.accent)
+                .help("结合上一页和当前页，快速接住主线")
+
+                Button("只讲本页") {
+                    askAssistant(
+                        "这一页最重要的一个意思是什么？请用三句话告诉我：我现在先读懂什么、它在解决什么问题、哪些细节可以先放过。只依据当前页。",
+                        pageOverride: pageIndex,
+                        scope: .page
+                    )
+                }
+                .buttonStyle(.borderless)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(SatoriTheme.accent)
+            } else {
+                Button(exerciseRange == nil
+                       ? (chapterRange == nil ? "先讲主线" : "看本章路线")
+                       : "看题型地图", systemImage: "sparkles") {
+                    if let exerciseRange {
+                        askAssistant(
+                            "这里进入了本章的习题区。请先给我一张题型地图：这些题分别在考什么、建议先做哪一类、哪些细节可以第二遍再看。最多 5 点，不要逐题解答，也不要把题目逐条复述。",
+                            pageOverride: pageIndex,
+                            scope: .pageRange(start: exerciseRange.lowerBound, end: exerciseRange.upperBound),
+                            readingMap: true
+                        )
+                    } else if let chapterRange {
+                        askAssistant(
+                            "我刚开始读这一章。请先给我一张阅读路线图：这章要解决哪几个问题、概念怎样递进、哪些是主干、哪些细节可以第二遍再看。控制在 5 点以内，依据本章内容，不要逐页复述。",
+                            pageOverride: pageIndex,
+                            scope: .pageRange(start: chapterRange.lowerBound, end: chapterRange.upperBound),
+                            readingMap: true
+                        )
+                    } else {
+                        askAssistant(
+                            "这一页最重要的一个意思是什么？请用三句话告诉我：我现在先读懂什么、它在解决什么问题、哪些细节可以先放过。只依据当前页，不要猜测未提供的前文。",
+                            pageOverride: pageIndex,
+                            scope: .page
+                        )
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(SatoriTheme.accent)
+                .help(exerciseRange == nil
+                      ? (chapterRange == nil ? "先抓住当前页的主线" : "先了解这一章的结构和阅读顺序")
+                      : "先了解习题的题型和起手顺序")
+
+                if pageIndex > 0 {
+                    Button("接上文", systemImage: "arrow.left") {
+                        askAssistant(
+                            "把这一页和前一页接起来讲：前一页在解决什么，这一页新增了什么，哪些概念要连起来看？请用容易理解的话说明。",
+                            pageOverride: pageIndex,
+                            scope: .pageRange(start: pageIndex - 1, end: pageIndex)
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("同时参考前一页和当前页")
+                }
             }
 
             Button("收起", systemImage: "xmark") {
