@@ -1036,7 +1036,7 @@ struct LearningInspector: View {
                     }
 
                     if let runSourcePage {
-                        Label("来自第 \(runSourcePage + 1) 页的选区；请先检查代码，再运行", systemImage: "text.quote")
+                        Label("来自\(readingPageLabel(runSourcePage))的选区；请先检查代码，再运行", systemImage: "text.quote")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
