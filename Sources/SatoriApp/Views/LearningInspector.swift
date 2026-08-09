@@ -453,17 +453,6 @@ struct LearningInspector: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 5)
                 .contentShape(Rectangle())
-                .overlay(alignment: .topTrailing) {
-                    if item == .notes, turns.count > 0 {
-                        Text("\(turns.count)")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(SatoriTheme.accent, in: Capsule())
-                            .offset(x: 8, y: -4)
-                    }
-                }
                 .background(
                     isActive ? SatoriTheme.paperRaised : .clear,
                     in: RoundedRectangle(cornerRadius: 7, style: .continuous)
