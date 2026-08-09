@@ -668,6 +668,27 @@ struct SatoriCoreTests {
             softwareScannedOutline.map(\.title) == ["软件维护", "软件项目管理"],
             "Expected real software-textbook OCR punctuation to be trimmed"
         )
+        let prefaceDuplicateEntries = [
+            ScannedOutlineEntry(chapterNumber: 1, title: "软件工程概述", printedPage: 6),
+            ScannedOutlineEntry(chapterNumber: 3, title: "面向对象", printedPage: 9),
+            ScannedOutlineEntry(chapterNumber: 1, title: "软件工程概述", printedPage: 21),
+            ScannedOutlineEntry(chapterNumber: 1, title: "软件", printedPage: 21, sectionNumber: 1, depth: 1),
+            ScannedOutlineEntry(chapterNumber: 2, title: "结构化", printedPage: 35)
+        ]
+        let bodyEntries = ScannedOutlineParser.keepMappedEntries(
+            prefaceDuplicateEntries,
+            printedPageOffset: 6,
+            minimumPageIndex: 26
+        )
+        precondition(
+            bodyEntries.map(\.printedPage) == [21, 21, 35],
+            "Expected preface chapter summaries to stay out of the body TOC"
+        )
+        let coherentEntries = ScannedOutlineParser.keepCoherentChapterRun(prefaceDuplicateEntries)
+        precondition(
+            coherentEntries.map(\.printedPage) == [21, 21, 35],
+            "Expected a chapter-number reset to select the final coherent TOC run"
+        )
         precondition(
             !ReadingScopeInference.inheritsRecentScope(for: "这一页主要讲什么"),
             "Expected ordinary explanations not to inherit a stale scope"
@@ -782,7 +803,7 @@ struct SatoriCoreTests {
             allowsWebSearch: true,
             transport: FixtureAssistantTransport(
                 expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
-                expectedModelID: "qwen3.8-max",
+                expectedModelID: "qwen3.7-max-2026-06-08",
                 expectedImageCount: 0,
                 expectsWebSearch: true,
                 expectedHistoryTurnCount: 0
@@ -798,7 +819,7 @@ struct SatoriCoreTests {
             selectionText: "文件系统在不同操作系统中有不同的结构",
             transport: FixtureAssistantTransport(
                 expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
-                expectedModelID: "qwen3.8-max",
+                expectedModelID: "qwen3.7-max-2026-06-08",
                 expectedImageCount: 0,
                 expectsWebSearch: false,
                 expectedHistoryTurnCount: 0,
@@ -814,7 +835,7 @@ struct SatoriCoreTests {
             selectionText: "文件系统在不同操作系统中有不同的结构",
             transport: FixtureAssistantTransport(
                 expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
-                expectedModelID: "qwen3.8-max",
+                expectedModelID: "qwen3.7-max-2026-06-08",
                 expectedImageCount: 0,
                 expectsWebSearch: false,
                 expectedHistoryTurnCount: 0,
@@ -850,7 +871,7 @@ struct SatoriCoreTests {
             ),
             transport: FixtureAssistantTransport(
                 expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
-                expectedModelID: "qwen3.8-max",
+                expectedModelID: "qwen3.7-max-2026-06-08",
                 expectedImageCount: 1,
                 expectsWebSearch: false,
                 expectedHistoryTurnCount: 0,
@@ -868,7 +889,7 @@ struct SatoriCoreTests {
             ),
             transport: FixtureAssistantTransport(
                 expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
-                expectedModelID: "qwen3.8-max",
+                expectedModelID: "qwen3.7-max-2026-06-08",
                 expectedImageCount: 1,
                 expectsWebSearch: false,
                 expectedHistoryTurnCount: 0,
@@ -886,7 +907,7 @@ struct SatoriCoreTests {
             ),
             transport: FixtureAssistantTransport(
                 expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
-                expectedModelID: "qwen3.8-max",
+                expectedModelID: "qwen3.7-max-2026-06-08",
                 expectedImageCount: 1,
                 expectsWebSearch: false,
                 expectedHistoryTurnCount: 0,
@@ -906,7 +927,7 @@ struct SatoriCoreTests {
             additionalImagesJPEG: [Data([0xFF, 0xD8, 0xFF])],
             transport: FixtureAssistantTransport(
                 expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
-                expectedModelID: "qwen3.8-max",
+                expectedModelID: "qwen3.7-max-2026-06-08",
                 expectedImageCount: 2,
                 expectsWebSearch: false,
                 expectedHistoryTurnCount: 0,
@@ -924,7 +945,7 @@ struct SatoriCoreTests {
             pageContent: .text("【第 226 页】\n习 题\n1. 什么是文件系统？\n2. 目录有什么作用？\n3. 假定磁盘块大小，计算访问次数。\n4. 请设计文件权限机制。"),
             transport: FixtureAssistantTransport(
                 expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
-                expectedModelID: "qwen3.8-max",
+                expectedModelID: "qwen3.7-max-2026-06-08",
                 expectedImageCount: 0,
                 expectsWebSearch: false,
                 expectedHistoryTurnCount: 0,
@@ -944,7 +965,7 @@ struct SatoriCoreTests {
             allowsWebSearch: false,
             transport: FixtureAssistantTransport(
                 expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
-                expectedModelID: "qwen3.8-max",
+                expectedModelID: "qwen3.7-max-2026-06-08",
                 expectedImageCount: 1,
                 expectsWebSearch: false,
                 expectedHistoryTurnCount: 1,
@@ -973,7 +994,7 @@ struct SatoriCoreTests {
             conversationContext: longConversation,
             transport: FixtureAssistantTransport(
                 expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
-                expectedModelID: "qwen3.8-max",
+                expectedModelID: "qwen3.7-max-2026-06-08",
                 expectedImageCount: 0,
                 expectsWebSearch: false,
                 expectedHistoryTurnCount: 3,
@@ -989,7 +1010,7 @@ struct SatoriCoreTests {
             pageContent: nil,
             transport: FixtureAssistantTransport(
                 expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
-                expectedModelID: "qwen3.8-max",
+                expectedModelID: "qwen3.7-max-2026-06-08",
                 expectedImageCount: 0,
                 expectsWebSearch: false,
                 expectedHistoryTurnCount: 0,
@@ -1009,7 +1030,7 @@ struct SatoriCoreTests {
             ],
             transport: FixtureAssistantTransport(
                 expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
-                expectedModelID: "qwen3.8-max",
+                expectedModelID: "qwen3.7-max-2026-06-08",
                 expectedImageCount: 0,
                 expectsWebSearch: false,
                 expectedHistoryTurnCount: 1,

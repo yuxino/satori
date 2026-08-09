@@ -1236,8 +1236,10 @@ private enum ScannedOutlineExtractor {
         guard let document = PDFDocument(url: url), document.pageCount > 0 else { return [] }
         let tocEnd = min(document.pageCount, 20)
         let tocPages = await recognizePages(document: document, indices: Array(0..<tocEnd))
-        let parsed = ScannedOutlineParser.parseHierarchy(
+        let parsed = ScannedOutlineParser.keepCoherentChapterRun(
+            ScannedOutlineParser.parseHierarchy(
             lines: tocPages.flatMap { $0.text.split(whereSeparator: \.isNewline).map(String.init) }
+            )
         )
         guard let first = parsed.first(where: { $0.depth == 0 }) else { return [] }
 
@@ -1270,9 +1272,21 @@ private enum ScannedOutlineExtractor {
 
         // Printed page 25 on PDF page 30 means the body offset is +5. Apply
         // that stable offset to every chapter number recovered from the TOC.
-        let offset = firstChapterPage - (first.printedPage - 1)
+        let bodyPrintedPage = bodyPages.first(where: { $0.pageIndex == firstChapterPage })
+            .flatMap { printedPageNumber(in: $0.lines) }
+        let offset = bodyPrintedPage.map {
+            firstChapterPage - ($0 - 1)
+        } ?? firstChapterPage - (first.printedPage - 1)
+        // The OCR window may contain chapter summaries from a preface. Once
+        // the first real body page gives us a stable PDF/printed-page offset,
+        // discard every heading that would still land before that page.
+        let bodyEntries = ScannedOutlineParser.keepMappedEntries(
+            parsed,
+            printedPageOffset: offset,
+            minimumPageIndex: firstChapterPage
+        )
         let bodyPagesByIndex = Dictionary(uniqueKeysWithValues: bodyPages.map { ($0.pageIndex, $0) })
-        let mapped = parsed.compactMap { entry -> CachedEntry? in
+        let mapped = bodyEntries.compactMap { entry -> CachedEntry? in
             let pageIndex = entry.printedPage - 1 + offset
             guard (0..<document.pageCount).contains(pageIndex) else { return nil }
             let title: String
@@ -1413,6 +1427,19 @@ private enum ScannedOutlineExtractor {
         }?.normalizedOffset
     }
 
+    private static func printedPageNumber(in lines: [RecognizedLine]) -> Int? {
+        lines
+            .filter { $0.normalizedOffset < 0.12 || $0.normalizedOffset > 0.88 }
+            .compactMap { line -> Int? in
+                let trimmed = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let digits = trimmed.filter(\.isNumber)
+                guard digits.count == trimmed.count,
+                      let number = Int(digits), (1...4_000).contains(number) else { return nil }
+                return number
+            }
+            .first
+    }
+
     private static func searchable(_ text: String) -> String {
         text.lowercased().filter { !$0.isWhitespace && !$0.isPunctuation }
     }
@@ -1421,7 +1448,7 @@ private enum ScannedOutlineExtractor {
         let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
         let modification = values?.contentModificationDate?.timeIntervalSince1970 ?? -1
         let size = values?.fileSize ?? -1
-        return "satori.scanned-outline.v4|\(url.standardizedFileURL.path)|\(modification)|\(size)"
+        return "satori.scanned-outline.v5|\(url.standardizedFileURL.path)|\(modification)|\(size)"
     }
 
     private static func cachedEntries(for key: String) -> [CachedEntry]? {

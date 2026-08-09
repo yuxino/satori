@@ -159,7 +159,7 @@ public enum AssistantError: LocalizedError, Sendable, Equatable {
         case .invalidResponse:
             "百炼返回了无法识别的响应。"
         case .emptyOutput:
-            "Qwen 没有返回可显示的文字。可能是选中的 PDF 文字过长或识别异常，请缩短选区后重试。"
+            "Qwen 返回了空回答，可能是模型暂时没有完成请求或内容未能解析。请检查连接后重试。"
         case .timeout:
             "回答超时（长时间没有新内容），请重试。"
         case let .api(statusCode, message):
@@ -171,9 +171,9 @@ public enum AssistantError: LocalizedError, Sendable, Equatable {
         case let .capabilityUnavailable(capability, modelID):
             switch capability {
             case .image:
-                "当前模型（\(modelID)）不支持图片输入，无法分析扫描页或附图。请在设置中切换到 qwen3.8-max 或 qwen3.7-plus。"
+                "当前模型（\(modelID)）不支持图片输入，无法分析扫描页或附图。请在设置中切换到支持视觉的 Qwen 模型。"
             case .webSearch:
-                "当前模型（\(modelID)）不支持联网搜索。请在设置中切换到 qwen3.8-max 或 qwen3.7-plus。"
+                "当前模型（\(modelID)）不支持联网搜索。请在设置中切换到支持联网工具的 Qwen 模型。"
             case .text:
                 "当前模型（\(modelID)）不支持文字输入。"
             }
@@ -186,7 +186,10 @@ public enum AssistantError: LocalizedError, Sendable, Equatable {
 }
 
 public struct QwenLearningAssistant: LearningAssistant {
-    public static let defaultModelID = "qwen3.8-max"
+    /// The previous `qwen3.8-max` label was not a callable Responses API model
+    /// ID. This dated Qwen3.7 Max snapshot is the strongest globally available
+    /// option in the official model list that also understands images.
+    public static let defaultModelID = "qwen3.7-max-2026-06-08"
     public static let defaultAPIHost = URL(string: "https://dashscope.aliyuncs.com/compatible-mode/v1")!
     /// 流式回答的总超时：连接挂起（既不返回数据也不结束）时强制结束，
     /// 避免界面永远停在等待状态、只能重启应用。
@@ -226,7 +229,7 @@ public struct QwenLearningAssistant: LearningAssistant {
     /// 可读错误，也不要带图静默失败。
     public static func capabilities(for modelID: String) -> Set<ModelCapability> {
         switch modelID.trimmingCharacters(in: .whitespacesAndNewlines) {
-        case "qwen3.8-max", "qwen3.7-plus":
+        case "qwen3.7-max-2026-06-08", "qwen3.7-plus":
             [.text, .image, .webSearch]
         case "qwen3.7-flash":
             [.text, .image]

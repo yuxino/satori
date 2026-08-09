@@ -45,5 +45,9 @@ Core checks cover noisy front matter, the `system.pdf`-shaped chapter list,
 interactive-code gating, and a real C multiplication run with `3 4` producing
 `12`, plus region persistence and same-page chapter ordering. Real local checks
 still keep `lang.pdf`'s code bridge pages `[54, 55, 53]` and scanned search
-wraparound. The release app is built after the core checks. Desktop click
-verification remains a separate gate because the Mac is currently locked.
+wraparound. The release app is built after the core checks. With the Mac
+unlocked, desktop verification also covered the repaired `software.pdf` TOC
+boundary, the Qwen connection smoke test, a chapter route, a constrained
+concept follow-up, a selected-passage micro experiment, and a two-page
+“接上文” bridge. The remaining student-pass check is the explicit
+“验证一下” follow-up and return-to-anchor behavior.

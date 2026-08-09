@@ -25,7 +25,7 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Keychain-only Model Studio API-key settings with verified migration from the transitional local file; the supported China (Beijing) shared endpoint is built in
 - A visible AI assistant boundary that labels its current response source
 - Current-page text and scanned-page images are connected to the Model Studio compatible Responses API with `store: false`
-- The saved model preference defaults to `qwen3.8-max`, with `qwen3.7-plus` and `qwen3.7-flash` available as balanced and efficient choices
+- The saved model preference defaults to the callable multimodal `qwen3.7-max-2026-06-08`, with `qwen3.7-plus` and `qwen3.7-flash` available as balanced and efficient choices; older `qwen3.8-max` preferences migrate automatically
 - Optional per-question web search with returned URL citations
 - Enter-to-send learning composer with Shift+Enter line breaks, one-click quick prompts, and a cancellable streaming answer card
 - Up to four removable local image attachments per question, resized and JPEG-compressed on device before the request and not persisted
@@ -52,6 +52,7 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Reading-first subtraction pass: the reading sidebar no longer surfaces due-review counts, the streak/badge wall, or page-completion percentages; it shows the books in each reading space instead. The composer no longer carries a permanent “运行代码” button. Review data and the secondary run space remain intact, but comprehension is now the primary visible action.
 - In-document PDF search: ⌘F opens a small native-text search popover, focuses the field immediately, starts from the current page, and wraps through previous/next matches. Scanned books and mixed PDFs explain that only the available text layer is indexed and point diagram/code questions to “框选理解” instead of claiming the term is absent.
 - Scanned-outline feedback: while a scan-only book's bounded OCR pass is discovering its table of contents and printed-page offset, the reading bar now says “正在识别目录”; the quiet state disappears when navigation is ready.
+- Scanned-outline boundary fix: real `software.pdf` front-matter chapter summaries no longer become bogus early TOC entries; the desktop pass now opens directly at `第1章 软件工程概述 · 第1节 软件` with `PDF 27 / 229 · 书内 21`.
 - Scanned-outline throughput: the bounded local Vision OCR pass now processes up to four independent pages at once and restores page order before parsing, shortening scan-book startup without changing chapter mapping or invoking the network.
 - Outline fallback routing: a text PDF without a native outline now uses the local reading-space directory immediately instead of paying the scanned-book OCR cost; scan-like PDFs remain on the OCR path, with the directory as a safe fallback if recognition yields nothing.
 - Medium-window reading bar: when the adaptive layout has to float the understanding panel, secondary actions collapse to accessible icons while the book name, chapter orientation, and page controls remain visible; the PDF is not squeezed by button labels.
@@ -140,12 +141,13 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Fixed-input experiments: textbook C/Python examples that call `scanf`/`input()` now expose one bounded “固定输入” field; Satori closes stdin after sending it, keeps the sandbox and timeout, and still rejects file/network/process behavior. The real C multiplication path is covered by a `3 4 → 12` run check.
 - Region-anchored scanned reading: a “框选理解” crop now carries its normalized PDF rectangle through follow-ups and persisted Q&A; the request explicitly names it as the priority object, reuses it for “完整代码”, restores it from the PDF after reopening, and refuses to guess a code block from unrelated same-page OCR. Replacing a crop also works when the attachment strip is already full.
 - Same-page TOC navigation: chapter targets now carry a vertical title offset. Native outlines use PDF text geometry before falling back to the outline destination; scanned outline OCR keeps matching heading-line geometry when it is in the bounded body window. Current chapter labels and TOC jumps compare page plus offset, and same-page clicks still force the PDF viewport to move.
+- Real desktop reading pass: the repaired Qwen connection was verified against the live settings screen; `software.pdf` produced a five-point chapter route and a three-sentence model comparison, while `system.pdf` produced an OCR correction plus a 30-second concept experiment and a two-page “接上文” bridge.
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 
 ## Next milestone
 
-Finish the unlocked end-to-end `system.pdf` reading pass: real answer, “验证一下” follow-up, return to the anchored passage, and a page transition. Measure first-token latency only after the Keychain connection is healthy; the current investigation found that the earlier apparent PDF delay was actually a blocked Keychain read. Validate the opt-in micro experiments on concepts that genuinely benefit from manipulation; keep them short and safe, and do not turn the reader into a general code execution surface. OCR-based editable table-of-contents extraction remains useful for scanned PDFs without outlines (`lang.pdf`, `software.pdf`), but it follows the comprehension loop rather than leading it.
+Continue the unlocked end-to-end `system.pdf` reading pass with the remaining “验证一下” follow-up and anchored-return check. Keep measuring first-token latency now that the Keychain connection is healthy. Continue validating opt-in micro experiments on concepts that genuinely benefit from manipulation; keep them short and safe, and do not turn the reader into a general code execution surface. OCR-based editable table-of-contents extraction remains useful for scanned PDFs without outlines (`lang.pdf`, `software.pdf`), but it follows the comprehension loop rather than leading it.
 
 ## Open questions
 

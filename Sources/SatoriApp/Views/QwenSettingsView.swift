@@ -260,18 +260,20 @@ struct QwenSettingsView: View {
                     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     request.httpBody = try JSONSerialization.data(withJSONObject: [
                         "model": submittedModelID,
-                        "input": [["role": "user", "content": [["type": "input_text", "text": "ping"]]]],
+                        // Keep the smoke test identical to Alibaba's minimal
+                        // Responses API example. The real reading request can
+                        // still use the richer message-array format.
+                        "input": "ping",
                         "stream": false,
                         "store": false,
-                        "max_output_tokens": 8
+                        "max_output_tokens": 16
                     ])
                     let (data, response) = try await URLSession.shared.data(for: request)
                     let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
                     if (200..<300).contains(statusCode) {
                         return (true, "连接成功：\(submittedModelID) 可以正常应答。")
                     }
-                    let message = (try? JSONDecoder().decode(APIErrorEnvelope.self, from: data))?.error.message
-                        ?? "HTTP \(statusCode)"
+                    let message = apiErrorMessage(from: data) ?? "HTTP \(statusCode)"
                     return (false, "连接失败：\(message)")
                 } catch {
                     return (false, "连接失败：\(error.localizedDescription)")
@@ -289,4 +291,16 @@ private struct APIErrorEnvelope: Decodable {
         let message: String
     }
     let error: APIError
+}
+
+private func apiErrorMessage(from data: Data) -> String? {
+    if let message = (try? JSONDecoder().decode(APIErrorEnvelope.self, from: data))?.error.message,
+       !message.isEmpty {
+        return message
+    }
+    guard let body = String(data: data, encoding: .utf8)?
+        .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+        .joined(separator: " "),
+        !body.isEmpty else { return nil }
+    return String(body.prefix(240))
 }

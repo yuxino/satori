@@ -96,7 +96,7 @@ private actor ConfigurationReadGate {
 }
 
 enum QwenModelOption: String, CaseIterable, Identifiable {
-    case best = "qwen3.8-max"
+    case best = "qwen3.7-max-2026-06-08"
     case balanced = "qwen3.7-plus"
     case efficient = "qwen3.7-flash"
 
@@ -104,7 +104,7 @@ enum QwenModelOption: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .best: "最佳 · Qwen3.8 Max"
+        case .best: "最佳 · Qwen3.7 Max（视觉版）"
         case .balanced: "平衡 · Qwen3.7 Plus"
         case .efficient: "节省 · Qwen3.7 Flash"
         }
@@ -112,7 +112,7 @@ enum QwenModelOption: String, CaseIterable, Identifiable {
 
     var explanation: String {
         switch self {
-        case .best: "理解能力最强，适合教材、扫描页和复杂代码；费用最高。"
+        case .best: "理解能力最强，支持扫描页视觉核对；费用最高。"
         case .balanced: "质量、速度和费用更均衡。"
         case .efficient: "速度更快、费用更低，适合日常简单解释。"
         }
@@ -204,6 +204,13 @@ enum QwenConfigurationStore {
     static func readModelID() -> String {
         let saved = UserDefaults.standard.string(forKey: modelDefaultsKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // Migrate the pre-release label that was shown in older builds but is
+        // not a callable Responses API model ID. Keep the migration local and
+        // silent so an existing reader can immediately use the stronger model.
+        if saved == "qwen3.8-max" {
+            UserDefaults.standard.set(QwenLearningAssistant.defaultModelID, forKey: modelDefaultsKey)
+            return QwenLearningAssistant.defaultModelID
+        }
         return saved.isEmpty ? QwenLearningAssistant.defaultModelID : saved
     }
 

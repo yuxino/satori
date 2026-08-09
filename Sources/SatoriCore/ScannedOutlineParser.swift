@@ -31,6 +31,41 @@ public struct ScannedOutlineEntry: Equatable, Sendable {
 /// table of contents. The compatibility `parse` API returns numbered
 /// top-level chapters; `parseHierarchy` also preserves first-level sections.
 public enum ScannedOutlineParser {
+    /// Keep the final monotonic chapter run when OCR has also parsed chapter
+    /// summaries from a preface. A reset such as 1,3,4,7,1,2,3 is a strong
+    /// signal that the second `1` starts the real table of contents.
+    public static func keepCoherentChapterRun(
+        _ entries: [ScannedOutlineEntry]
+    ) -> [ScannedOutlineEntry] {
+        let topLevelIndices = entries.indices.filter { entries[$0].depth == 0 }
+        guard topLevelIndices.count > 1 else { return entries }
+        var resetIndex: Int?
+        for position in 1..<topLevelIndices.count {
+            let previous = topLevelIndices[position - 1]
+            let current = topLevelIndices[position]
+            if entries[current].chapterNumber <= entries[previous].chapterNumber {
+                resetIndex = current
+                break
+            }
+        }
+        guard let resetIndex else { return entries }
+        let firstBodyPrintedPage = entries[resetIndex].printedPage
+        return entries.filter { $0.printedPage >= firstBodyPrintedPage }
+    }
+
+    /// Remove OCR headings that map before the first real body page. Scanned
+    /// textbooks often repeat a chapter summary in the preface; without this
+    /// boundary those sentences look like a second, earlier table of contents.
+    public static func keepMappedEntries(
+        _ entries: [ScannedOutlineEntry],
+        printedPageOffset: Int,
+        minimumPageIndex: Int
+    ) -> [ScannedOutlineEntry] {
+        entries.filter { entry in
+            entry.printedPage - 1 + printedPageOffset >= minimumPageIndex
+        }
+    }
+
     public static func parse(lines: [String]) -> [ScannedOutlineEntry] {
         var seen = Set<Int>()
         return parseHierarchy(lines: lines)
