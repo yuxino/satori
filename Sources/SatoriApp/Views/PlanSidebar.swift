@@ -257,7 +257,3 @@ private struct CourseRow: View {
         .help(isCompact ? "\(course.title) · \(documentSummary)" : "")
     }
 }
-
-extension Notification.Name {
-    static let learningStatsDidChange = Notification.Name("satori.learningStatsDidChange")
-}

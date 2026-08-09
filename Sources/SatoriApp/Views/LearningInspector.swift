@@ -1077,9 +1077,6 @@ struct LearningInspector: View {
                 runOutput = result
                 isRunning = false
             }
-            // Running code counts as studying — feeds the 动手达人 badge.
-            try? await LearningStatsStore.shared.recordCodeRun(documentID: documentID)
-            NotificationCenter.default.post(name: .learningStatsDidChange, object: nil)
         }
     }
 
@@ -2507,11 +2504,6 @@ struct LearningInspector: View {
         submittedAttachmentsForActiveRequest = []
         response = nil
         persistTurns()
-        // A completed Q&A counts as studying — feeds the 勤学好问 badge.
-        Task {
-            try? await LearningStatsStore.shared.recordQuestion(documentID: documentID)
-            NotificationCenter.default.post(name: .learningStatsDidChange, object: nil)
-        }
         // 回答完成时用户可能已经翻到别的页：提示它存进了哪一页，不再"消失"。
         if targetPage != pageIndex {
             completedElsewherePage = targetPage
