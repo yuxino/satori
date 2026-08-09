@@ -346,16 +346,20 @@ private struct DocumentWorkspace: View {
         chapters.last { $0.depth == 0 && $0.pageIndex <= currentPageIndex }
     }
 
-    /// For scanned books, carry the printed-page number forward from the most
-    /// recent mapped chapter/section. Front matter has no reliable printed
-    /// body-page mapping, so it keeps the normal PDF-only indicator.
+    /// For scan-like books, carry the printed-page number forward from the
+    /// most recent mapped chapter/section. Front matter has no reliable
+    /// printed body-page mapping, so it keeps the normal PDF-only indicator.
     private var currentPrintedPage: Int? {
-        guard document.contentKind == .scanned,
+        printedPage(for: currentPageIndex)
+    }
+
+    private func printedPage(for pageIndex: Int) -> Int? {
+        guard document.contentKind == .scanned || document.contentKind == .mixed,
               let anchor = chapters.last(where: {
-                  $0.printedPage != nil && $0.pageIndex <= currentPageIndex
+                  $0.printedPage != nil && $0.pageIndex <= pageIndex
               }),
               let printedPage = anchor.printedPage else { return nil }
-        return printedPage + (currentPageIndex - anchor.pageIndex)
+        return printedPage + (pageIndex - anchor.pageIndex)
     }
 
     private func persistPanelSize() {
@@ -832,7 +836,8 @@ private struct DocumentWorkspace: View {
             if let result {
                 currentPageIndex = result.pageIndex
                 let wrapText = result.wrapped ? "（已从头继续查找）" : ""
-                searchNotice = "找到 PDF 第 \(result.pageIndex + 1) 页 · 本地 OCR\(wrapText)"
+                let printedText = printedPage(for: result.pageIndex).map { " · 书内第 \($0) 页" } ?? ""
+                searchNotice = "找到 PDF 第 \(result.pageIndex + 1) 页\(printedText) · 本地 OCR\(wrapText)"
             } else {
                 searchNotice = "整本书暂时没有找到“\(query)”；可以换个词，或用“框选理解”。"
             }
