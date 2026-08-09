@@ -136,6 +136,8 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Interactive-code explanation: when a textbook code block is safely blocked because it needs `scanf`/`input()`-style interaction, the answer card now says “仅复制 · 需要输入” directly instead of hiding the reason in a tooltip.
 - One-step forward reading: an answer's overflow menu now offers “继续到下一页”, which jumps forward and sends the compact current-page/next-page bridge without adding another permanent toolbar button.
 - Front-matter fast start: when a recovered outline shows that the reader is still in a foreword or exam-outline section, the one-time reading entry explains the boundary and offers “从第一章开始”; choosing to stay keeps the normal page explanation path.
+- Real outline front-matter fix: the fast-start boundary now selects the first numbered chapter (`第一章` / `Chapter 1`) instead of blindly taking the first top-level outline item, so system.pdf 的封面、前言、目录和考试大纲不会吞掉正文入口。
+- Fixed-input experiments: textbook C/Python examples that call `scanf`/`input()` now expose one bounded “固定输入” field; Satori closes stdin after sending it, keeps the sandbox and timeout, and still rejects file/network/process behavior. The real C multiplication path is covered by a `3 4 → 12` run check.
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 

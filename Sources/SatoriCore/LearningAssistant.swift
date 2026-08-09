@@ -318,7 +318,7 @@ public struct QwenLearningAssistant: LearningAssistant {
 
         let markers = [
             "什么意思", "啥意思", "这是什么", "这是什么东西", "这段是什么",
-            "这啥", "这说的啥", "这段在说啥", "怎么理解"
+            "这什么", "这在说什么", "在说什么", "这啥", "这说的啥", "这段在说啥", "怎么理解"
         ]
         return markers.contains { normalized.contains($0) }
     }

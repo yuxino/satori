@@ -213,6 +213,7 @@ private struct CodeBlockView: View {
     @State private var runTask: Task<Void, Never>?
     @State private var runGeneration = UUID()
     @State private var copied = false
+    @State private var standardInput = ""
 
     private enum RunState {
         case idle
@@ -222,13 +223,31 @@ private struct CodeBlockView: View {
 
     private var runnable: CodeRunner.Language? {
         guard let language = CodeRunner.Language.recognized(language),
-              CodeRunner.safety(for: content, language: language).isAllowed else { return nil }
+              CodeRunner.safety(
+                  for: content,
+                  language: language,
+                  allowsStandardInput: CodeRunner.requiresStandardInput(for: content, language: language)
+              ).isAllowed else { return nil }
         return language
+    }
+
+    private var requiresInput: Bool {
+        guard let language = CodeRunner.Language.recognized(language) else { return false }
+        return CodeRunner.requiresStandardInput(for: content, language: language)
+    }
+
+    private var canRun: Bool {
+        guard runnable != nil else { return false }
+        return !requiresInput || !standardInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var blockedRunReason: String? {
         guard let language = CodeRunner.Language.recognized(language) else { return nil }
-        return CodeRunner.safety(for: content, language: language).message
+        return CodeRunner.safety(
+            for: content,
+            language: language,
+            allowsStandardInput: CodeRunner.requiresStandardInput(for: content, language: language)
+        ).message
     }
 
     private var blockedRunLabel: String {
@@ -250,7 +269,10 @@ private struct CodeBlockView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.mini)
                         .tint(SatoriTheme.accent)
-                        .help("在本机运行这段代码")
+                        .disabled(!canRun)
+                        .help(requiresInput && standardInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                              ? "先填写一组固定输入"
+                              : "在本机运行这段代码")
                 }
                 if isRunning {
                     Button("停止", systemImage: "stop.fill") { stop() }
@@ -303,6 +325,23 @@ private struct CodeBlockView: View {
                     .padding(11)
             }
 
+            if requiresInput {
+                HStack(spacing: 8) {
+                    Label("固定输入", systemImage: "keyboard")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    TextField("例如：3 4", text: $standardInput)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .disabled(isRunning)
+                    Text("运行一次后即关闭输入")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 11)
+                .padding(.bottom, 9)
+            }
+
             if let result = finishedResult {
                 Divider()
                 runOutputView(result)
@@ -326,12 +365,14 @@ private struct CodeBlockView: View {
 
     private func run() {
         guard let runnable else { return }
+        guard canRun else { return }
         runState = .running
         let code = content
+        let input = requiresInput ? standardInput : nil
         let generation = UUID()
         runGeneration = generation
         runTask = Task { @MainActor in
-            let result = await CodeRunner.run(code: code, language: runnable)
+            let result = await CodeRunner.run(code: code, language: runnable, standardInput: input)
             guard generation == runGeneration else { return }
             runState = .finished(result)
             runTask = nil

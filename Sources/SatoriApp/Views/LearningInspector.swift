@@ -163,6 +163,7 @@ struct LearningInspector: View {
     // MARK: Run space (quick code execution)
 
     @State private var runCode = ""
+    @State private var runStandardInput = ""
     @State private var runLanguage: CodeRunner.Language = .python
     @State private var runSourcePage: Int?
     @State private var runOutput: CodeRunResult?
@@ -387,6 +388,7 @@ struct LearningInspector: View {
               request.url == nil || request.url == documentURL else { return }
         selectMode(.run)
         runCode = text
+        runStandardInput = ""
         runSourcePage = request.pageIndex
         runNotice = ""
     }
@@ -403,6 +405,7 @@ struct LearningInspector: View {
               CodeRunner.isRunIntent(request) else { return false }
         selectMode(.run)
         runCode = code
+        runStandardInput = ""
         runLanguage = language
         runSourcePage = activeSelectionPage
         runOutput = nil
@@ -1028,8 +1031,28 @@ struct LearningInspector: View {
         }
     }
 
+    private var runRequiresStandardInput: Bool {
+        CodeRunner.requiresStandardInput(for: runCode, language: runLanguage)
+    }
+
+    private var runSafety: ExperimentSafety {
+        CodeRunner.safety(
+            for: runCode,
+            language: runLanguage,
+            allowsStandardInput: runRequiresStandardInput
+        )
+    }
+
+    private var canRunSnippet: Bool {
+        guard !runCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              runSafety.isAllowed else { return false }
+        return !runRequiresStandardInput
+            || !runStandardInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// 运行 — a quick scratchpad to execute code locally. Paste from the PDF
-    /// selection (or anywhere), pick a language, hit run, see output.
+    /// selection (or anywhere), optionally provide one fixed input, hit run,
+    /// and see output.
     private var runView: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -1074,8 +1097,7 @@ struct LearningInspector: View {
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .tint(SatoriTheme.accent)
-                        .disabled((runCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            || !CodeRunner.safety(for: runCode, language: runLanguage).isAllowed) && !isRunning)
+                        .disabled(!canRunSnippet && !isRunning)
                     }
 
                     if !runNotice.isEmpty {
@@ -1114,8 +1136,23 @@ struct LearningInspector: View {
                         .background(SatoriTheme.paperRaised, in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous).strokeBorder(SatoriTheme.hairline))
 
+                    if runRequiresStandardInput {
+                        HStack(spacing: SatoriTheme.Spacing.sm) {
+                            Label("固定输入", systemImage: "keyboard")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            TextField("例如：3 4", text: $runStandardInput)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.caption, design: .monospaced))
+                                .disabled(isRunning)
+                            Text("只送入这一组输入，然后关闭")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+
                     if !runCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                       let safetyMessage = CodeRunner.safety(for: runCode, language: runLanguage).message {
+                       let safetyMessage = runSafety.message {
                         Label(safetyMessage, systemImage: "lock.slash")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -1167,12 +1204,13 @@ struct LearningInspector: View {
 
     private func runSnippet() {
         let code = runCode
-        guard !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isRunning else { return }
+        guard canRunSnippet, !isRunning else { return }
         isRunning = true
         runOutput = nil
         let language = runLanguage
+        let input = runRequiresStandardInput ? runStandardInput : nil
         runTask = Task {
-            let result = await CodeRunner.run(code: code, language: language)
+            let result = await CodeRunner.run(code: code, language: language, standardInput: input)
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 runOutput = result
@@ -1225,7 +1263,11 @@ struct LearningInspector: View {
     /// Native-outline books and scanned books share this path, while books
     /// without a recovered chapter simply keep the normal page entry.
     private var firstTopLevelChapter: BookChapter? {
-        chapters.first(where: { $0.depth == 0 })
+        let index = ReadingChapterSelector.firstRealChapterIndex(
+            titles: chapters.map(\.title),
+            depths: chapters.map(\.depth)
+        )
+        return index.flatMap { chapters.indices.contains($0) ? chapters[$0] : nil }
     }
 
     private var isFrontMatterEntry: Bool {
@@ -2607,18 +2649,12 @@ struct LearningInspector: View {
     /// 前言和目录等一级目录；没有编号章节的课程目录回退结构则保留全部一级项。
     private var hasNumberedChapterOutline: Bool {
         chapters.contains { chapter in
-            chapter.depth == 0 && isNumberedChapterTitle(chapter.title)
+            chapter.depth == 0 && ReadingChapterSelector.isNumberedChapterTitle(chapter.title)
         }
     }
 
     private func isNumberedChapterTitle(_ title: String) -> Bool {
-        title.range(
-            of: #"^第\s*[0-9一二三四五六七八九十百]+\s*章"#,
-            options: .regularExpression
-        ) != nil || title.range(
-            of: #"(?i)^chapter\s+\d+"#,
-            options: .regularExpression
-        ) != nil
+        ReadingChapterSelector.isNumberedChapterTitle(title)
     }
 
     /// `currentChapter` 可能指向“本节/习题”等叶子节点；“这一章”这类问题

@@ -239,6 +239,13 @@ struct SatoriCoreTests {
             "Expected terse reading speed bumps to use a compact clarification path"
         )
         precondition(
+            ["这什么啊", "这在说什么", "在说什么"].allSatisfy {
+                QwenLearningAssistant.isQuickClarificationRequest(for: $0)
+                    && QwenLearningAssistant.responseTokenBudget(for: $0) == 360
+            },
+            "Expected colloquial speed-bump phrases from real reading sessions to stay compact"
+        )
+        precondition(
             !QwenLearningAssistant.isQuickClarificationRequest(for: "这是什么？请详细展开")
                 && QwenLearningAssistant.responseTokenBudget(for: "这是什么？请详细展开") == 1_400,
             "Expected explicit depth requests to keep the normal answer budget"
@@ -1067,6 +1074,22 @@ struct SatoriCoreTests {
             !ExtractedTextNormalizer.likelyDegraded(String(repeating: "这是正常的中文教材正文。", count: 8)),
             "Expected clean text to stay text-only"
         )
+        precondition(
+            ReadingChapterSelector.firstRealChapterIndex(
+                titles: ["封面", "组编前言", "目录", "操作系统自学考试大纲", "第一章 操作系统概论", "第二章 进程"],
+                depths: [0, 0, 0, 0, 0, 0]
+            ) == 4
+                && ReadingChapterSelector.firstRealChapterIndex(
+                    titles: ["封面", "第一章 软件工程概述", "第一节 软件"],
+                    depths: [0, 0, 1]
+                ) == 1
+                && ReadingChapterSelector.isNumberedChapterTitle("第 一 章 软件工程概述")
+                && ReadingChapterSelector.firstRealChapterIndex(
+                    titles: ["程序设计基础", "数据类型与表达式"],
+                    depths: [0, 0]
+                ) == 0,
+            "Expected front matter to be skipped while non-numbered fallback directories stay usable"
+        )
 
         precondition(
             CodeRunner.safety(for: "print(2 + 2)", language: .python) == .allowed,
@@ -1089,8 +1112,17 @@ struct SatoriCoreTests {
                 for: "#include <stdio.h>\nint main(void) { int n; scanf(\"%d\", &n); return n; }",
                 language: .c
             ).isAllowed
-                && CodeRunner.safety(for: "input('n?')", language: .python).message?.contains("交互输入") == true,
-            "Expected interactive stdin examples from textbooks to be blocked with a clear explanation"
+                && CodeRunner.safety(for: "input('n?')", language: .python).message?.contains("需要输入") == true
+                && CodeRunner.requiresStandardInput(
+                    for: "#include <stdio.h>\nint main(void) { int n; scanf(\"%d\", &n); return n; }",
+                    language: .c
+                )
+                && CodeRunner.safety(
+                    for: "#include <stdio.h>\nint main(void) { int n; scanf(\"%d\", &n); return n; }",
+                    language: .c,
+                    allowsStandardInput: true
+                ).isAllowed,
+            "Expected textbook stdin examples to require, but accept, one fixed input payload"
         )
         precondition(
             !CodeRunner.safety(for: "echo hello", language: .shell).isAllowed
@@ -1134,8 +1166,18 @@ struct SatoriCoreTests {
         precondition(
             interactiveRun.exitCode != 0
                 && !interactiveRun.timedOut
-                && interactiveRun.stderr.contains("交互输入"),
+                && interactiveRun.stderr.contains("需要输入"),
             "Expected textbook stdin examples to fail immediately instead of waiting for input"
+        )
+
+        let fixedInputRun = await CodeRunner.run(
+            code: "#include <stdio.h>\nint main(void) { int a, b; if (scanf(\"%d%d\", &a, &b) != 2) return 2; printf(\"%d\\n\", a * b); return 0; }",
+            language: .c,
+            standardInput: "3 4\n"
+        )
+        precondition(
+            fixedInputRun.exitCode == 0 && fixedInputRun.stdout.contains("12"),
+            "Expected a bounded fixed stdin payload to complete the textbook C example"
         )
 
         let sandboxedWriteAttempt = await CodeRunner.run(

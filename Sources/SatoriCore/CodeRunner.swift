@@ -183,10 +183,35 @@ public enum CodeRunner {
         ].contains { normalized.contains($0) }
     }
 
+    /// Whether the snippet expects stdin. This is not a general interactive
+    /// terminal: the UI may provide one bounded, fixed input payload and then
+    /// closes stdin so a program cannot wait for another prompt.
+    public static func requiresStandardInput(for code: String, language: Language) -> Bool {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch language {
+        case .python:
+            return trimmed.range(of: #"\binput\s*\("#, options: .regularExpression) != nil
+        case .c, .cpp:
+            let patterns = [
+                #"\b(scanf|fscanf|getchar|fgetc|fgets|gets)\s*\("#,
+                #"\b(std::)?cin\s*>>"#,
+                #"\b(std::)?getline\s*\("#
+            ]
+            return patterns.contains { trimmed.range(of: $0, options: .regularExpression) != nil }
+        case .shell, .swift:
+            return false
+        }
+    }
+
     /// Defense-in-depth gate for both the answer-card runner and the secondary
     /// experiment space. A blocked snippet can still be copied out, but Satori
-    /// will not execute it locally.
-    public static func safety(for code: String, language: Language) -> ExperimentSafety {
+    /// will not execute it locally. `allowsStandardInput` is only used after
+    /// the reader has supplied one bounded fixed input payload.
+    public static func safety(
+        for code: String,
+        language: Language,
+        allowsStandardInput: Bool = false
+    ) -> ExperimentSafety {
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return .blocked("实验内容不能为空。")
@@ -208,8 +233,8 @@ public enum CodeRunner {
             if blockedPatterns.contains(where: { trimmed.range(of: $0, options: .regularExpression) != nil }) {
                 return .blocked("检测到文件、网络或动态执行接口；实验只能做纯计算。")
             }
-            if trimmed.range(of: #"\binput\s*\("#, options: .regularExpression) != nil {
-                return .blocked("这段代码需要交互输入；Satori 实验只运行纯计算代码。请先把输入改成固定值，或复制到终端运行。")
+            if requiresStandardInput(for: trimmed, language: language), !allowsStandardInput {
+                return .blocked("这段代码需要输入；请先填写一组固定输入，Satori 不开放持续交互终端。")
             }
         case .c, .cpp:
             let blockedPatterns = [
@@ -222,13 +247,8 @@ public enum CodeRunner {
             if blockedPatterns.contains(where: { trimmed.range(of: $0, options: .regularExpression) != nil }) {
                 return .blocked("检测到文件、网络或进程接口；实验只能做纯计算。")
             }
-            let interactiveInputPatterns = [
-                #"\b(scanf|fscanf|getchar|fgetc|fgets|gets)\s*\("#,
-                #"\b(std::)?cin\s*>>"#,
-                #"\b(std::)?getline\s*\("#
-            ]
-            if interactiveInputPatterns.contains(where: { trimmed.range(of: $0, options: .regularExpression) != nil }) {
-                return .blocked("这段代码需要交互输入；Satori 实验只运行纯计算代码。请先把输入改成固定值，或复制到终端运行。")
+            if requiresStandardInput(for: trimmed, language: language), !allowsStandardInput {
+                return .blocked("这段代码需要输入；请先填写一组固定输入，Satori 不开放持续交互终端。")
             }
         }
 
@@ -238,9 +258,22 @@ public enum CodeRunner {
     public static func run(
         code: String,
         language: Language,
-        configuration: Configuration = Configuration()
+        configuration: Configuration = Configuration(),
+        standardInput: String? = nil
     ) async -> CodeRunResult {
-        if case let .blocked(message) = safety(for: code, language: language) {
+        if let standardInput, standardInput.utf8.count > 4_096 {
+            return CodeRunResult(
+                exitCode: 1,
+                stdout: "",
+                stderr: "实验未运行：固定输入不能超过 4 KB。",
+                timedOut: false
+            )
+        }
+        if case let .blocked(message) = safety(
+            for: code,
+            language: language,
+            allowsStandardInput: standardInput != nil
+        ) {
             return CodeRunResult(exitCode: 1, stdout: "", stderr: "实验未运行：\(message)", timedOut: false)
         }
         guard FileManager.default.isExecutableFile(atPath: "/usr/bin/sandbox-exec") else {
@@ -287,7 +320,8 @@ public enum CodeRunner {
                 in: dir,
                 configuration: configuration,
                 timeout: configuration.timeout,
-                sandbox: .restricted
+                sandbox: .restricted,
+                standardInput: standardInput
             )
         case .python, .shell, .swift:
             return await launch(
@@ -296,7 +330,8 @@ public enum CodeRunner {
                 in: dir,
                 configuration: configuration,
                 timeout: configuration.timeout,
-                sandbox: .restricted
+                sandbox: .restricted,
+                standardInput: standardInput
             )
         }
     }
@@ -322,7 +357,8 @@ public enum CodeRunner {
         in directory: URL,
         configuration: Configuration,
         timeout: TimeInterval,
-        sandbox: SandboxMode
+        sandbox: SandboxMode,
+        standardInput: String? = nil
     ) async -> CodeRunResult {
         let process = Process()
         // Compilation needs to write the temporary binary, so it uses the
@@ -344,8 +380,10 @@ public enum CodeRunner {
 
         let outPipe = Pipe()
         let errPipe = Pipe()
+        let inputPipe: Pipe? = standardInput == nil ? nil : Pipe()
         process.standardOutput = outPipe
         process.standardError = errPipe
+        process.standardInput = inputPipe
 
         let monitor = RunMonitor(
             process: process,
@@ -359,6 +397,10 @@ public enum CodeRunner {
 
         do {
             try process.run()
+            if let inputPipe, let standardInput {
+                inputPipe.fileHandleForWriting.write(Data(standardInput.utf8))
+                inputPipe.fileHandleForWriting.closeFile()
+            }
         } catch {
             outPipe.fileHandleForReading.readabilityHandler = nil
             errPipe.fileHandleForReading.readabilityHandler = nil
