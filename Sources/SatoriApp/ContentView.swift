@@ -98,6 +98,10 @@ struct ContentView: View {
                   let text = note.userInfo?["text"] as? String,
                   let pageIndex = note.userInfo?["pageIndex"] as? Int else { return }
             Task { @MainActor in
+                // An explicit selection action is a request to see an answer,
+                // not a background bookmark. Leave flow mode so the reader
+                // gets visible feedback instead of a silently queued question.
+                router.isImmersiveReading = false
                 router.pendingAskSelection = ReaderSelectionRequest(
                     documentID: documentID,
                     text: text,
@@ -115,6 +119,7 @@ struct ContentView: View {
                   let text = note.userInfo?["text"] as? String,
                   let pageIndex = note.userInfo?["pageIndex"] as? Int else { return }
             Task { @MainActor in
+                router.isImmersiveReading = false
                 router.pendingRunSelection = ReaderSelectionRequest(
                     documentID: documentID,
                     text: text,
@@ -131,6 +136,7 @@ struct ContentView: View {
                   let pageIndex = note.userInfo?["pageIndex"] as? Int else { return }
             let requestedURL = note.userInfo?["url"] as? URL
             Task { @MainActor in
+                router.isImmersiveReading = false
                 router.pendingPageRegion = ReaderPageRegionRequest(
                     documentID: documentID,
                     jpegData: jpegData,

@@ -187,9 +187,9 @@ struct LearningInspector: View {
         .task(id: documentID) { await loadHistory() }
         .onAppear {
             refreshConfigurationState()
-            // 沉浸阅读时面板会暂时卸载；如果用户在那期间点了选区动作，
-            // Router 会保留请求，但此时不会触发下面的 onChange。面板重新
-            // 出现时主动接管，避免「点了举例却没有回答」的静默丢失。
+            // Selection actions leave immersive mode in ContentView before the
+            // panel mounts. Keep this fallback for an already queued request,
+            // such as one delivered during a layout transition.
             consumePendingRouterRequests()
         }
         .onChange(of: scenePhase) { _, phase in
