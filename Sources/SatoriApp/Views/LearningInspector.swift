@@ -1437,12 +1437,16 @@ struct LearningInspector: View {
 
     /// A page in the margin notes: "第 N 页" header followed by that page's turns.
     private func pageSectionView(_ section: PageSection) -> some View {
-        VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
+        let pdfLabel = "第 \(section.pageIndex + 1) 页"
+        let pageLabel = printedPageForPage(section.pageIndex).map {
+            "\(pdfLabel) · 书内 \($0)"
+        } ?? pdfLabel
+        return VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
             Button {
                 navigateToPage(section.pageIndex)
             } label: {
                 HStack(spacing: SatoriTheme.Spacing.sm) {
-                    Text("第 \(section.pageIndex + 1) 页")
+                    Text(pageLabel)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     if section.pageIndex == pageIndex {
@@ -1460,7 +1464,7 @@ struct LearningInspector: View {
                 }
             }
             .buttonStyle(.plain)
-            .help("跳到第 \(section.pageIndex + 1) 页")
+            .help("跳到\(pageLabel)")
 
             ForEach(section.turns) { turn in
                 conversationTurnCard(turn)
