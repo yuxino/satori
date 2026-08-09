@@ -124,7 +124,7 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Figure look-ahead: when a current page names a numbered figure/table, a single-page question can also carry the immediately following page image because textbook figures often begin across the page break; the request labels the adjacent page as visual evidence without widening the text scope.
 - Scanned-book orientation: OCR table-of-contents entries now retain first-level sections and their printed-page mapping, so scanned books can show the same chapter + section breadcrumb as native-outline PDFs.
 - Printed-page clarity: scanned books now show PDF page and textbook page together in the reading bar and TOC, so a printed citation such as “书内第 25 页” no longer gets confused with PDF 第 30 页.
-- Native printed-page clarity: text-native books with consistent header/footer page numbers now build a conservative local PDF-to-printed-page map; system.pdf 的 PDF 第 187 页因此可显示为书内第 180 页，孤立数字不会被当成页码。
+- Native printed-page clarity: text-native books with consistent header/footer page numbers now build a conservative local PDF-to-printed-page map; system.pdf 的 PDF 第 187 页因此可显示为书内第 180 页，阅读栏、目录和问答锚点都能对齐，孤立数字不会被当成页码。
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 

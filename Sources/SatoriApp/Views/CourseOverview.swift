@@ -559,6 +559,7 @@ private struct DocumentWorkspace: View {
                         chapters: chapters,
                         currentChapterID: currentChapter?.id,
                         pageCount: pageCount,
+                        printedPageForPage: { pageIndex in printedPage(for: pageIndex) },
                         onJump: { targetPage in
                             currentPageIndex = min(max(targetPage, 0), pageCount - 1)
                             pageInput = ""
@@ -1002,6 +1003,7 @@ private struct TOCDrawer: View {
     let chapters: [BookChapter]
     let currentChapterID: Int?
     let pageCount: Int
+    let printedPageForPage: (Int) -> Int?
     let onJump: (Int) -> Void
     let onClose: () -> Void
 
@@ -1094,14 +1096,15 @@ private struct TOCDrawer: View {
     }
 
     private func pageRangeLabel(_ chapter: BookChapter) -> String {
+        let mappedPrintedPage = printedPageForPage(chapter.pageIndex)
         if let range = BookChapter.pageRange(for: chapter, in: chapters, pageCount: pageCount) {
             let pdfLabel = "\(range.lowerBound + 1)–\(range.upperBound + 1)"
-            if let printedPage = chapter.printedPage {
+            if let printedPage = mappedPrintedPage ?? chapter.printedPage {
                 return "PDF \(pdfLabel) · 书内 \(printedPage)"
             }
             return pdfLabel
         }
-        if let printedPage = chapter.printedPage {
+        if let printedPage = mappedPrintedPage ?? chapter.printedPage {
             return "PDF \(chapter.pageIndex + 1) · 书内 \(printedPage)"
         }
         return "\(chapter.pageIndex + 1)"
