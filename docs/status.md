@@ -131,6 +131,7 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Context contamination guard: saved turns whose page range contradicts their own page anchor are ignored as stale history; current-page questions keep only nearby turns, while broad chapter/book requests prefer grounded broad maps over a pile of local selection explanations. This prevents an old mis-scoped chapter answer from steering a new reading pass.
 - Selection-history grounding: follow-up context now carries a short copy of the prior selected passage, so repeated “理解” actions remain distinguishable instead of becoming a list of identical generic questions; the same history-size budget accounts for that text before admitting it.
 - Numeric OCR warning: a real system.pdf corruption pattern such as “600乂8” now marks the text layer as degraded and keeps the original page image in the evidence path, so damaged units and numbers are not explained as facts.
+- Inline experiment stop: code examples in answer cards now expose an immediate “停止” action and cancel their process when the card leaves the screen, so a student never has to wait for a timeout to recover the reading flow.
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 

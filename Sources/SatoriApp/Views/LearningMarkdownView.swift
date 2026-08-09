@@ -210,6 +210,8 @@ private struct CodeBlockView: View {
     let content: String
 
     @State private var runState: RunState = .idle
+    @State private var runTask: Task<Void, Never>?
+    @State private var runGeneration = UUID()
     @State private var copied = false
 
     private enum RunState {
@@ -244,6 +246,15 @@ private struct CodeBlockView: View {
                         .controlSize(.mini)
                         .tint(SatoriTheme.accent)
                         .help("在本机运行这段代码")
+                }
+                if isRunning {
+                    Button("停止", systemImage: "stop.fill") { stop() }
+                        .font(.caption2.weight(.semibold))
+                        .labelStyle(.titleAndIcon)
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .tint(.orange)
+                        .help("停止这个实验")
                 }
                 if let blockedRunReason {
                     Label("仅复制", systemImage: "lock.slash")
@@ -295,6 +306,7 @@ private struct CodeBlockView: View {
         .background(Color(nsColor: .textBackgroundColor).opacity(0.7))
         .clipShape(RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous).stroke(.quaternary))
+        .onDisappear { stop() }
     }
 
     private var isRunning: Bool {
@@ -311,21 +323,41 @@ private struct CodeBlockView: View {
         guard let runnable else { return }
         runState = .running
         let code = content
-        Task {
+        let generation = UUID()
+        runGeneration = generation
+        runTask = Task { @MainActor in
             let result = await CodeRunner.run(code: code, language: runnable)
+            guard generation == runGeneration else { return }
             runState = .finished(result)
+            runTask = nil
         }
+    }
+
+    private func stop() {
+        guard isRunning else { return }
+        runGeneration = UUID()
+        runTask?.cancel()
+        runTask = nil
+        runState = .finished(
+            CodeRunResult(
+                exitCode: 130,
+                stdout: "",
+                stderr: "实验已停止。",
+                timedOut: false,
+                cancelled: true
+            )
+        )
     }
 
     private func runOutputView(_ result: CodeRunResult) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Image(systemName: result.exitCode == 0 ? "checkmark.circle" : "xmark.octagon")
-                    .foregroundStyle(result.exitCode == 0 ? .green : .red)
-                Text(result.timedOut ? "运行超时，已停止" : (result.exitCode == 0 ? "运行完成" : "运行出错"))
+                Image(systemName: result.cancelled ? "stop.circle" : (result.exitCode == 0 ? "checkmark.circle" : "xmark.octagon"))
+                    .foregroundStyle(result.cancelled ? .orange : (result.exitCode == 0 ? .green : .red))
+                Text(result.cancelled ? "已停止" : (result.timedOut ? "运行超时，已停止" : (result.exitCode == 0 ? "运行完成" : "运行出错")))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                if result.exitCode != 0 && !result.timedOut {
+                if result.exitCode != 0 && !result.timedOut && !result.cancelled {
                     Text("退出码 \(result.exitCode)")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.tertiary)
@@ -343,10 +375,10 @@ private struct CodeBlockView: View {
             if !result.stderr.isEmpty {
                 Text(result.stderr)
                     .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(result.cancelled ? Color.secondary : Color.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
-                    .background(Color.red.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+                    .background((result.cancelled ? Color.primary : Color.red).opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
             }
         }
         .padding(10)

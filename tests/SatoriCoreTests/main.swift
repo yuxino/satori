@@ -1167,6 +1167,18 @@ struct SatoriCoreTests {
         )
         precondition(timeoutRun.timedOut, "Expected runaway loop to be killed by the timeout")
 
+        let cancellableRun = Task {
+            await CodeRunner.run(
+                code: "while True: pass",
+                language: .python,
+                configuration: .init(timeout: 10, outputLimit: 16_000)
+            )
+        }
+        try? await Task.sleep(for: .milliseconds(120))
+        cancellableRun.cancel()
+        let cancelledRun = await cancellableRun.value
+        precondition(cancelledRun.cancelled, "Expected an inline experiment to stop when its task is cancelled")
+
         let outputLimitRun = await CodeRunner.run(
             code: "for i in range(10000):\n    print(i)",
             language: .python,

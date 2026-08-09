@@ -6,12 +6,20 @@ public struct CodeRunResult: Equatable, Sendable {
     public let stdout: String
     public let stderr: String
     public let timedOut: Bool
+    public let cancelled: Bool
 
-    public init(exitCode: Int32, stdout: String, stderr: String, timedOut: Bool) {
+    public init(
+        exitCode: Int32,
+        stdout: String,
+        stderr: String,
+        timedOut: Bool,
+        cancelled: Bool = false
+    ) {
         self.exitCode = exitCode
         self.stdout = stdout
         self.stderr = stderr
         self.timedOut = timedOut
+        self.cancelled = cancelled
     }
 }
 
@@ -396,6 +404,7 @@ private final class RunMonitor: @unchecked Sendable {
     private var processFinished = false
     private var terminationRequested = false
     private var timedOut = false
+    private var cancelled = false
     private var resumed = false
     private var timeoutTask: Task<Void, Never>?
     private var escalationTask: Task<Void, Never>?
@@ -454,7 +463,14 @@ private final class RunMonitor: @unchecked Sendable {
             checkFinish()
             return
         }
-        if reason == .timeout { timedOut = true }
+        switch reason {
+        case .timeout:
+            timedOut = true
+        case .cancelled:
+            cancelled = true
+        case .outputLimit:
+            break
+        }
         if !terminationRequested {
             terminationRequested = true
             process.terminate()
@@ -533,7 +549,8 @@ private final class RunMonitor: @unchecked Sendable {
             exitCode: process.terminationStatus,
             stdout: decode(stdoutData, overLimit: stdoutOverLimit),
             stderr: decode(stderrData, overLimit: stderrOverLimit),
-            timedOut: timedOut
+            timedOut: timedOut,
+            cancelled: cancelled
         )
         let continuation = self.continuation
         let timeoutTask = self.timeoutTask
