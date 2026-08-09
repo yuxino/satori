@@ -518,10 +518,19 @@ struct LearningInspector: View {
                             .foregroundStyle(.secondary)
                             .padding(.vertical, 18)
                         } else if turns.isEmpty, activeTurn == nil {
-                            promptStarter
+                            // 第一次进入章节时，下面的 pageEntryPrompt 已经给出
+                            // 唯一的阅读入口；不要再把通用快捷问题堆在上面。
+                            if !showsPageEntry {
+                                promptStarter
+                            }
                         } else {
                             // 「问」只呈现当前页，避免翻到新页后被上一页的长回答
                             // 占满视野；完整的跨页记录仍可在「回看」里按页查看。
+                            if currentPageTurns.isEmpty,
+                               activeTurn == nil,
+                               !showsPageEntry {
+                                emptyPageHint
+                            }
                             ForEach(currentPageTurns) { turn in
                                 conversationTurnCard(turn)
                                     .id(turn.id)
@@ -1192,6 +1201,27 @@ struct LearningInspector: View {
             }
         }
         .padding(.vertical, SatoriTheme.Spacing.xs)
+    }
+
+    /// 翻到一个没有历史问答的页面时，保持阅读现场有反馈，但不把每次翻页
+    /// 都变成一组待处理按钮。章节入口和“接上文”仍由 pageEntryPrompt 负责。
+    private var emptyPageHint: some View {
+        HStack(alignment: .top, spacing: SatoriTheme.Spacing.sm) {
+            Image(systemName: "book.pages")
+                .foregroundStyle(SatoriTheme.accent)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("这一页还没有问答")
+                    .font(.callout.weight(.semibold))
+                Text("先读正文；卡住时选中一段，或直接在下方问一句。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, SatoriTheme.Spacing.sm)
+        .foregroundStyle(.secondary)
     }
 
     /// 一轮对话：右侧你的问题气泡 + 左侧 AI 回答卡片。历史与进行中的

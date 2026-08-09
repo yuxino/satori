@@ -127,6 +127,7 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Native printed-page clarity: text-native books with consistent header/footer page numbers now build a conservative local PDF-to-printed-page map; system.pdf 的 PDF 第 187 页因此可显示为书内第 180 页，阅读栏、目录和问答锚点都能对齐，孤立数字不会被当成页码。
 - Reading-location consistency: page-entry prompts, selection anchors, streaming status, crop attachments, experiment source labels, extraction errors, and context-range pickers now reuse the same PDF/printed-page label; “回看” also puts the current reading page first before sorting older pages by recent discussion.
 - Priority-answer restraint: “有什么值得看 / 值得学习 / 核心考点” now uses the compact reading-map budget, and skip advice is explicitly scoped to the current reading goal so Satori does not turn “暂时可跳过” into “完全没用”。
+- Empty-reading-state cleanup: a first chapter page now shows only its focused reading entry instead of duplicating it with generic quick prompts; a page without local Q&A gets a quiet orientation hint instead of an unexplained blank panel, while ordinary page turns still avoid adding action buttons.
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 
