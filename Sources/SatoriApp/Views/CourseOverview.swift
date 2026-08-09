@@ -170,6 +170,8 @@ private struct DocumentWorkspace: View {
     @FocusState private var isSearchFieldFocused: Bool
     /// 这本书的章节导览（PDF outline 优先，扫描目录 OCR 次之，课程目录回退）；打开时一次性加载。
     @State private var chapters: [BookChapter] = []
+    /// 扫描书的目录识别可能需要几秒；给读者一个低干扰的状态，而不是让目录按钮像坏掉了一样消失。
+    @State private var isLoadingChapters = true
     /// 目录快速跳转浮层是否显示（⌘T 或点目录按钮）。
     @State private var showsTOC = false
     @State private var showsInspector = true
@@ -220,6 +222,13 @@ private struct DocumentWorkspace: View {
             }
         }
         .task(id: document.id) {
+            chapters = []
+            isLoadingChapters = true
+            defer {
+                if !Task.isCancelled {
+                    isLoadingChapters = false
+                }
+            }
             // 打开 PDF 时优先读取原生 outline；扫描版没有 outline 时，再在后台
             // OCR 前面的目录页并校正印刷页码偏移。两条路径都只在这里做一次，
             // 不把目录识别混进每次提问的等待。
@@ -569,6 +578,16 @@ private struct DocumentWorkspace: View {
 
             if !chapters.isEmpty {
                 tocButton
+            }
+
+            if isLoadingChapters, !router.isImmersiveReading {
+                Label(
+                    document.contentKind == .scanned ? "正在识别目录" : "正在读取目录",
+                    systemImage: "ellipsis.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .transition(.opacity)
             }
 
             Spacer(minLength: 8)
