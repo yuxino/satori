@@ -1,4 +1,4 @@
-# Reading loop repair: real chapter start and fixed-input experiments
+# Reading loop repair: grounded regions, same-page chapters, and fixed-input experiments
 
 ## Evidence
 
@@ -9,6 +9,15 @@ item therefore cannot identify the first useful reading page. The real
 example to asking for complete code and then wanting to run it. Blocking every
 `scanf`/`input()` example breaks that loop even when the reader only needs one
 known sample input.
+
+Two more failures appeared in the next student pass:
+
+- `lang.pdf` PDF page 54 contains two unrelated code objects. A scanned-page
+  crop was previously sent as an anonymous temporary image, so a follow-up
+  such as “完整代码” could drift between them.
+- `system.pdf` PDF page 66 contains two outline sections at different vertical
+  positions. The outline destination points both land at the page top, so a
+  page-only TOC jump cannot move between them when the page is already open.
 
 ## Design
 
@@ -22,9 +31,19 @@ temporary directory, no-network/restricted sandbox, output cap, and timeout
 remain in force. The answer code block and the secondary experiment space
 expose the same small fixed-input field; they never open a persistent terminal.
 
+`ReadingRegionAnchor` stores a normalized top-left page rectangle with the
+learning turn. Follow-ups reattach the same crop, the request labels it as the
+single priority object, and reopening a session re-renders it from the PDF
+instead of persisting a large image. `BookChapter` now carries a normalized
+title offset. Native PDF outlines prefer text-layer geometry; scanned outlines
+carry a bounded Vision-OCR line offset when available. TOC clicks post a
+page-plus-offset jump even when the page number does not change.
+
 ## Verification
 
 Core checks cover noisy front matter, the `system.pdf`-shaped chapter list,
 interactive-code gating, and a real C multiplication run with `3 4` producing
-`12`. The release app is built and signed after the core checks. Desktop click
+`12`, plus region persistence and same-page chapter ordering. Real local checks
+still keep `lang.pdf`'s code bridge pages `[54, 55, 53]` and scanned search
+wraparound. The release app is built after the core checks. Desktop click
 verification remains a separate gate because the Mac is currently locked.

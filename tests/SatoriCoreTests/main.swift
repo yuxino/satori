@@ -703,6 +703,47 @@ struct SatoriCoreTests {
             ),
             "Expected ordinary native-text bridge pages to remain text-only"
         )
+        let regionAnchor = ReadingRegionAnchor(pageIndex: 53, x: -0.2, y: 0.25, width: 0.8, height: 0.9)
+        precondition(
+            regionAnchor == ReadingRegionAnchor(pageIndex: 53, x: 0, y: 0.25, width: 0.8, height: 0.75)
+                && regionAnchor.centerY == 0.625,
+            "Expected scanned-page region anchors to clamp to a normalized top-left rectangle"
+        )
+        let anchoredTurn = LearningTurn(
+            question: "解释这块代码",
+            answer: "它把输入交给函数。",
+            pageIndex: 53,
+            sourceKind: .currentPDF,
+            regionAnchor: regionAnchor
+        )
+        let anchoredRoundTrip = try XCTUnwrap(
+            try? JSONDecoder().decode(LearningTurn.self, from: JSONEncoder().encode(anchoredTurn))
+        )
+        precondition(
+            anchoredRoundTrip.regionAnchor == regionAnchor,
+            "Expected a framed PDF region to survive learning-session persistence"
+        )
+        precondition(
+            !ReadingPositionOrdering.isAtOrBefore(
+                pageIndex: 65,
+                normalizedOffset: 0.68,
+                currentPageIndex: 65,
+                currentNormalizedOffset: 0.22
+            )
+                && ReadingPositionOrdering.isAtOrBefore(
+                    pageIndex: 65,
+                    normalizedOffset: 0.68,
+                    currentPageIndex: 65,
+                    currentNormalizedOffset: 0.74
+                )
+                && ReadingPositionOrdering.isAtOrBefore(
+                    pageIndex: 64,
+                    normalizedOffset: nil,
+                    currentPageIndex: 65,
+                    currentNormalizedOffset: 0
+                ),
+            "Expected same-page chapter anchors to follow their vertical reading position"
+        )
         precondition(
             !ReadingVisualEvidence.requiresPageImage(currentText: "文件系统负责存储、检索和更新"),
             "Expected ordinary prose to stay text-only"
@@ -854,6 +895,27 @@ struct SatoriCoreTests {
             )
         ).explain(request: "完整代码", pageIndex: 53)
         precondition(completeCodeResponse.text == "fixture explanation", "Expected complete-code requests to reject guessed OCR reconstruction")
+
+        let regionAnchoredResponse = await QwenLearningAssistant(
+            apiKey: "fixture-key",
+            pageContent: .textAndImage(
+                "【第 54 页】本页同时有两个 C 代码示例。",
+                Data([0xFF, 0xD8, 0xFF])
+            ),
+            regionAnchor: ReadingRegionAnchor(pageIndex: 53, x: 0.08, y: 0.12, width: 0.84, height: 0.32),
+            additionalImagesJPEG: [Data([0xFF, 0xD8, 0xFF])],
+            transport: FixtureAssistantTransport(
+                expectedEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
+                expectedModelID: "qwen3.8-max",
+                expectedImageCount: 2,
+                expectsWebSearch: false,
+                expectedHistoryTurnCount: 0,
+                expectsPageContent: true,
+                expectsReconstructionGuard: true,
+                expectsRegionAnchor: true
+            )
+        ).explain(request: "完整代码", pageIndex: 53)
+        precondition(regionAnchoredResponse.text == "fixture explanation", "Expected a framed scan region to stay attached to reconstruction requests")
 
         let exercisePageResponse = await QwenLearningAssistant(
             apiKey: "fixture-key",
@@ -1133,6 +1195,7 @@ struct SatoriCoreTests {
             CodeRunner.languageHint(for: "#include <stdio.h>\nint main(void) { printf(\"hi\"); }") == .c
                 && CodeRunner.languageHint(for: "std::cout << 42;") == .cpp
                 && CodeRunner.languageHint(for: "print(2 + 2)") == .python
+                && CodeRunner.languageHint(for: "# include <stdio.h>\nint main ( void ) { printf ( \"hi\" ); }") == .c
                 && CodeRunner.languageHint(for: "这是一段普通教材解释") == nil,
             "Expected conservative language hints for selection-to-experiment routing"
         )
@@ -1366,6 +1429,7 @@ private struct FixtureAssistantTransport: AssistantTransport {
     var expectsVisualEvidenceInstruction: Bool = false
     var expectsImageOnlyPageInstruction: Bool = false
     var expectsReconstructionGuard: Bool = false
+    var expectsRegionAnchor: Bool = false
     var expectsHistorySelectionText: Bool = false
     var expectedMaxOutputTokens: Int?
     var maximumRequestBodyBytes: Int?
@@ -1458,6 +1522,20 @@ private struct FixtureAssistantTransport: AssistantTransport {
                 selectionText?.contains("文件系统在不同操作系统中有不同的结构") == true
                     && selectionText?.contains("不要用常识补齐") == true,
                 "Expected selected passage guidance to reject guessed OCR code completions"
+            )
+        }
+        let regionMarker = content.filter { $0["type"] as? String == "input_text" }
+            .compactMap { $0["text"] as? String }
+            .first { $0.hasPrefix("用户当前明确框选的是") }
+        precondition(
+            (regionMarker != nil) == expectsRegionAnchor,
+            "Expected the current framed region marker to match the request"
+        )
+        if expectsRegionAnchor {
+            precondition(
+                regionMarker?.contains("PDF 第 54 页") == true
+                    && regionMarker?.contains("不能在同页多个代码/图表之间自行猜测") == true,
+                "Expected the framed region marker to name the page and reject same-page guessing"
             )
         }
         let verificationMarker = content.filter { $0["type"] as? String == "input_text" }

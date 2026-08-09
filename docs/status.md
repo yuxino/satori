@@ -138,6 +138,8 @@ The first runnable macOS build is complete. It is a Swift Package app that build
 - Front-matter fast start: when a recovered outline shows that the reader is still in a foreword or exam-outline section, the one-time reading entry explains the boundary and offers “从第一章开始”; choosing to stay keeps the normal page explanation path.
 - Real outline front-matter fix: the fast-start boundary now selects the first numbered chapter (`第一章` / `Chapter 1`) instead of blindly taking the first top-level outline item, so system.pdf 的封面、前言、目录和考试大纲不会吞掉正文入口。
 - Fixed-input experiments: textbook C/Python examples that call `scanf`/`input()` now expose one bounded “固定输入” field; Satori closes stdin after sending it, keeps the sandbox and timeout, and still rejects file/network/process behavior. The real C multiplication path is covered by a `3 4 → 12` run check.
+- Region-anchored scanned reading: a “框选理解” crop now carries its normalized PDF rectangle through follow-ups and persisted Q&A; the request explicitly names it as the priority object, reuses it for “完整代码”, restores it from the PDF after reopening, and refuses to guess a code block from unrelated same-page OCR. Replacing a crop also works when the attachment strip is already full.
+- Same-page TOC navigation: chapter targets now carry a vertical title offset. Native outlines use PDF text geometry before falling back to the outline destination; scanned outline OCR keeps matching heading-line geometry when it is in the bounded body window. Current chapter labels and TOC jumps compare page plus offset, and same-page clicks still force the PDF viewport to move.
 
 The supplied PDFs were imported for local verification: `lang.pdf` and `software.pdf` classify as scanned; `system.pdf` classifies as text.
 

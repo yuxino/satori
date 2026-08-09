@@ -65,6 +65,7 @@ struct LearningInspector: View {
 
     let documentID: UUID
     let pageIndex: Int
+    let currentPageOffset: Double
     let pageCount: Int
     let documentURL: URL
     /// 这本书的章节导览（PDF outline 优先，课程目录回退）；为空时「章节」选项隐藏。
@@ -97,6 +98,10 @@ struct LearningInspector: View {
     @State private var activeSelectionText: String?
     @State private var activeSelectionPage: Int?
     @State private var activeSelectionOffset: Double?
+    /// 扫描页框选的视觉锚点。图片只在内存中保留，后续追问会按页码和
+    /// 归一化矩形重新带回同一块区域，避免同页多个代码示例串台。
+    @State private var activeRegionAnchor: ReadingRegionAnchor?
+    @State private var activeRegionAttachment: LearningImageAttachment?
     @State private var turns: [LearningTurn] = []
     @State private var draftQuestion = ""
     @State private var draftPageIndex = 0
@@ -105,6 +110,7 @@ struct LearningInspector: View {
     /// 当前草稿关联的选区；即使用户清掉可视锚点，重试也不能丢掉原文。
     @State private var draftSelectionText: String?
     @State private var draftSelectionOffset: Double?
+    @State private var draftRegionAnchor: ReadingRegionAnchor?
     @State private var response: LearningResponse?
     @State private var isThinking = false
     @State private var isLoadingHistory = true
@@ -281,6 +287,11 @@ struct LearningInspector: View {
         activeSelectionText = text
         activeSelectionPage = request.pageIndex
         activeSelectionOffset = request.position?.normalizedPageOffset
+        if let previousRegionID = activeRegionAttachment?.id {
+            attachments.removeAll { $0.id == previousRegionID }
+        }
+        activeRegionAnchor = nil
+        activeRegionAttachment = nil
         let selectionContextScope = selectionScope(for: request.intent, pageIndex: request.pageIndex)
         let prompt = selectionPrompt(for: request.intent, pageIndex: request.pageIndex)
         if question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isThinking {
@@ -341,7 +352,8 @@ struct LearningInspector: View {
     private func handlePageRegion(_ request: ReaderPageRegionRequest) {
         guard request.documentID == documentID,
               request.url == nil || request.url == documentURL else { return }
-        guard attachments.count < 4 else {
+        let replacingRegion = activeRegionAttachment != nil
+        guard attachments.count < 4 || replacingRegion else {
             attachmentStatus = "每次最多附加 4 张图片，请先发送或移除一张。"
             return
         }
@@ -359,13 +371,20 @@ struct LearningInspector: View {
         activeSelectionText = nil
         activeSelectionPage = nil
         activeSelectionOffset = nil
-        attachments.append(
-            LearningImageAttachment(
-                name: "\(readingPageLabel(request.pageIndex)) · 框选",
-                jpegData: request.jpegData,
-                preview: preview
-            )
+        let attachment = LearningImageAttachment(
+            name: "\(readingPageLabel(request.pageIndex)) · 框选",
+            jpegData: request.jpegData,
+            preview: preview
         )
+        let previousRegionID = activeRegionAttachment?.id
+        activeRegionAnchor = request.anchor
+        activeRegionAttachment = attachment
+        // Put the current region first. Qwen receives this image immediately
+        // after the explicit role marker, before any extra user attachments.
+        if let previousRegionID {
+            attachments.removeAll { $0.id == previousRegionID }
+        }
+        attachments.insert(attachment, at: 0)
         pendingSelectionPage = request.pageIndex
         attachmentStatus = "已框选\(readingPageLabel(request.pageIndex))的一块区域。"
 
@@ -391,6 +410,15 @@ struct LearningInspector: View {
         runStandardInput = ""
         runSourcePage = request.pageIndex
         runNotice = ""
+        if let hintedLanguage = CodeRunner.languageHint(for: text) {
+            // A direct PDF selection has no markdown fence to tell the
+            // scratchpad whether this is C or Python. Infer it before the
+            // reader sees the experiment, otherwise the default Python mode
+            // makes a perfectly valid C example fail on the first click.
+            runLanguage = hintedLanguage
+        } else {
+            runNotice = "暂未识别代码语言，已按 Python 载入；可在上方切换。"
+        }
     }
 
     /// A reader who has already selected code often says only “运行”. Route
@@ -616,6 +644,10 @@ struct LearningInspector: View {
                 selectionAnchorBanner(text: activeSelectionText, pageIndex: activeSelectionPage)
             }
 
+            if let activeRegionAnchor {
+                regionAnchorBanner(activeRegionAnchor)
+            }
+
             if pendingVerification {
                 verificationBanner
             }
@@ -709,6 +741,55 @@ struct LearningInspector: View {
         .padding(.horizontal, SatoriTheme.Spacing.md)
         .padding(.vertical, SatoriTheme.Spacing.sm)
         .background(SatoriTheme.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+        .padding(.horizontal, SatoriTheme.Spacing.md)
+        .padding(.bottom, SatoriTheme.Spacing.sm)
+    }
+
+    private func regionAnchorBanner(_ anchor: ReadingRegionAnchor) -> some View {
+        let isCurrentPage = anchor.pageIndex == pageIndex
+        return HStack(alignment: .center, spacing: SatoriTheme.Spacing.sm) {
+            Image(systemName: "viewfinder")
+                .foregroundStyle(SatoriTheme.gold)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(isCurrentPage
+                     ? "当前框选 · \(readingPageLabel(anchor.pageIndex))"
+                     : "上次框选 · \(readingPageLabel(anchor.pageIndex))")
+                    .font(.caption.weight(.semibold))
+                Text(isCurrentPage
+                     ? "后续追问会继续围绕这块区域，不会在整页代码之间猜。"
+                     : "回到这一页后，Satori 会恢复这块区域。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 4)
+            if !isCurrentPage {
+                Button("返回") {
+                    navigateToPage(anchor.pageIndex)
+                }
+                .buttonStyle(.link)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(SatoriTheme.accent)
+            }
+            Button("清除框选锚点", systemImage: "xmark") {
+                let regionID = activeRegionAttachment?.id
+                activeRegionAnchor = nil
+                activeRegionAttachment = nil
+                if let regionID {
+                    attachments.removeAll { $0.id == regionID }
+                }
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("清除当前框选；不会删除已经保存的问答")
+        }
+        .padding(.horizontal, SatoriTheme.Spacing.md)
+        .padding(.vertical, SatoriTheme.Spacing.sm)
+        .background(SatoriTheme.gold.opacity(0.08), in: RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: SatoriTheme.Radius.sm, style: .continuous)
+                .strokeBorder(SatoriTheme.gold.opacity(0.2), lineWidth: 1)
+        )
         .padding(.horizontal, SatoriTheme.Spacing.md)
         .padding(.bottom, SatoriTheme.Spacing.sm)
     }
@@ -2254,6 +2335,8 @@ struct LearningInspector: View {
         activeSelectionText = nil
         activeSelectionPage = nil
         activeSelectionOffset = nil
+        activeRegionAnchor = nil
+        activeRegionAttachment = nil
         completedElsewherePage = nil
         recentCompletedPage = nil
         pendingVerification = false
@@ -2274,6 +2357,12 @@ struct LearningInspector: View {
                 activeSelectionPage = restoredSelection.pageIndex
                 activeSelectionOffset = restoredSelection.selectionAnchorOffset
             }
+            if let restoredRegion = groundedTurns.reversed().compactMap(\.regionAnchor).first {
+                activeRegionAnchor = restoredRegion
+                Task {
+                    await restoreRegionAttachment(for: restoredRegion)
+                }
+            }
             dismissedPageEntryPage = nil
             // 打开面板默认看最新对话：锚定到底部，历史加载完自动贴底。
             scrollAnchorID = responseBottomID
@@ -2284,6 +2373,21 @@ struct LearningInspector: View {
             historyStatus = "问答记录暂时无法读取；不影响继续阅读和提问。"
         }
         isLoadingHistory = false
+    }
+
+    private func restoreRegionAttachment(for anchor: ReadingRegionAnchor) async {
+        let data = await Task.detached(priority: .utility) {
+            PDFRegionRenderer.renderJPEG(from: documentURL, anchor: anchor)
+        }.value
+        guard !Task.isCancelled,
+              activeRegionAnchor == anchor,
+              let data,
+              let preview = NSImage(data: data) else { return }
+        activeRegionAttachment = LearningImageAttachment(
+            name: "\(readingPageLabel(anchor.pageIndex)) · 框选",
+            jpegData: data,
+            preview: preview
+        )
     }
 
     /// 从历史问答回到原文时，恢复选区锚点；没有选区的普通页问答仍只跳到页码。
@@ -2357,7 +2461,9 @@ struct LearningInspector: View {
             runCode = ""
             runSourcePage = nil
             runOutput = nil
-            runNotice = "先在 PDF 中选中一段完整代码；扫描页可以先用“框选理解”。Satori 不会从整页 OCR 猜代码。"
+            runNotice = activeRegionAnchor?.pageIndex == pageIndex
+                ? "当前是图片框选；请先让 AI 整理并核对代码，再从回答里的代码卡片运行。Satori 不会从整页 OCR 猜代码。"
+                : "先在 PDF 中选中一段完整代码；扫描页可以先用“框选理解”。Satori 不会从整页 OCR 猜代码。"
             question = ""
             return
         }
@@ -2444,7 +2550,26 @@ struct LearningInspector: View {
             effectiveScope = inferredContextScope(for: request, pageIndex: targetPageIndex) ?? .page
         }
 
-        let submittedAttachments = attachments
+        let regionForRequest = activeRegionAnchor?.pageIndex == targetPageIndex
+            ? activeRegionAnchor
+            : nil
+        var submittedAttachments = attachments
+        if regionForRequest != nil,
+           let activeRegionAttachment,
+           !submittedAttachments.contains(where: { $0.id == activeRegionAttachment.id }) {
+            // A follow-up such as “完整代码” may arrive after the first crop
+            // was sent and removed from the composer. Reattach the same crop
+            // before any new user images so the region marker stays truthful.
+            submittedAttachments.insert(activeRegionAttachment, at: 0)
+        }
+        let requestRegionAnchor: ReadingRegionAnchor? = {
+            guard let regionForRequest,
+                  let activeRegionAttachment,
+                  submittedAttachments.contains(where: { $0.id == activeRegionAttachment.id }) else {
+                return nil
+            }
+            return regionForRequest
+        }()
         submittedAttachmentsForActiveRequest = submittedAttachments
         activeAttachmentPreviews = submittedAttachments.map(\.preview)
         let context = ReadingConversationContextSelector.select(
@@ -2468,6 +2593,7 @@ struct LearningInspector: View {
         draftPageRevision = readingPositionRevision
         draftContextScope = effectiveScope
         draftAttachmentCount = submittedAttachments.count
+        draftRegionAnchor = requestRegionAnchor
         let effectiveSelectionText: String? = {
             guard let candidate = (selectionText ?? (activeSelectionPage == targetPageIndex ? activeSelectionText : nil))?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -2590,6 +2716,7 @@ struct LearningInspector: View {
                 modelID: config.modelID,
                 pageContent: pageContent,
                 selectionText: effectiveSelectionText,
+                regionAnchor: draftRegionAnchor,
                 isVerificationResponse: isAnswerToVerification,
                 additionalImagesJPEG: submittedAttachments.map(\.jpegData),
                 conversationContext: context,
@@ -2662,7 +2789,12 @@ struct LearningInspector: View {
     private var currentTopLevelChapter: BookChapter? {
         chapters.last {
             $0.depth == 0
-                && $0.pageIndex <= pageIndex
+                && ReadingPositionOrdering.isAtOrBefore(
+                    pageIndex: $0.pageIndex,
+                    normalizedOffset: $0.normalizedOffset,
+                    currentPageIndex: pageIndex,
+                    currentNormalizedOffset: currentPageOffset
+                )
                 && (!hasNumberedChapterOutline || isNumberedChapterTitle($0.title))
         }
     }
@@ -2708,6 +2840,7 @@ struct LearningInspector: View {
             draftContextScope = .none
             draftSelectionText = nil
             draftSelectionOffset = nil
+            draftRegionAnchor = nil
             activeAttachmentPreviews = []
             pendingVerification = false
             verificationAnswerMode = false
@@ -2738,6 +2871,7 @@ struct LearningInspector: View {
             selectionText: draftSelectionText,
             selectionOffset: draftSelectionOffset,
             selectionAnchorOffset: draftSelectionOffset,
+            regionAnchor: draftRegionAnchor,
             attachmentNotice: finalResponse.attachmentNotice
         )
         turns.append(turn)
@@ -2753,6 +2887,7 @@ struct LearningInspector: View {
         draftContextScope = .none
         draftSelectionText = nil
         draftSelectionOffset = nil
+        draftRegionAnchor = nil
         activeAttachmentPreviews = []
         submittedAttachmentsForActiveRequest = []
         response = nil
@@ -2776,6 +2911,7 @@ struct LearningInspector: View {
         turns = []
         draftQuestion = ""
         draftSelectionText = nil
+        draftRegionAnchor = nil
         response = nil
         activeAttachmentPreviews = []
         submittedAttachmentsForActiveRequest = []
@@ -2791,6 +2927,8 @@ struct LearningInspector: View {
         activeSelectionText = nil
         activeSelectionPage = nil
         activeSelectionOffset = nil
+        activeRegionAnchor = nil
+        activeRegionAttachment = nil
         draftSelectionOffset = nil
         dismissedPageEntryPage = nil
         Task {

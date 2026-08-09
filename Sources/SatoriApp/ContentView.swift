@@ -26,14 +26,15 @@ struct ReaderSelectionRequest: Equatable, Sendable {
     let intent: ReaderSelectionIntent
 }
 
-/// A cropped region from a scanned PDF page. It stays in memory only long
-/// enough to become the next question's attachment; it is never persisted as
-/// a note or a separate file.
+/// A cropped region from a scanned PDF page. The JPEG stays in memory for the
+/// active request; the normalized anchor can be persisted and re-cropped from
+/// the original PDF for a later follow-up.
 struct ReaderPageRegionRequest: Equatable, Sendable {
     let id = UUID()
     let documentID: UUID
     let jpegData: Data
     let pageIndex: Int
+    let anchor: ReadingRegionAnchor
     let url: URL?
 }
 
@@ -133,7 +134,8 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .satoriPageRegionCaptured)) { note in
             guard let documentID = note.userInfo?["documentID"] as? UUID,
                   let jpegData = note.userInfo?["jpegData"] as? Data,
-                  let pageIndex = note.userInfo?["pageIndex"] as? Int else { return }
+                  let pageIndex = note.userInfo?["pageIndex"] as? Int,
+                  let anchor = note.userInfo?["anchor"] as? ReadingRegionAnchor else { return }
             let requestedURL = note.userInfo?["url"] as? URL
             Task { @MainActor in
                 router.isImmersiveReading = false
@@ -141,6 +143,7 @@ struct ContentView: View {
                     documentID: documentID,
                     jpegData: jpegData,
                     pageIndex: pageIndex,
+                    anchor: anchor,
                     url: requestedURL
                 )
             }

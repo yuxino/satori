@@ -145,19 +145,26 @@ public enum CodeRunner {
     public static func languageHint(for code: String) -> Language? {
         let normalized = code.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return nil }
-        if normalized.contains("std::") || normalized.contains("cout <<") || normalized.contains("cin >>") {
+        // OCR and PDF text selection often insert spaces between punctuation
+        // and tokens ("# include" / "printf (" / "c i n >>"). Keep the
+        // original form for conservative Python detection, but use a compact
+        // form for the C-family markers so a direct selection can enter the
+        // right experiment language without making the reader switch it by
+        // hand.
+        let compact = normalized.replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+        if compact.contains("std::") || compact.contains("cout<<") || compact.contains("cin>>") {
             return .cpp
         }
-        if normalized.contains("#include")
-            || normalized.contains("int main")
-            || normalized.contains("printf(")
-            || normalized.contains("scanf(") {
+        if compact.contains("#include")
+            || compact.contains("intmain")
+            || compact.contains("printf(")
+            || compact.contains("scanf(") {
             return .c
         }
         if normalized.contains("def ")
-            || normalized.contains("print(")
-            || normalized.contains("import math")
-            || normalized.contains("input(") {
+            || compact.contains("print(")
+            || compact.contains("importmath")
+            || compact.contains("input(") {
             return .python
         }
         return nil

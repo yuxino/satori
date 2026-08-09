@@ -131,6 +131,9 @@ struct BookChapter: Identifiable, Equatable {
     /// contents. Native PDF outlines leave this nil because PDF and book page
     /// numbers are usually already the same.
     let printedPage: Int?
+    /// 0…1 distance from the page top to the chapter title. Older caches and
+    /// course-directory fallbacks may not have this geometry yet.
+    let normalizedOffset: Double?
 
     /// 层级感知的页码范围（0 起、含两端）：从自己的起始页到**下一个同级或更高级**
     /// 条目的起始页前 1 页。这样选「第一章」得到整章（含其下所有节），
@@ -346,7 +349,7 @@ private struct DocumentWorkspace: View {
     /// 章节来源：优先 PDF 自带 outline；没有 outline 时回退到这个阅读空间的目录里
     /// 已关联页码的章节项；两者都没有则返回空（阅读栏不显示目录）。
     private static func makeChapters(
-        entries: [(title: String, pageIndex: Int, depth: Int)],
+        entries: [(title: String, pageIndex: Int, depth: Int, normalizedOffset: Double?)],
         directory: [LearningDirectoryItem]
     ) -> [BookChapter] {
         if !entries.isEmpty {
@@ -356,7 +359,8 @@ private struct DocumentWorkspace: View {
                     title: $0.element.title,
                     pageIndex: $0.element.pageIndex,
                     depth: $0.element.depth,
-                    printedPage: nil
+                    printedPage: nil,
+                    normalizedOffset: $0.element.normalizedOffset
                 )
             }
         }
@@ -366,12 +370,12 @@ private struct DocumentWorkspace: View {
         }
         .enumerated()
         .map {
-            BookChapter(id: $0.offset, title: $0.element.title, pageIndex: $0.element.pageIndex, depth: 0, printedPage: nil)
+            BookChapter(id: $0.offset, title: $0.element.title, pageIndex: $0.element.pageIndex, depth: 0, printedPage: nil, normalizedOffset: nil)
         }
     }
 
     private static func makeScannedChapters(
-        entries: [(title: String, pageIndex: Int, depth: Int, printedPage: Int)]
+        entries: [(title: String, pageIndex: Int, depth: Int, printedPage: Int, normalizedOffset: Double?)]
     ) -> [BookChapter] {
         entries.enumerated().map {
             BookChapter(
@@ -379,20 +383,30 @@ private struct DocumentWorkspace: View {
                 title: $0.element.title,
                 pageIndex: $0.element.pageIndex,
                 depth: $0.element.depth,
-                printedPage: $0.element.printedPage
+                printedPage: $0.element.printedPage,
+                normalizedOffset: $0.element.normalizedOffset
             )
         }
     }
 
     /// 当前页所属的章节：最后一个起始页 ≤ 当前页的章节。
     private var currentChapter: BookChapter? {
-        chapters.last { $0.pageIndex <= currentPageIndex }
+        chapters.last { chapterIsAtOrBeforeCurrent($0) }
     }
 
     /// Keep the top-level chapter visible while a section title is selected.
     /// On a long textbook page, the section alone is not enough orientation.
     private var currentTopLevelChapter: BookChapter? {
-        chapters.last { $0.depth == 0 && $0.pageIndex <= currentPageIndex }
+        chapters.last { $0.depth == 0 && chapterIsAtOrBeforeCurrent($0) }
+    }
+
+    private func chapterIsAtOrBeforeCurrent(_ chapter: BookChapter) -> Bool {
+        ReadingPositionOrdering.isAtOrBefore(
+            pageIndex: chapter.pageIndex,
+            normalizedOffset: chapter.normalizedOffset,
+            currentPageIndex: currentPageIndex,
+            currentNormalizedOffset: currentOffset
+        )
     }
 
     /// Prefer a direct native-text mapping; scan-like books carry the
@@ -422,7 +436,7 @@ private struct DocumentWorkspace: View {
 
     /// 用当前 PDF 的 outline 补齐课程目录项缺失的页码并持久化。
     /// 全部已关联（此前已持久化）或 PDF 没有 outline 时直接跳过，保持现状。
-    private func linkDirectoryPages(entries: [(title: String, pageIndex: Int, depth: Int)]) async {
+    private func linkDirectoryPages(entries: [(title: String, pageIndex: Int, depth: Int, normalizedOffset: Double?)]) async {
         let directory = course.learningDirectory
         guard !directory.isEmpty,
               directory.contains(where: { $0.pageIndex == nil }),
@@ -461,6 +475,7 @@ private struct DocumentWorkspace: View {
                 LearningInspector(
                     documentID: document.id,
                     pageIndex: currentPageIndex,
+                    currentPageOffset: currentOffset,
                     pageCount: pageCount,
                     documentURL: url,
                     chapters: chapters,
@@ -485,6 +500,7 @@ private struct DocumentWorkspace: View {
                 LearningInspector(
                     documentID: document.id,
                     pageIndex: currentPageIndex,
+                    currentPageOffset: currentOffset,
                     pageCount: pageCount,
                     documentURL: url,
                     chapters: chapters,
@@ -525,7 +541,7 @@ private struct DocumentWorkspace: View {
                             normalizedOffset: offset
                         )
                     },
-                    onPageRegionCaptured: { jpegData, pageIndex in
+                    onPageRegionCaptured: { jpegData, pageIndex, anchor in
                         isRegionCaptureEnabled = false
                         NotificationCenter.default.post(
                             name: .satoriPageRegionCaptured,
@@ -534,7 +550,8 @@ private struct DocumentWorkspace: View {
                                 "documentID": document.id,
                                 "url": url,
                                 "pageIndex": pageIndex,
-                                "jpegData": jpegData
+                                "jpegData": jpegData,
+                                "anchor": anchor
                             ]
                         )
                     },
@@ -560,10 +577,8 @@ private struct DocumentWorkspace: View {
                         currentChapterID: currentChapter?.id,
                         pageCount: pageCount,
                         printedPageForPage: { pageIndex in printedPage(for: pageIndex) },
-                        onJump: { targetPage in
-                            currentPageIndex = min(max(targetPage, 0), pageCount - 1)
-                            pageInput = ""
-                            showsTOC = false
+                        onJump: { chapter in
+                            jump(to: chapter)
                         },
                         onClose: { showsTOC = false }
                     )
@@ -575,6 +590,27 @@ private struct DocumentWorkspace: View {
         }
         .frame(minWidth: 620)
         .frame(maxWidth: .infinity)
+    }
+
+    private func jump(to chapter: BookChapter) {
+        let targetPage = min(max(chapter.pageIndex, 0), pageCount - 1)
+        let targetOffset = min(max(chapter.normalizedOffset ?? 0, 0), 1)
+        currentPageIndex = targetPage
+        currentOffset = targetOffset
+        pageInput = ""
+        NotificationCenter.default.post(
+            name: .satoriReaderJumpRequested,
+            object: nil,
+            userInfo: [
+                "documentID": document.id,
+                "url": url,
+                "position": ReadingPosition(
+                    pageIndex: targetPage,
+                    normalizedPageOffset: targetOffset
+                )
+            ]
+        )
+        showsTOC = false
     }
 
     /// 窄窗口面板高度分隔条：横向可拖，实时调整下面板高度（200-520pt）。
@@ -1004,7 +1040,7 @@ private struct TOCDrawer: View {
     let currentChapterID: Int?
     let pageCount: Int
     let printedPageForPage: (Int) -> Int?
-    let onJump: (Int) -> Void
+    let onJump: (BookChapter) -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -1065,7 +1101,7 @@ private struct TOCDrawer: View {
     private func row(_ chapter: BookChapter) -> some View {
         let isCurrent = chapter.id == currentChapterID
         return Button {
-            onJump(chapter.pageIndex)
+            onJump(chapter)
         } label: {
             HStack(spacing: 7) {
                 if isCurrent {
@@ -1151,17 +1187,30 @@ private enum NativePrintedPageExtractor {
 /// printed-to-PDF page offset; this keeps opening a scanned book local and
 /// bounded instead of sending its whole book to Qwen just to build navigation.
 private enum ScannedOutlineExtractor {
+    private struct RecognizedLine: Sendable {
+        let text: String
+        let normalizedOffset: Double
+    }
+
+    private struct RecognizedPage: Sendable {
+        let pageIndex: Int
+        let text: String
+        let lines: [RecognizedLine]
+    }
+
     private struct CachedEntry: Codable {
         let title: String
         let pageIndex: Int
         let depth: Int
         let printedPage: Int
+        let normalizedOffset: Double?
 
-        init(title: String, pageIndex: Int, depth: Int = 0, printedPage: Int) {
+        init(title: String, pageIndex: Int, depth: Int = 0, printedPage: Int, normalizedOffset: Double? = nil) {
             self.title = title
             self.pageIndex = pageIndex
             self.depth = depth
             self.printedPage = printedPage
+            self.normalizedOffset = normalizedOffset
         }
 
         init(from decoder: Decoder) throws {
@@ -1170,17 +1219,18 @@ private enum ScannedOutlineExtractor {
             pageIndex = try container.decode(Int.self, forKey: .pageIndex)
             depth = try container.decodeIfPresent(Int.self, forKey: .depth) ?? 0
             printedPage = try container.decodeIfPresent(Int.self, forKey: .printedPage) ?? 0
+            normalizedOffset = try container.decodeIfPresent(Double.self, forKey: .normalizedOffset)
         }
 
         private enum CodingKeys: String, CodingKey {
-            case title, pageIndex, depth, printedPage
+            case title, pageIndex, depth, printedPage, normalizedOffset
         }
     }
 
-    static func entries(url: URL) async -> [(title: String, pageIndex: Int, depth: Int, printedPage: Int)] {
+    static func entries(url: URL) async -> [(title: String, pageIndex: Int, depth: Int, printedPage: Int, normalizedOffset: Double?)] {
         let cacheKey = cacheKey(for: url)
         if let cached = cachedEntries(for: cacheKey) {
-            return cached.map { ($0.title, $0.pageIndex, $0.depth, $0.printedPage) }
+            return cached.map { ($0.title, $0.pageIndex, $0.depth, $0.printedPage, $0.normalizedOffset) }
         }
 
         guard let document = PDFDocument(url: url), document.pageCount > 0 else { return [] }
@@ -1221,6 +1271,7 @@ private enum ScannedOutlineExtractor {
         // Printed page 25 on PDF page 30 means the body offset is +5. Apply
         // that stable offset to every chapter number recovered from the TOC.
         let offset = firstChapterPage - (first.printedPage - 1)
+        let bodyPagesByIndex = Dictionary(uniqueKeysWithValues: bodyPages.map { ($0.pageIndex, $0) })
         let mapped = parsed.compactMap { entry -> CachedEntry? in
             let pageIndex = entry.printedPage - 1 + offset
             guard (0..<document.pageCount).contains(pageIndex) else { return nil }
@@ -1230,16 +1281,20 @@ private enum ScannedOutlineExtractor {
             } else {
                 title = "第\(entry.chapterNumber)章 \(entry.title)"
             }
+            let titleOffset = bodyPagesByIndex[pageIndex].flatMap {
+                normalizedOffset(for: title, in: $0.lines)
+            }
             return CachedEntry(
                 title: title,
                 pageIndex: pageIndex,
                 depth: entry.depth,
-                printedPage: entry.printedPage
+                printedPage: entry.printedPage,
+                normalizedOffset: titleOffset
             )
         }
         guard !mapped.isEmpty else { return [] }
         save(mapped, for: cacheKey)
-        return mapped.map { ($0.title, $0.pageIndex, $0.depth, $0.printedPage) }
+        return mapped.map { ($0.title, $0.pageIndex, $0.depth, $0.printedPage, $0.normalizedOffset) }
     }
 
     /// Vision OCR is CPU-heavy but each page is independent. Keep a small
@@ -1248,13 +1303,13 @@ private enum ScannedOutlineExtractor {
     private static func recognizePages(
         document: PDFDocument,
         indices: [Int]
-    ) async -> [(pageIndex: Int, text: String)] {
+    ) async -> [RecognizedPage] {
         guard !indices.isEmpty else { return [] }
         let documentBox = ScannedPDFDocumentBox(document: document)
-        var results: [(pageIndex: Int, text: String)] = []
+        var results: [RecognizedPage] = []
         results.reserveCapacity(indices.count)
 
-        await withTaskGroup(of: (Int, String?).self) { group in
+        await withTaskGroup(of: RecognizedPage?.self) { group in
             var iterator = indices.makeIterator()
             let concurrency = min(4, indices.count)
 
@@ -1262,11 +1317,11 @@ private enum ScannedOutlineExtractor {
                 guard let index = iterator.next() else { return }
                 group.addTask {
                     guard let page = documentBox.document.page(at: index),
-                          let text = recognize(page: page),
-                          !text.isEmpty else {
-                        return (index, nil)
+                          let recognized = recognize(page: page),
+                          !recognized.text.isEmpty else {
+                        return nil
                     }
-                    return (index, text)
+                    return RecognizedPage(pageIndex: index, text: recognized.text, lines: recognized.lines)
                 }
             }
 
@@ -1274,8 +1329,8 @@ private enum ScannedOutlineExtractor {
                 addNext()
             }
             while let result = await group.next() {
-                if let text = result.1 {
-                    results.append((result.0, text))
+                if let result {
+                    results.append(result)
                 }
                 addNext()
             }
@@ -1283,7 +1338,7 @@ private enum ScannedOutlineExtractor {
         return results.sorted { $0.pageIndex < $1.pageIndex }
     }
 
-    private static func recognize(page: PDFPage) -> String? {
+    private static func recognize(page: PDFPage) -> (text: String, lines: [RecognizedLine])? {
         let bounds = page.bounds(for: .mediaBox)
         guard bounds.width > 0, bounds.height > 0 else { return nil }
         let scale = 1_600 / max(bounds.width, bounds.height)
@@ -1307,12 +1362,12 @@ private enum ScannedOutlineExtractor {
         // A scanned table of contents is commonly two columns. Sorting the
         // whole page by y/x interleaves “第一章 …” with “第四章 …”; split
         // columns first, then rebuild reading lines inside each column.
-        func lines(in column: [VNRecognizedTextObservation]) -> [String] {
+        func lines(in column: [VNRecognizedTextObservation]) -> [RecognizedLine] {
             let sorted = column.sorted { lhs, rhs in
                 let dy = lhs.boundingBox.midY - rhs.boundingBox.midY
                 return abs(dy) > 0.02 ? dy > 0 : lhs.boundingBox.minX < rhs.boundingBox.minX
             }
-            var result: [String] = []
+            var result: [RecognizedLine] = []
             var currentY: CGFloat?
             for observation in sorted {
                 guard let candidate = observation.topCandidates(1).first?.string,
@@ -1321,11 +1376,16 @@ private enum ScannedOutlineExtractor {
                 // while fragments from one row stay within roughly 0.001.
                 // A wider threshold silently glues a chapter to its first
                 // section and makes the chapter disappear from the parser.
+                let normalizedOffset = min(max(1 - Double(observation.boundingBox.midY), 0), 1)
                 if let currentY, abs(observation.boundingBox.midY - currentY) <= 0.01,
                    !result.isEmpty {
-                    result[result.count - 1] += " " + candidate
+                    let previous = result[result.count - 1]
+                    result[result.count - 1] = RecognizedLine(
+                        text: previous.text + " " + candidate,
+                        normalizedOffset: (previous.normalizedOffset + normalizedOffset) / 2
+                    )
                 } else {
-                    result.append(candidate)
+                    result.append(RecognizedLine(text: candidate, normalizedOffset: normalizedOffset))
                     currentY = observation.boundingBox.midY
                 }
             }
@@ -1334,9 +1394,23 @@ private enum ScannedOutlineExtractor {
 
         let left = observations.filter { $0.boundingBox.midX < 0.5 }
         let right = observations.filter { $0.boundingBox.midX >= 0.5 }
-        let text = (lines(in: left) + lines(in: right)).joined(separator: "\n")
+        let recognizedLines = lines(in: left) + lines(in: right)
+        let text = recognizedLines.map(\.text).joined(separator: "\n")
         let normalized = ExtractedTextNormalizer.normalize(text)
-        return normalized.isEmpty ? nil : normalized
+        return normalized.isEmpty ? nil : (normalized, recognizedLines)
+    }
+
+    private static func normalizedOffset(for title: String, in lines: [RecognizedLine]) -> Double? {
+        let target = searchable(title)
+        guard target.count >= 2 else { return nil }
+        let candidates = lines.filter { line in
+            let value = searchable(line.text)
+            return value.contains(target) || (target.contains(value) && value.count >= 2)
+        }
+        return candidates.min { lhs, rhs in
+            abs(searchable(lhs.text).count - target.count)
+                < abs(searchable(rhs.text).count - target.count)
+        }?.normalizedOffset
     }
 
     private static func searchable(_ text: String) -> String {
@@ -1347,7 +1421,7 @@ private enum ScannedOutlineExtractor {
         let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
         let modification = values?.contentModificationDate?.timeIntervalSince1970 ?? -1
         let size = values?.fileSize ?? -1
-        return "satori.scanned-outline.v3|\(url.standardizedFileURL.path)|\(modification)|\(size)"
+        return "satori.scanned-outline.v4|\(url.standardizedFileURL.path)|\(modification)|\(size)"
     }
 
     private static func cachedEntries(for key: String) -> [CachedEntry]? {
@@ -1376,7 +1450,7 @@ private final class ScannedPDFDocumentBox: @unchecked Sendable {
 /// outline 的书本顺序顺延到下一个节点。PDF 没有 outline 时返回全 nil。
 private enum OutlinePageMatcher {
     /// PDF outline 的全部章节条目（按页码升序）；没有 outline 时返回空数组。
-    static func allEntries(url: URL) -> [(title: String, pageIndex: Int, depth: Int)] {
+    static func allEntries(url: URL) -> [(title: String, pageIndex: Int, depth: Int, normalizedOffset: Double?)] {
         extractOutlineEntries(url: url)
     }
 
@@ -1388,7 +1462,7 @@ private enum OutlinePageMatcher {
     /// 返回与输入目录标题一一对应的页索引；无匹配且无剩余 outline 节点时为 nil。
     static func linkedPageIndices(
         titles: [String],
-        entries: [(title: String, pageIndex: Int, depth: Int)]
+        entries: [(title: String, pageIndex: Int, depth: Int, normalizedOffset: Double?)]
     ) -> [Int?] {
         guard !entries.isEmpty else { return Array(repeating: nil, count: titles.count) }
         let normalized = entries.map { (normalize($0.title), $0.pageIndex) }
@@ -1415,28 +1489,77 @@ private enum OutlinePageMatcher {
         return result
     }
 
-    private static func extractOutlineEntries(url: URL) -> [(title: String, pageIndex: Int, depth: Int)] {
+    private static func extractOutlineEntries(url: URL) -> [(title: String, pageIndex: Int, depth: Int, normalizedOffset: Double?)] {
         guard let pdf = PDFDocument(url: url), let root = pdf.outlineRoot else { return [] }
-        var entries: [(title: String, pageIndex: Int, depth: Int)] = []
+        var entries: [(title: String, pageIndex: Int, depth: Int, normalizedOffset: Double?)] = []
         collectOutline(root, in: pdf, depth: 0, into: &entries)
-        return entries.sorted { $0.pageIndex < $1.pageIndex }
+        return entries.enumerated().sorted { lhs, rhs in
+            if lhs.element.pageIndex != rhs.element.pageIndex {
+                return lhs.element.pageIndex < rhs.element.pageIndex
+            }
+            switch (lhs.element.normalizedOffset, rhs.element.normalizedOffset) {
+            case let (left?, right?) where abs(left - right) > 0.001:
+                return left < right
+            default:
+                return lhs.offset < rhs.offset
+            }
+        }.map(\.element)
     }
 
     private static func collectOutline(
         _ node: PDFOutline,
         in pdf: PDFDocument,
         depth: Int,
-        into entries: inout [(title: String, pageIndex: Int, depth: Int)]
+        into entries: inout [(title: String, pageIndex: Int, depth: Int, normalizedOffset: Double?)]
     ) {
         let page = node.destination?.page ?? firstPage(of: node)
         if let page, let label = node.label, !label.isEmpty {
-            entries.append((label, pdf.index(for: page), depth))
+            let offset = normalizedOffset(for: label, page: page, in: pdf)
+                ?? destinationOffset(node.destination, page: page)
+            entries.append((label, pdf.index(for: page), depth, offset))
         }
         for index in 0..<node.numberOfChildren {
             if let child = node.child(at: index) {
                 collectOutline(child, in: pdf, depth: depth + 1, into: &entries)
             }
         }
+    }
+
+    /// PDF outline destinations often point to the top of a page rather than
+    /// the actual heading. Native text geometry is more useful for same-page
+    /// sections, so prefer the heading's text bounds and fall back to the
+    /// destination point when a publisher omitted the text layer match.
+    private static func normalizedOffset(for label: String, page: PDFPage, in pdf: PDFDocument) -> Double? {
+        let queries = [label, label.filter { !$0.isWhitespace }]
+            .filter { !$0.isEmpty }
+        var matches: [PDFSelection] = []
+        let pageIndex = pdf.index(for: page)
+        for query in queries {
+            for match in pdf.findString(query, withOptions: [.literal])
+                where match.pages.contains(where: { pdf.index(for: $0) == pageIndex }) {
+                let isDuplicate = matches.contains { existing in
+                    guard let existingPage = existing.pages.first,
+                          let matchPage = match.pages.first else { return false }
+                    return pdf.index(for: existingPage) == pdf.index(for: matchPage)
+                        && existing.bounds(for: existingPage).insetBy(dx: -0.5, dy: -0.5)
+                            .intersects(match.bounds(for: matchPage))
+                }
+                if !isDuplicate { matches.append(match) }
+            }
+        }
+        guard let selection = matches.first,
+              let matchPage = selection.pages.first else { return nil }
+        let pageBounds = page.bounds(for: .mediaBox)
+        let titleBounds = selection.bounds(for: matchPage)
+        guard pageBounds.height > 0 else { return nil }
+        return min(max((pageBounds.maxY - titleBounds.midY) / pageBounds.height, 0), 1)
+    }
+
+    private static func destinationOffset(_ destination: PDFDestination?, page: PDFPage) -> Double? {
+        guard let destination, destination.page === page else { return nil }
+        let bounds = page.bounds(for: .mediaBox)
+        guard bounds.height > 0 else { return nil }
+        return min(max((bounds.maxY - destination.point.y) / bounds.height, 0), 1)
     }
 
     /// 没有 destination 的父节点取第一个带页码的后代页，保证「第X章」等父标题可匹配。

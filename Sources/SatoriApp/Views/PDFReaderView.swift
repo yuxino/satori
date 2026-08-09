@@ -30,7 +30,7 @@ struct PDFReaderView: NSViewRepresentable {
     @Binding var currentPageIndex: Int
     @Binding var isRegionCaptureEnabled: Bool
     let onPositionChanged: (Int, Double) -> Void
-    var onPageRegionCaptured: ((Data, Int) -> Void)? = nil
+    var onPageRegionCaptured: ((Data, Int, ReadingRegionAnchor) -> Void)? = nil
     var onSearchResult: ((Int, Int) -> Void)? = nil
 
     /// Selection toolbar callbacks, in addition to the notification channel:
@@ -108,7 +108,7 @@ struct PDFReaderView: NSViewRepresentable {
         private weak var observedView: PDFView?
         private let currentPageIndex: Binding<Int>
         private let onPositionChanged: (Int, Double) -> Void
-        var onPageRegionCaptured: ((Data, Int) -> Void)?
+        var onPageRegionCaptured: ((Data, Int, ReadingRegionAnchor) -> Void)?
         var onSearchResult: ((Int, Int) -> Void)?
         var onAskSelection: ((String, Int) -> Void)?
         var onRunSelection: ((String, Int) -> Void)?
@@ -142,7 +142,7 @@ struct PDFReaderView: NSViewRepresentable {
         init(
             documentID: UUID,
             currentPageIndex: Binding<Int>,
-            onPageRegionCaptured: ((Data, Int) -> Void)?,
+            onPageRegionCaptured: ((Data, Int, ReadingRegionAnchor) -> Void)?,
             onPositionChanged: @escaping (Int, Double) -> Void,
             onAskSelection: ((String, Int) -> Void)?,
             onRunSelection: ((String, Int) -> Void)?,
@@ -331,7 +331,16 @@ struct PDFReaderView: NSViewRepresentable {
             guard let jpeg = Self.renderRegionJPEG(page: page, rect: pageRect) else { return }
             let pageIndex = document.index(for: page)
             guard pageIndex >= 0 else { return }
-            onPageRegionCaptured?(jpeg, pageIndex)
+            let bounds = page.bounds(for: .mediaBox).standardized
+            guard bounds.width > 0, bounds.height > 0 else { return }
+            let anchor = ReadingRegionAnchor(
+                pageIndex: pageIndex,
+                x: (clipped.minX - bounds.minX) / bounds.width,
+                y: (bounds.maxY - clipped.maxY) / bounds.height,
+                width: clipped.width / bounds.width,
+                height: clipped.height / bounds.height
+            )
+            onPageRegionCaptured?(jpeg, pageIndex, anchor)
         }
 
         private static func renderRegionJPEG(page: PDFPage, rect: NSRect) -> Data? {
@@ -738,6 +747,59 @@ struct PDFReaderView: NSViewRepresentable {
         @MainActor private func hideToolbar() {
             toolbar?.removeFromSuperview()
         }
+    }
+}
+
+/// Rebuilds a persisted region anchor from the original PDF. The crop itself is
+/// deliberately not saved in the learning archive; reopening a book can make
+/// the same visual evidence again from this small normalized rectangle.
+enum PDFRegionRenderer {
+    static func renderJPEG(from url: URL, anchor: ReadingRegionAnchor) -> Data? {
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess { url.stopAccessingSecurityScopedResource() }
+        }
+        guard let document = PDFDocument(url: url),
+              let page = document.page(at: anchor.pageIndex) else { return nil }
+        let bounds = page.bounds(for: .mediaBox).standardized
+        guard bounds.width > 0, bounds.height > 0 else { return nil }
+        let pageRect = NSRect(
+            x: bounds.minX + anchor.x * bounds.width,
+            y: bounds.maxY - (anchor.y + anchor.height) * bounds.height,
+            width: anchor.width * bounds.width,
+            height: anchor.height * bounds.height
+        )
+        return renderRegionJPEG(page: page, rect: pageRect)
+    }
+
+    static func renderRegionJPEG(page: PDFPage, rect: NSRect) -> Data? {
+        let bounds = page.bounds(for: .mediaBox).standardized
+        let clipped = rect.standardized.intersection(bounds)
+        guard clipped.width >= 1, clipped.height >= 1,
+              bounds.width > 0, bounds.height > 0 else { return nil }
+
+        let longestSide: CGFloat = 2_200
+        let scale = longestSide / max(bounds.width, bounds.height)
+        let fullSize = NSSize(width: bounds.width * scale, height: bounds.height * scale)
+        let image = page.thumbnail(of: fullSize, for: .mediaBox)
+        var proposedRect = NSRect(origin: .zero, size: image.size)
+        guard let fullImage = image.cgImage(
+            forProposedRect: &proposedRect,
+            context: nil,
+            hints: nil
+        ) else { return nil }
+
+        let imageBounds = CGRect(x: 0, y: 0, width: fullImage.width, height: fullImage.height)
+        let cropRect = CGRect(
+            x: (clipped.minX - bounds.minX) / bounds.width * imageBounds.width,
+            y: (bounds.maxY - clipped.maxY) / bounds.height * imageBounds.height,
+            width: clipped.width / bounds.width * imageBounds.width,
+            height: clipped.height / bounds.height * imageBounds.height
+        ).integral.intersection(imageBounds)
+        guard cropRect.width >= 2, cropRect.height >= 2,
+              let cropped = fullImage.cropping(to: cropRect) else { return nil }
+        let bitmap = NSBitmapImageRep(cgImage: cropped)
+        return bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.86])
     }
 }
 

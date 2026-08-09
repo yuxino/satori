@@ -366,6 +366,9 @@ public struct QwenLearningAssistant: LearningAssistant {
     /// 用户在 PDF 中主动选中的原文。它和问题分开传输，让模型明确
     /// 这段文字是本轮优先理解的对象，而不是普通聊天内容。
     private let selectionText: String?
+    /// 用户在扫描页上明确框选的视觉区域。它比整页 OCR 更优先；整页
+    /// 内容只负责提供上下文，不能让模型在同页多个代码对象之间猜测。
+    private let regionAnchor: ReadingRegionAnchor?
     /// 用户正在回答上一轮主动发起的轻量理解验证；让模型按“判断 + 关键修正”
     /// 处理，而不是把这句话误当成一个新的普通问题。
     private let isVerificationResponse: Bool
@@ -381,6 +384,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         modelID: String = QwenLearningAssistant.defaultModelID,
         pageContent: LearningPageContent?,
         selectionText: String? = nil,
+        regionAnchor: ReadingRegionAnchor? = nil,
         isVerificationResponse: Bool = false,
         additionalImagesJPEG: [Data] = [],
         conversationContext: [LearningConversationContext] = [],
@@ -394,6 +398,7 @@ public struct QwenLearningAssistant: LearningAssistant {
         self.modelID = normalizedModelID.isEmpty ? Self.defaultModelID : normalizedModelID
         self.pageContent = pageContent
         self.selectionText = selectionText?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.regionAnchor = regionAnchor
         self.isVerificationResponse = isVerificationResponse
         self.additionalImagesJPEG = additionalImagesJPEG
         self.conversationContext = conversationContext
@@ -625,6 +630,13 @@ public struct QwenLearningAssistant: LearningAssistant {
             content.append(.init(
                 type: "input_text",
                 text: "用户在 PDF 中选中的原文（这是本轮优先解释的对象）：\n「\(String(selectionText.prefix(4_000)))」\n\n选区文字层可能有 OCR 空格、错字、断行或缺失字符；如果同时提供页面图像，必须先核对图像。默认先用一句话说明它在解决什么，再用不超过 3 点解释关键术语或步骤；除非用户明确要求完整代码、逐行解释、深入推导或全部细节，不要逐句翻译或大段复述。用户要求“完整代码/完整公式”时，只有页面图像能逐项核对所有 token 才能整理完整版本；看不清或原文缺失时不要用常识补齐、不要写“大致如下”，应明确指出不确定的行和需要补看的页面。",
+                imageURL: nil
+            ))
+        }
+        if let regionAnchor {
+            content.append(.init(
+                type: "input_text",
+                text: "用户当前明确框选的是 PDF 第 \(regionAnchor.pageIndex + 1) 页的一块区域（下一张附图）。这是本轮优先理解对象；整页文字和页面图像只用于上下文，不能在同页多个代码/图表之间自行猜测。若区域只包含程序片段，先指出缺少的上下文或要求用户扩大框选，不要凭常识补成完整代码。",
                 imageURL: nil
             ))
         }
