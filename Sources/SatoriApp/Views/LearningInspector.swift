@@ -893,7 +893,7 @@ struct LearningInspector: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 15))
                 .foregroundStyle(SatoriTheme.accent)
-            Text("回答已留在第 \(pageIndex + 1) 页")
+            Text("回答已留在\(readingPageLabel(pageIndex))")
                 .font(.callout.weight(.medium))
             Spacer()
             Button("去看看") {
@@ -1272,20 +1272,20 @@ struct LearningInspector: View {
         }
     }
 
+    private func readingPageLabel(_ index: Int) -> String {
+        let pdfLabel = "第 \(index + 1) 页"
+        guard let printedPage = printedPageForPage(index) else { return pdfLabel }
+        return "\(pdfLabel) · 书内 \(printedPage)"
+    }
+
     /// 气泡里展示「这一轮问答依据什么」；nil 视为旧版本数据（按「当前页」理解）。
     private func contextAnchorLabel(_ scope: LearningContextScope?, pageIndex: Int) -> String? {
-        func pageLabel(_ index: Int) -> String {
-            let pdfLabel = "第 \(index + 1) 页"
-            guard let printedPage = printedPageForPage(index) else { return pdfLabel }
-            return "\(pdfLabel) · 书内 \(printedPage)"
-        }
-
         switch scope {
         case .some(.none):
             // 不带上下文：不显示页码锚点，避免误导。
             return nil
         case .some(.page), nil:
-            return pageLabel(pageIndex)
+            return readingPageLabel(pageIndex)
         case let .some(.pageRange(start, end)):
             let pdfLabel = start == end ? "第 \(start + 1) 页" : "第 \(start + 1)–\(end + 1) 页"
             let printedLabel: String? = {
@@ -1437,10 +1437,7 @@ struct LearningInspector: View {
 
     /// A page in the margin notes: "第 N 页" header followed by that page's turns.
     private func pageSectionView(_ section: PageSection) -> some View {
-        let pdfLabel = "第 \(section.pageIndex + 1) 页"
-        let pageLabel = printedPageForPage(section.pageIndex).map {
-            "\(pdfLabel) · 书内 \($0)"
-        } ?? pdfLabel
+        let pageLabel = readingPageLabel(section.pageIndex)
         return VStack(alignment: .leading, spacing: SatoriTheme.Spacing.sm) {
             Button {
                 navigateToPage(section.pageIndex)
@@ -2006,10 +2003,14 @@ struct LearningInspector: View {
             switch contextMode {
             case .automatic: scopeText = "按问题自动选择"
             case .none: scopeText = "不带上下文"
-            case .page: scopeText = "第 \(pageIndex + 1) 页"
+            case .page: scopeText = readingPageLabel(pageIndex)
             case .chapter:
                 scopeText = activeChapter?.title ?? "章节"
-            case .pageRange: scopeText = "第 \(rangeStart)–\(rangeEnd) 页"
+            case .pageRange:
+                scopeText = contextAnchorLabel(
+                    .pageRange(start: rangeStart - 1, end: rangeEnd - 1),
+                    pageIndex: pageIndex
+                ) ?? "第 \(rangeStart)–\(rangeEnd) 页"
             case .wholeDocument: scopeText = "整本书"
             }
         }
