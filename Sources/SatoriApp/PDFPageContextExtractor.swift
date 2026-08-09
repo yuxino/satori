@@ -204,7 +204,9 @@ enum PDFPageContextExtractor {
                       let page = document.page(at: pageIndex),
                       let jpeg = renderPageJPEG(page) else { continue }
                 visualPages.append(.init(pageIndex: pageIndex, jpegData: jpeg))
-                if visualPages.count == 2 { break }
+                if visualPages.count == ReadingSamplePlan.maximumVisualPages(forShortRangeCount: range.count) {
+                    break
+                }
             }
             if !visualPages.isEmpty {
                 return .textAndImages(

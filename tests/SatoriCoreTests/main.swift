@@ -288,6 +288,12 @@ struct SatoriCoreTests {
                 && ReadingSamplePlan.pageIndicesPrioritizingAnchor(in: 51...53, anchorPage: nil) == [51, 52, 53],
             "Expected scanned continuation images to prioritize the current and forward pages"
         )
+        precondition(
+            ReadingSamplePlan.maximumVisualPages(forShortRangeCount: 3) == 3
+                && ReadingSamplePlan.maximumVisualPages(forShortRangeCount: 4) == 2
+                && ReadingSamplePlan.maximumVisualPages(forShortRangeCount: 0) == 0,
+            "Expected three-page reconstruction bridges to preserve all three visual pages"
+        )
         // Real system.pdf outline: Chapter 6 starts at PDF page 183 (index 182)
         // and Chapter 7 starts at PDF page 229 (index 228).
         precondition(

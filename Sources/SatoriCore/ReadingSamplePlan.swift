@@ -26,6 +26,15 @@ public enum ReadingSamplePlan {
         return prioritized
     }
 
+    /// A three-page reconstruction request usually represents one object split
+    /// across a page break (for example, a scanned program or a formula). Keep
+    /// all three original images in that small bridge; longer bridges stay at
+    /// two images so ordinary reading does not become image-heavy.
+    public static func maximumVisualPages(forShortRangeCount count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        return count <= 3 ? 3 : 2
+    }
+
     /// Chooses a very small visual sample for a scanned chapter route.
     /// The text route already carries many bounded samples; images should only
     /// establish the chapter's visual grammar without turning the first answer
