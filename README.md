@@ -12,8 +12,13 @@
 
 A macOS app for reading PDF textbooks. Open a book, read full-screen, and when a paragraph, figure, or code block doesn't make sense — select it and get an explanation of that part.
 
-- Works with text-native and scanned PDFs.
-- Reading position and past Q&A are saved on your Mac.
+## Features
+
+- **Ask about anything on the page** — select a paragraph, a figure, or a code block; works on both text-native and scanned PDFs.
+- **A reader, not a workbench** — continuous scrolling, pinch to zoom, page thumbnails, and jump to any page by number.
+- **Your books and history** — switch between books anytime; reading position and past Q&A are saved on your Mac.
+
+## Getting started
 
 Requires macOS 14+.
 
@@ -21,6 +26,8 @@ Requires macOS 14+.
 npm install
 npx tauri dev
 ```
+
+## Privacy
 
 Books and history stay on your Mac. Explanations are generated on demand by Alibaba Cloud Model Studio (Qwen) from the current page image.
 
