@@ -40,10 +40,15 @@ export interface HistoryTurn {
   content: string;
 }
 
+export interface EvidencePage {
+  page: number;
+  jpeg: string;
+}
+
 export interface AskRequest {
   model: string;
   question: string;
-  image_base64: string | null;
+  evidence: EvidencePage[];
   history: HistoryTurn[];
 }
 

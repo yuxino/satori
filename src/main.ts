@@ -250,6 +250,43 @@ async function askSelectionQuestion(selection: { text: string; page: number }) {
   await askQuestion(question, selection.text);
 }
 
+/// 决定一次提问带哪些页的图作为证据。规则基于自然语言触发，
+/// 读者不需要学会说「跨页」——表达「还是不懂/接上文/下一页」即可。
+function evidencePages(question: string): number[] {
+  if (!currentDoc) return [currentPage];
+  const last = currentDoc.pageCount;
+  const q = question;
+  const pages = new Set<number>();
+  pages.add(currentPage);
+
+  const wantsBefore =
+    /接上文|前面|上一页|前文|刚才|上文|衔接|有什么关系|连起来/.test(q);
+  const wantsAfter =
+    /下一页|然后呢|继续|往下|后面|接着讲|讲完/.test(q);
+  const confused =
+    /还是不懂|换个说法|更简单|看不懂|没懂|不明白|换角度|例子/.test(q);
+
+  if (wantsBefore && currentPage > 1) pages.add(currentPage - 1);
+  if (wantsAfter && currentPage < last) pages.add(currentPage + 1);
+  if (confused && !wantsBefore && !wantsAfter) {
+    if (currentPage > 1) pages.add(currentPage - 1);
+    if (currentPage < last) pages.add(currentPage + 1);
+  }
+
+  return [...pages].sort((a, b) => a - b);
+}
+
+/// 把若干页渲染成 JPEG 数组，供 Rust 端作为多图证据。
+async function exportEvidence(pages: number[]): Promise<{ page: number; jpeg: string }[]> {
+  const out: { page: number; jpeg: string }[] = [];
+  for (const page of pages) {
+    if (!currentDoc) continue;
+    const jpeg = await currentDoc.exportPageAsJPEG(page);
+    out.push({ page, jpeg });
+  }
+  return out;
+}
+
 // ---- 核心提问闭环 ----
 async function askQuestion(question: string, selectionText: string | null) {
   if (!currentDoc || !apiKey) {
@@ -258,8 +295,9 @@ async function askQuestion(question: string, selectionText: string | null) {
   }
   if (streaming) return;
 
-  // 页面图像即证据。
-  const image = await currentDoc.exportPageAsJPEG(currentPage);
+  // 页面图像即证据；跨页内容按自然语言触发自动扩页。
+  const pages = evidencePages(question);
+  const evidence = await exportEvidence(pages);
   history.push({ role: "user", content: question });
   lastSelection = selectionText ? { text: selectionText, page: currentPage } : null;
 
@@ -276,7 +314,7 @@ async function askQuestion(question: string, selectionText: string | null) {
       {
         model: store.settings.model_id,
         question,
-        image_base64: image,
+        evidence,
         history: history.slice(-6, -1),
       },
       (chunk) => {
@@ -364,7 +402,8 @@ function appendActions(answerNode: HTMLDivElement, lastQuestion: string) {
 
 async function followUp(text: string) {
   if (!currentDoc || !apiKey || streaming) return;
-  const image = await currentDoc.exportPageAsJPEG(currentPage);
+  const pages = evidencePages(text);
+  const evidence = await exportEvidence(pages);
   history.push({ role: "user", content: text });
 
   // 在面板里追加一轮
@@ -387,7 +426,7 @@ async function followUp(text: string) {
       {
         model: store.settings.model_id,
         question: text,
-        image_base64: image,
+        evidence,
         history: history.slice(-6, -1),
       },
       (chunk) => {
