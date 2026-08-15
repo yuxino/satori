@@ -876,6 +876,8 @@ const THUMB_WIDTH = 34;
 let thumbElements = new Map<number, HTMLElement>();
 let thumbBarEl: HTMLElement | null = null;
 let thumbHighlightEl: HTMLElement | null = null;
+/// 拖动缩略图条后抑制误点击的时间戳。
+let suppressThumbClickUntil = 0;
 
 function renderBottomBar() {
   bottomBar.innerHTML = "";
@@ -960,7 +962,38 @@ function renderBottomBar() {
   const thumbs = document.createElement("div");
   thumbs.className = "thumbs";
   thumbBarEl = thumbs;
+
+  // 按住拖动横滚 vs 点击缩略图跳页：拖动超过阈值后抑制 click。
+  let thumbDrag = false;
+  let thumbMoved = false;
+  let thumbDragStartX = 0;
+  let thumbDragStartScroll = 0;
+
+  thumbs.addEventListener("mousedown", (e) => {
+    thumbDrag = true;
+    thumbMoved = false;
+    thumbDragStartX = e.clientX;
+    thumbDragStartScroll = thumbs.scrollLeft;
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!thumbDrag) return;
+    const dx = e.clientX - thumbDragStartX;
+    if (Math.abs(dx) > 4) thumbMoved = true;
+    thumbs.scrollLeft = thumbDragStartScroll - dx;
+  });
+  window.addEventListener("mouseup", () => {
+    thumbDrag = false;
+    // 拖动后短暂抑制 click，避免误跳页。
+    if (thumbMoved) {
+      suppressThumbClickUntil = performance.now() + 300;
+    }
+  });
+
   thumbs.addEventListener("click", (e) => {
+    if (performance.now() < suppressThumbClickUntil) {
+      e.stopPropagation();
+      return;
+    }
     const t = (e.target as HTMLElement).closest(".thumb") as HTMLElement | null;
     if (!t || !reader) return;
     const page = Number(t.dataset.page);
@@ -971,6 +1004,16 @@ function renderBottomBar() {
   });
   // 缩略图条展开（悬停状态条）时校正高亮位置。
   thumbs.addEventListener("mouseenter", () => scheduleBottomBarUpdate());
+
+  // 鼠标滚轮在缩略图条上转为横向滚动（默认纵向滚轮在横向容器上无效）。
+  thumbs.addEventListener(
+    "wheel",
+    (e) => {
+      e.preventDefault();
+      thumbs.scrollLeft += e.deltaY + e.deltaX;
+    },
+    { passive: false },
+  );
 
   // 高亮框：绝对定位在当前缩略图上，滚动时只移动它，不重建任何 DOM。
   const highlight = document.createElement("div");
