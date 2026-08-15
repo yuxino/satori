@@ -32,6 +32,13 @@ export class PDFDocument {
     return this.doc.numPages;
   }
 
+  /// 页面在 scale=1 下的逻辑尺寸（PDF 点）。用于自适应缩放计算。
+  async pageSize(pageNumber: number): Promise<{ width: number; height: number }> {
+    const page = await this.doc.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 1 });
+    return { width: viewport.width, height: viewport.height };
+  }
+
   async renderPageToCanvas(pageNumber: number, scale: number): Promise<HTMLCanvasElement> {
     const page = await this.doc.getPage(pageNumber);
     const viewport = page.getViewport({ scale });

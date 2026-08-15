@@ -33,7 +33,10 @@ let apiKey: string | null = null;
 let currentBook: BookRecord | null = null;
 let currentDoc: PDFDocument | null = null;
 let currentPage = 1;
-let renderScale = 1.4;
+/// 用户缩放倍数：1 = 自适应铺满，可 ⌘+/⌘- 调整。
+let zoomFactor = 1;
+/// 页边距（CSS px），页面铺满时四周保留的小留白。
+const PAGE_MARGIN = 24;
 let history: HistoryTurn[] = [];
 let lastSelection: { text: string; page: number } | null = null;
 let streaming = false;
@@ -53,6 +56,13 @@ async function boot() {
     await openBook(book);
   }
   setupReaderSurface();
+
+  // 窗口尺寸变化时重新自适应铺满。
+  let resizeTimer: number | undefined;
+  window.addEventListener("resize", () => {
+    window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(() => void renderPage(), 150);
+  });
 }
 
 // ---- 空书架 ----
@@ -108,11 +118,26 @@ async function openBook(book: BookRecord) {
   }
 }
 
-// ---- 渲染当前页 ----
+// ---- 渲染当前页（自适应铺满窗口） ----
 async function renderPage() {
   if (!currentDoc) return;
   readerSurface.innerHTML = "";
-  const canvas = await currentDoc.renderPageToCanvas(currentPage, renderScale);
+
+  const surface = readerSurface.getBoundingClientRect();
+  const availW = Math.max(surface.width - PAGE_MARGIN * 2, 200);
+  const availH = Math.max(surface.height - PAGE_MARGIN * 2, 200);
+
+  // 页面在 scale=1 下的逻辑尺寸。
+  const { width, height } = await currentDoc.pageSize(currentPage);
+
+  // 基础缩放：让整页刚好铺满可用区域（保持比例）。
+  const fitScale = Math.min(availW / width, availH / height);
+  // 应用用户缩放倍数。
+  const scale = fitScale * zoomFactor;
+
+  const canvas = await currentDoc.renderPageToCanvas(currentPage, scale);
+  canvas.style.width = `${width * scale}px`;
+  canvas.style.height = `${height * scale}px`;
   readerSurface.appendChild(canvas);
   updateReadingBar();
 }
@@ -509,6 +534,25 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.metaKey && e.key === ",") {
     openSettings();
+  }
+  // 缩放：⌘+/⌘- 调整，⌘0 回到自适应。
+  if (e.metaKey && (e.key === "=" || e.key === "+")) {
+    e.preventDefault();
+    zoomFactor = Math.min(3, zoomFactor + 0.15);
+    void renderPage();
+    return;
+  }
+  if (e.metaKey && e.key === "-") {
+    e.preventDefault();
+    zoomFactor = Math.max(0.5, zoomFactor - 0.15);
+    void renderPage();
+    return;
+  }
+  if (e.metaKey && e.key === "0") {
+    e.preventDefault();
+    zoomFactor = 1;
+    void renderPage();
+    return;
   }
   if (!e.metaKey && (e.key === "ArrowRight" || e.key === "PageDown")) {
     if (currentDoc && currentPage < currentDoc.pageCount) {
