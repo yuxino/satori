@@ -1090,11 +1090,14 @@ function toggleBookMenu() {
   }, { once: true });
 }
 
-/// 滚动/翻页后：只更新页码 + 移动高亮框 + 让当前缩略图可见。不重建 DOM。
+/// 滚动/翻页后：更新页码、增量渲染当前页附近缩略图、移动高亮框。
 function scheduleBottomBarUpdate() {
   if (!currentDoc || !thumbBarEl) return;
   const pageNum = bottomBar.querySelector(".page-num") as HTMLElement | null;
   if (pageNum) pageNum.textContent = `${currentPage} / ${currentDoc.pageCount}`;
+
+  // 增量补齐当前页附近的缩略图（打开书后滚动到新位置也能看到）。
+  void ensureThumbnailsAround(currentPage);
 
   // 缩略图条收起时（height 0）不做定位，展开时由 hover 触发一次校正。
   const barRect = thumbBarEl.getBoundingClientRect();
@@ -1122,19 +1125,49 @@ function scheduleBottomBarUpdate() {
   }
 }
 
-/// 一次性渲染当前页附近的缩略图并缓存。滚动时不调用。
-/// 串行渲染并让出事件循环，避免开大书时并发渲染卡住。
+/// 确保当前页前后 THUMB_COUNT 页的缩略图已渲染（增量补缺，不重建已有）。
+/// 打开书和滚动/翻页都会调用，缩略图条始终跟随阅读位置。
 async function renderAllThumbnails() {
   if (!currentDoc || !thumbBarEl) return;
-  const start = Math.max(1, currentPage - THUMB_COUNT);
-  const end = Math.min(currentDoc.pageCount, currentPage + THUMB_COUNT);
-
-  for (let p = start; p <= end; p++) {
-    await renderThumb(p);
-    // 让出事件循环，避免阻塞打开书的主流程。
-    await new Promise((r) => setTimeout(r, 0));
-  }
+  await ensureThumbnailsAround(currentPage);
   scheduleBottomBarUpdate();
+}
+
+let thumbnailBusy = false;
+let thumbnailQueued = false;
+
+async function ensureThumbnailsAround(page: number) {
+  if (!currentDoc || !thumbBarEl) return;
+  const start = Math.max(1, page - THUMB_COUNT);
+  const end = Math.min(currentDoc.pageCount, page + THUMB_COUNT);
+
+  // 找缺失的页。
+  const missing: number[] = [];
+  for (let p = start; p <= end; p++) {
+    if (!thumbElements.has(p)) missing.push(p);
+  }
+  if (missing.length === 0) return;
+
+  if (thumbnailBusy) {
+    thumbnailQueued = true;
+    return;
+  }
+  thumbnailBusy = true;
+  try {
+    // 批量渲染，但分批让出事件循环，避免开大书卡住。
+    const BATCH = 4;
+    for (let i = 0; i < missing.length; i += BATCH) {
+      const batch = missing.slice(i, i + BATCH);
+      await Promise.all(batch.map((p) => renderThumb(p)));
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  } finally {
+    thumbnailBusy = false;
+    if (thumbnailQueued) {
+      thumbnailQueued = false;
+      void ensureThumbnailsAround(currentPage);
+    }
+  }
 }
 
 async function renderThumb(page: number): Promise<void> {
