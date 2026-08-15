@@ -763,8 +763,16 @@ async function applyZoom() {
 const THUMB_COUNT = 13; // 当前页前后各渲染多少缩略图
 const THUMB_WIDTH = 34;
 
+/// 缩略图缓存：page -> 已渲染的 DOM 元素（打开书时一次性渲染，滚动不重建）。
+let thumbElements = new Map<number, HTMLElement>();
+let thumbBarEl: HTMLElement | null = null;
+let thumbHighlightEl: HTMLElement | null = null;
+
 function renderBottomBar() {
   bottomBar.innerHTML = "";
+  thumbElements = new Map();
+  thumbBarEl = null;
+  thumbHighlightEl = null;
 
   // 上一页 / 下一页
   const prev = document.createElement("button");
@@ -794,6 +802,7 @@ function renderBottomBar() {
 
   const thumbs = document.createElement("div");
   thumbs.className = "thumbs";
+  thumbBarEl = thumbs;
   thumbs.addEventListener("click", (e) => {
     const t = (e.target as HTMLElement).closest(".thumb") as HTMLElement | null;
     if (!t || !reader) return;
@@ -803,6 +812,12 @@ function renderBottomBar() {
       void reader.onScroll();
     }
   });
+
+  // 高亮框：绝对定位在当前缩略图上，滚动时只移动它，不重建任何 DOM。
+  const highlight = document.createElement("div");
+  highlight.className = "thumb-highlight";
+  thumbs.appendChild(highlight);
+  thumbHighlightEl = highlight;
 
   // 缩放控制
   const zoomGroup = document.createElement("div");
@@ -832,7 +847,9 @@ function renderBottomBar() {
 
   bottomBar.append(prev, pageNum, thumbs, zoomGroup);
   updateBottomBarZoom();
-  void updateThumbnails();
+
+  // 打开书时一次性渲染全部缩略图（缓存），滚动时只更新高亮。
+  void renderAllThumbnails();
 }
 
 function updateBottomBarZoom() {
@@ -840,47 +857,56 @@ function updateBottomBarZoom() {
   if (pct) pct.textContent = `${Math.round(zoomFactor * 100)}%`;
 }
 
-/// 缩略图防抖更新：滚动/翻页后重建当前页附近的缩略图。
-let thumbTimer: number | undefined;
+/// 滚动/翻页后：只更新页码 + 移动高亮框 + 让当前缩略图可见。不重建 DOM。
 function scheduleBottomBarUpdate() {
-  window.clearTimeout(thumbTimer);
-  thumbTimer = window.setTimeout(() => void updateThumbnails(), 120);
-}
-
-async function updateThumbnails() {
-  if (!currentDoc) return;
-  const thumbs = bottomBar.querySelector(".thumbs");
-  if (!thumbs) return;
-
+  if (!currentDoc || !thumbBarEl) return;
   const pageNum = bottomBar.querySelector(".page-num") as HTMLElement | null;
   if (pageNum) pageNum.textContent = `${currentPage} / ${currentDoc.pageCount}`;
 
-  // 清理旧的缩略图。
-  thumbs.innerHTML = "";
+  const active = thumbElements.get(currentPage);
+  if (active && thumbBarEl) {
+    const barRect = thumbBarEl.getBoundingClientRect();
+    const thumbRect = active.getBoundingClientRect();
+    // 高亮框跟随当前缩略图。
+    if (thumbHighlightEl) {
+      thumbHighlightEl.style.left = `${thumbRect.left - barRect.left}px`;
+      thumbHighlightEl.style.top = `${thumbRect.top - barRect.top}px`;
+      thumbHighlightEl.style.width = `${thumbRect.width}px`;
+      thumbHighlightEl.style.height = `${thumbRect.height}px`;
+      thumbHighlightEl.style.display = "block";
+    }
+    // 当前缩略图滚入视野（只横向滚动缩略图条本身，不碰页面滚动）。
+    const barW = barRect.width;
+    const thumbCenter = thumbRect.left - barRect.left + thumbRect.width / 2;
+    const target = thumbBarEl.scrollLeft + (thumbCenter - barW / 2);
+    thumbBarEl.scrollTo({ left: target, behavior: "smooth" });
+  }
+}
+
+/// 一次性渲染当前页附近的缩略图并缓存。滚动时不调用。
+async function renderAllThumbnails() {
+  if (!currentDoc || !thumbBarEl) return;
   const start = Math.max(1, currentPage - THUMB_COUNT);
   const end = Math.min(currentDoc.pageCount, currentPage + THUMB_COUNT);
 
   const jobs: Promise<void>[] = [];
   for (let p = start; p <= end; p++) {
-    jobs.push(renderThumb(thumbs as HTMLElement, p));
+    jobs.push(renderThumb(p));
   }
   await Promise.all(jobs);
-
-  // 高亮当前页并滚动到可见位置。
-  const active = thumbs.querySelector(`.thumb[data-page="${currentPage}"]`) as HTMLElement | null;
-  if (active) {
-    active.classList.add("active");
-    active.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }
+  scheduleBottomBarUpdate();
 }
 
-async function renderThumb(container: HTMLElement, page: number): Promise<void> {
-  if (!currentDoc) return;
+async function renderThumb(page: number): Promise<void> {
+  if (!currentDoc || !thumbBarEl) return;
+  if (thumbElements.has(page)) return;
+
   const thumb = document.createElement("div");
   thumb.className = "thumb";
   thumb.dataset.page = String(page);
   thumb.title = `第 ${page} 页`;
-  container.appendChild(thumb);
+  thumbBarEl.appendChild(thumb);
+  thumbElements.set(page, thumb);
 
   try {
     const size = await currentDoc.pageSize(page);

@@ -516,6 +516,17 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--line) transparent;
   height: 100%;
+  position: relative;
+}
+
+/* 高亮框：绝对定位，滚动时由 JS 移动位置，不重建 DOM。 */
+#bottom-bar .thumb-highlight {
+  position: absolute;
+  display: none;
+  border: 2px solid var(--lavender);
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 1;
 }
 
 #bottom-bar .thumb {
@@ -526,7 +537,7 @@ body {
   background: white;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
   opacity: 0.75;
-  transition: opacity 0.15s, border-color 0.15s;
+  transition: opacity 0.15s;
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -534,11 +545,6 @@ body {
 }
 
 #bottom-bar .thumb:hover {
-  opacity: 1;
-}
-
-#bottom-bar .thumb.active {
-  border-color: var(--lavender);
   opacity: 1;
 }
 
