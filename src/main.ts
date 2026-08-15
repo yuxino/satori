@@ -1236,11 +1236,11 @@ async function ensureThumbnailsAround(page: number, fromScroll = false) {
   }
   thumbnailBusy = true;
   try {
-    const BATCH = 4;
+    // 批量渲染；骨架已同步就位，这里只负责尽快填充图片。
+    const BATCH = 6;
     for (let i = 0; i < missing.length; i += BATCH) {
       const batch = missing.slice(i, i + BATCH);
       await Promise.all(batch.map((p) => renderThumb(p)));
-      await new Promise((r) => setTimeout(r, 0));
     }
   } finally {
     thumbnailBusy = false;
@@ -1256,22 +1256,27 @@ async function renderThumb(page: number): Promise<void> {
   if (thumbElements.has(page)) return;
 
   const thumb = document.createElement("div");
-  thumb.className = "thumb";
+  thumb.className = "thumb placeholder";
   thumb.dataset.page = String(page);
   thumb.title = `第 ${page} 页`;
   // 绝对定位：第 page 页的横坐标 = (page-1) * THUMB_STEP。
   thumb.style.left = `${(page - 1) * THUMB_STEP}px`;
+
+  // 先拿到尺寸放占位（pageSize 有缓存，很快），再异步渲染 canvas。
+  // 这样展开瞬间所有缩略图位置就位（骨架），图片随后渐进填充——秒出排布。
+  const size = await currentDoc.pageSize(page);
+  const h = Math.round((size.height / size.width) * THUMB_WIDTH);
+  thumb.style.width = `${THUMB_WIDTH}px`;
+  thumb.style.height = `${h + 4}px`;
   thumbBarEl.appendChild(thumb);
   thumbElements.set(page, thumb);
 
   try {
-    const size = await currentDoc.pageSize(page);
-    const h = Math.round((size.height / size.width) * THUMB_WIDTH);
     const canvas = await currentDoc.renderPageToCanvas(page, THUMB_WIDTH / size.width);
     canvas.style.width = `${THUMB_WIDTH}px`;
     canvas.style.height = `${h}px`;
     thumb.appendChild(canvas);
-    thumb.style.height = `${h + 4}px`;
+    thumb.classList.remove("placeholder");
   } catch {
     // 缩略图渲染失败不阻塞阅读。
   }

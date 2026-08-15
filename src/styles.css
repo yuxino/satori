@@ -714,6 +714,12 @@ body {
   overflow: hidden;
 }
 
+/* 缩略图未渲染完成时的占位（骨架），保证展开瞬间就有排布。 */
+#bottom-bar .thumb.placeholder {
+  background: color-mix(in srgb, var(--line) 40%, transparent);
+  box-shadow: none;
+}
+
 #bottom-bar .thumb:hover {
   opacity: 1;
 }
