@@ -98,6 +98,22 @@ body {
 
 /* ---- 阅读栏：悬停出现，自动淡出 ---- */
 
+/* ---- 加载提示 ---- */
+
+#loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 70;
+  background: var(--paper-deep);
+  color: var(--ink-soft);
+  font-size: 14px;
+  font-family: var(--sans);
+  letter-spacing: 1px;
+}
+
 /* ---- 空书架 ---- */
 
 #empty-state {
@@ -141,14 +157,16 @@ body {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 0;
+  /* 坐在底部工具栏上方，提问时底栏仍可见可用。 */
+  bottom: 46px;
   z-index: 40;
   background: var(--sheet);
   border-top: 1px solid var(--line);
-  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.1);
+  border-radius: 12px 12px 0 0;
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.12);
   transform: translateY(105%);
   transition: transform 0.28s ease;
-  max-height: 55%;
+  max-height: calc(55% - 46px);
   display: flex;
   flex-direction: column;
 }
@@ -157,12 +175,41 @@ body {
   transform: translateY(0);
 }
 
+#teacher-sheet .sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding-top: 8px;
+  flex-shrink: 0;
+}
+
 #teacher-sheet .grip {
   height: 4px;
   width: 44px;
-  margin: 10px auto 4px;
   border-radius: 2px;
   background: var(--line);
+  cursor: pointer;
+}
+
+#teacher-sheet .grip:hover {
+  background: var(--ink-faint);
+}
+
+#teacher-sheet .sheet-close {
+  position: absolute;
+  right: 14px;
+  top: 10px;
+  border: none;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+
+#teacher-sheet .sheet-close:hover {
+  color: var(--lavender);
 }
 
 #teacher-sheet .qa-scroll {

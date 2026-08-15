@@ -141,6 +141,7 @@ async function pickAndOpenBook() {
 
 // ---- 打开书 ----
 async function openBook(book: BookRecord) {
+  showLoading("正在打开书…");
   try {
     const resolved = await resolveBookPath(book);
     currentBook = resolved;
@@ -163,6 +164,7 @@ async function openBook(book: BookRecord) {
     });
     await reader.open(currentPage);
     readerSurface.addEventListener("scroll", () => void reader?.onScroll(), { passive: true });
+    hideLoading();
     renderBottomBar();
     showReopenCue(resolved);
     buildTOC();
@@ -170,6 +172,7 @@ async function openBook(book: BookRecord) {
     store.books = store.books.map((b) => (b.id === resolved.id ? resolved : b));
     await persist();
   } catch (err) {
+    hideLoading();
     readerSurface.innerHTML = `
       <div id="empty-state">
         <div class="hint">打不开这本书：${String(err)}</div>
@@ -177,6 +180,19 @@ async function openBook(book: BookRecord) {
       </div>`;
     readerSurface.querySelector(".open-book")!.addEventListener("click", () => void pickAndOpenBook());
   }
+}
+
+// ---- 加载提示（打开大书时不白屏） ----
+function showLoading(message: string) {
+  hideLoading();
+  const overlay = document.createElement("div");
+  overlay.id = "loading-overlay";
+  overlay.textContent = message;
+  readerSurface.appendChild(overlay);
+}
+
+function hideLoading() {
+  readerSurface.querySelector("#loading-overlay")?.remove();
 }
 
 // ---- 渲染：连续滚动阅读器接管，这里只做滚动/缩放入口 ----
@@ -409,6 +425,21 @@ async function askQuestion(question: string, selectionText: string | null) {
 // ---- 老师面板 ----
 function openTeacherSheet(question: string) {
   teacherSheet.innerHTML = "";
+
+  // 头部：拖拽条 + 关闭按钮。
+  const header = document.createElement("div");
+  header.className = "sheet-header";
+  const grip = document.createElement("div");
+  grip.className = "grip";
+  grip.title = "收起";
+  grip.addEventListener("click", () => teacherSheet.classList.remove("open"));
+  const close = document.createElement("button");
+  close.className = "sheet-close";
+  close.textContent = "收起";
+  close.addEventListener("click", () => teacherSheet.classList.remove("open"));
+  header.append(grip, close);
+  teacherSheet.appendChild(header);
+
   const scroll = document.createElement("div");
   scroll.className = "qa-scroll";
 
