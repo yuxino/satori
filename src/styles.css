@@ -246,7 +246,89 @@ body {
   font-size: 16px;
   line-height: 1.8;
   color: var(--ink);
-  white-space: pre-wrap;
+}
+
+/* Markdown 排版 */
+#teacher-sheet .turn.answer p {
+  margin: 0 0 10px;
+}
+
+#teacher-sheet .turn.answer h1,
+#teacher-sheet .turn.answer h2,
+#teacher-sheet .turn.answer h3 {
+  font-family: var(--sans);
+  margin: 14px 0 8px;
+  line-height: 1.4;
+}
+
+#teacher-sheet .turn.answer h1 {
+  font-size: 18px;
+}
+
+#teacher-sheet .turn.answer h2 {
+  font-size: 16px;
+}
+
+#teacher-sheet .turn.answer h3 {
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+
+#teacher-sheet .turn.answer ul,
+#teacher-sheet .turn.answer ol {
+  margin: 0 0 10px;
+  padding-left: 22px;
+}
+
+#teacher-sheet .turn.answer li {
+  margin-bottom: 4px;
+}
+
+#teacher-sheet .turn.answer blockquote {
+  margin: 0 0 10px;
+  padding: 6px 14px;
+  border-left: 3px solid var(--lavender);
+  background: var(--lavender-soft);
+  border-radius: 0 8px 8px 0;
+  color: var(--ink-soft);
+}
+
+#teacher-sheet .turn.answer pre {
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+
+#teacher-sheet .turn.answer pre code {
+  font-family: "SF Mono", "Menlo", monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+#teacher-sheet .turn.answer code.inline-code {
+  font-family: "SF Mono", "Menlo", monospace;
+  font-size: 13px;
+  background: var(--lavender-soft);
+  color: var(--lavender);
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+
+#teacher-sheet .turn.answer a {
+  color: var(--lavender);
+  text-decoration: none;
+}
+
+#teacher-sheet .turn.answer a:hover {
+  text-decoration: underline;
+}
+
+#teacher-sheet .turn.answer strong {
+  font-weight: 700;
 }
 
 #teacher-sheet .turn.answer.streaming::after {

@@ -48,6 +48,7 @@ import {
 } from "./api";
 import { PDFDocument } from "./pdf";
 import { ScrollReader, type RegionSelection } from "./reader";
+import { renderMarkdown } from "./markdown";
 
 // ---- DOM ----
 const readerSurface = document.getElementById("reader-surface") as HTMLDivElement;
@@ -272,7 +273,7 @@ async function reopenQA(entry: QAEntry) {
   scroll.appendChild(q);
   const a = document.createElement("div");
   a.className = "turn answer";
-  a.textContent = entry.answer;
+  setAnswerContent(a, entry.answer);
   scroll.appendChild(a);
   teacherSheet.append(scroll);
   teacherSheet.classList.add("open");
@@ -326,7 +327,7 @@ async function askRegionQuestion(region: RegionSelection) {
       },
       (chunk) => {
         fullText += chunk;
-        answerNode.textContent = fullText;
+        setAnswerContent(answerNode, fullText);
       },
     );
     history.push({ role: "assistant", content: fullText });
@@ -334,7 +335,7 @@ async function askRegionQuestion(region: RegionSelection) {
     appendActions(answerNode, question);
     await saveQA(`${question}（框选区域）`, fullText);
   } catch (err) {
-    answerNode.textContent = `出错了：${String(err)}`;
+    setAnswerContent(answerNode, `出错了：${String(err)}`);
     answerNode.classList.remove("streaming");
   } finally {
     streaming = false;
@@ -409,7 +410,7 @@ async function askQuestion(question: string, selectionText: string | null) {
       },
       (chunk) => {
         fullText += chunk;
-        answerNode.textContent = fullText;
+        setAnswerContent(answerNode, fullText);
       },
     );
     history.push({ role: "assistant", content: fullText });
@@ -417,7 +418,7 @@ async function askQuestion(question: string, selectionText: string | null) {
     appendActions(answerNode, question);
     await saveQA(question, fullText);
   } catch (err) {
-    answerNode.textContent = `出错了：${String(err)}`;
+    setAnswerContent(answerNode, `出错了：${String(err)}`);
     answerNode.classList.remove("streaming");
   } finally {
     streaming = false;
@@ -425,6 +426,13 @@ async function askQuestion(question: string, selectionText: string | null) {
 }
 
 // ---- 老师面板 ----
+
+/// 把回答内容渲染进元素（Markdown → DOM）。
+function setAnswerContent(el: HTMLElement, text: string) {
+  el.innerHTML = "";
+  el.appendChild(renderMarkdown(text));
+}
+
 function openTeacherSheet(question: string) {
   teacherSheet.innerHTML = "";
 
@@ -536,7 +544,7 @@ async function followUp(text: string) {
       },
       (chunk) => {
         fullText += chunk;
-        a.textContent = fullText;
+        setAnswerContent(a, fullText);
         scroll.scrollTop = scroll.scrollHeight;
       },
     );
@@ -545,7 +553,7 @@ async function followUp(text: string) {
     appendActions(a, text);
     await saveQA(text, fullText);
   } catch (err) {
-    a.textContent = `出错了：${String(err)}`;
+    setAnswerContent(a, `出错了：${String(err)}`);
     a.classList.remove("streaming");
   } finally {
     streaming = false;
