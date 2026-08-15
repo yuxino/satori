@@ -1,7 +1,7 @@
 <div align="center">
   <img src="Resources/Assets/satori-icon.png" width="112" alt="satori">
   <h1>satori</h1>
-  <p>读 PDF 时看不懂的地方，选中它，AI 给你讲。</p>
+  <p>选中 PDF 里看不懂的部分，获得基于当前页的解释。</p>
   <p>
     <a href="README_ZH.md">简体中文</a>
     · <a href="README_JA.md">日本語</a>

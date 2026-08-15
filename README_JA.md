@@ -1,7 +1,7 @@
 <div align="center">
   <img src="Resources/Assets/satori-icon.png" width="112" alt="satori">
   <h1>satori</h1>
-  <p>PDF を読んでいて分からないところを選ぶと、AI が説明してくれます。</p>
+  <p>PDF で分からない部分を選ぶと、そのページに基づいた説明が得られます。</p>
   <p>
     <a href="README.md">English</a>
     · <a href="README_ZH.md">简体中文</a>
