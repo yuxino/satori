@@ -2,6 +2,12 @@
 import "./styles.css";
 import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+
+// 菜单「设置…」触发打开设置面板。
+void listen("open-settings", () => {
+  openSettings();
+});
 
 // 白屏时把错误显示出来，便于定位（而不是一片空白）。
 window.addEventListener("error", (e) => {

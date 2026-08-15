@@ -2,6 +2,8 @@ mod keychain;
 mod qwen;
 mod store;
 
+use tauri::{Emitter, Manager};
+
 /// 可配置的百炼视觉模型清单。默认使用理解能力最强的档位；
 /// 用户可以在设置里换成更均衡或更节省的档位。
 #[derive(Clone, serde::Serialize)]
@@ -45,6 +47,51 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             client: reqwest::Client::new(),
+        })
+        .setup(|app| {
+            use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
+
+            // 应用菜单（macOS 菜单栏）。调试工具不默认打开，由用户手动触发。
+            let menu = Menu::with_items(app, &[
+                &SubmenuBuilder::new(app, "satori")
+                    .item(
+                        &MenuItemBuilder::with_id("toggle-devtools", "打开调试工具")
+                            .accelerator("CmdOrCtrl+Option+I")
+                            .build(app)?,
+                    )
+                    .item(
+                        &MenuItemBuilder::with_id("settings", "设置…")
+                            .accelerator("CmdOrCtrl+,")
+                            .build(app)?,
+                    )
+                    .separator()
+                    .item(
+                        &MenuItemBuilder::with_id("quit", "退出 satori")
+                            .accelerator("CmdOrCtrl+Q")
+                            .build(app)?,
+                    )
+                    .build()?,
+            ])?;
+            app.set_menu(menu)?;
+
+            Ok(())
+        })
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "toggle-devtools" => {
+                // 手动打开 WebView 调试工具（用户决定何时查看，不自动打开）。
+                if let Some(window) = app.get_webview_window("main") {
+                    window.open_devtools();
+                }
+            }
+            "settings" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.emit("open-settings", ());
+                }
+            }
+            "quit" => {
+                app.exit(0);
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             list_model_options,
