@@ -2,6 +2,27 @@
 import "./styles.css";
 import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
+
+// 白屏时把错误显示出来，便于定位（而不是一片空白）。
+window.addEventListener("error", (e) => {
+  showFatalError(String(e.error ?? e.message ?? "未知错误"));
+});
+window.addEventListener("unhandledrejection", (e) => {
+  showFatalError(String(e.reason ?? "未处理的 Promise 错误"));
+});
+
+function showFatalError(message: string) {
+  const root = document.getElementById("reader-surface");
+  if (!root) return;
+  if (root.querySelector("#fatal-error")) return;
+  const div = document.createElement("div");
+  div.id = "fatal-error";
+  div.style.cssText =
+    "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#f7f4ee;z-index:100;font:14px/1.7 -apple-system,'PingFang SC',sans-serif;color:#8a2b2b;padding:40px;text-align:left;white-space:pre-wrap;";
+  div.textContent = `出错了：\n${message}`;
+  root.appendChild(div);
+}
+
 import {
   askVisual,
   clearApiKey,
