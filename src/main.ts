@@ -38,6 +38,7 @@ import {
   readApiKey,
   resolveBookPath,
   saveApiKey,
+  saveDevKey,
   saveStore,
   type BookRecord,
   type HistoryTurn,
@@ -959,14 +960,15 @@ function openSettings(force: boolean = false) {
   modal.innerHTML = `
     <div class="card">
       <h2>连接老师</h2>
-      <label>百炼 API Key（只存本机钥匙串）</label>
+      <label>百炼 API Key（优先存钥匙串；测试可用下方「开发模式」存本地文件）</label>
       <input type="password" placeholder="sk-…" value="${apiKey ?? ""}" />
       <label>模型</label>
       <select></select>
       <div class="status"></div>
       <div class="row">
         <button class="cancel">关闭</button>
-        <button class="primary save">保存</button>
+        <button class="dev">存为开发 Key</button>
+        <button class="primary save">保存到钥匙串</button>
       </div>
     </div>`;
 
@@ -983,30 +985,40 @@ function openSettings(force: boolean = false) {
 
   const statusEl = modal.querySelector(".status")!;
   if (apiKey) {
-    statusEl.textContent = "已连接百炼（Key 在钥匙串里）。";
+    statusEl.textContent = "已连接百炼（Key 可用）。";
   } else {
     statusEl.textContent = "还没有 Key——填上它，老师才能开口。";
   }
 
   modal.querySelector(".cancel")!.addEventListener("click", () => modal.remove());
-  modal.querySelector(".save")!.addEventListener("click", async () => {
-    const keyInput = modal.querySelector('input[type="password"]') as HTMLInputElement;
-    const key = keyInput.value.trim();
+
+  async function applyKey(key: string, save: () => Promise<void>, done: string) {
     if (!key) {
       statusEl.textContent = "Key 不能为空。";
       return;
     }
     try {
-      await saveApiKey(key);
+      await save();
       apiKey = key;
       store.settings.model_id = select.value;
       await persist();
-      statusEl.textContent = "已保存。";
-      window.setTimeout(() => modal.remove(), 600);
+      statusEl.textContent = done;
+      window.setTimeout(() => modal.remove(), 700);
     } catch (err) {
       statusEl.textContent = `保存失败：${String(err)}`;
     }
+  }
+
+  modal.querySelector(".save")!.addEventListener("click", async () => {
+    const keyInput = modal.querySelector('input[type="password"]') as HTMLInputElement;
+    await applyKey(keyInput.value.trim(), () => saveApiKey(keyInput.value.trim()), "已保存到钥匙串。");
   });
+
+  modal.querySelector(".dev")!.addEventListener("click", async () => {
+    const keyInput = modal.querySelector('input[type="password"]') as HTMLInputElement;
+    await applyKey(keyInput.value.trim(), () => saveDevKey(keyInput.value.trim()), "已存为开发 Key（本地文件，仅测试用）。");
+  });
+
   modal.addEventListener("click", (e) => {
     if (e.target === modal) modal.remove();
   });

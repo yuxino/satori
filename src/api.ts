@@ -66,6 +66,10 @@ export function saveApiKey(apiKey: string): Promise<void> {
   return invoke("save_api_key", { apiKey });
 }
 
+export function saveDevKey(apiKey: string): Promise<void> {
+  return invoke("save_dev_key", { apiKey });
+}
+
 export function clearApiKey(): Promise<void> {
   return invoke("clear_api_key");
 }
