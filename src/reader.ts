@@ -36,6 +36,9 @@ interface PageLayout {
 
 export class ScrollReader {
   private surface: HTMLDivElement;
+  /// 内容层：页面与 spacer 都挂在这里。缩放预览用 transform 作用于该层，
+  /// 避免手势期间重建 DOM / 重渲染高清 canvas 造成卡顿。
+  private content: HTMLDivElement;
   private doc: PDFDocument;
   private cb: ReaderCallbacks;
 
@@ -52,6 +55,9 @@ export class ScrollReader {
     this.surface = surface;
     this.doc = doc;
     this.cb = cb;
+    this.content = document.createElement("div");
+    this.content.className = "reader-content";
+    this.surface.appendChild(this.content);
   }
 
   private get availableWidth(): number {
@@ -70,25 +76,9 @@ export class ScrollReader {
   }
 
   /// 缩放：改页面宽度，重建布局，保持视口中心对应的文档位置不动。
+  /// （离散操作：⌘+/-、按钮、窗口 resize 走这里）
   async setZoom(factor: number): Promise<void> {
-    // 记录缩放前视口中心所在的页和页内比例，缩放后恢复。
-    const centerY = this.surface.scrollTop + this.surface.clientHeight / 2;
-    const anchorPage = this.pageAtOffset(centerY);
-    const anchorLayout = this.layouts[anchorPage - 1];
-    const ratioInPage = anchorLayout
-      ? (centerY - anchorLayout.top) / anchorLayout.displayHeight
-      : 0.5;
-
-    this.zoom = factor;
-    this.pageWidth = this.availableWidth * this.zoom;
-    await this.layout();
-
-    const newLayout = this.layouts[anchorPage - 1];
-    if (newLayout) {
-      this.surface.scrollTop = newLayout.top + newLayout.displayHeight * ratioInPage - this.surface.clientHeight / 2;
-    }
-    await this.renderVisible(anchorPage);
-    this.emitPage();
+    await this.commitZoom(factor);
   }
 
   async layout(): Promise<void> {
@@ -99,7 +89,8 @@ export class ScrollReader {
       if (this.surface.clientWidth <= 0) await nextFrame();
     }
 
-    this.surface.innerHTML = "";
+    // 清空内容层（保留 content 本身，避免重复嵌套）。
+    this.content.innerHTML = "";
     this.mounted.clear();
     this.layouts = [];
 
@@ -124,7 +115,7 @@ export class ScrollReader {
       el.style.width = `${this.pageWidth}px`;
       el.style.height = `${displayHeight}px`;
       el.style.top = `${this.layouts[p - 1].top}px`;
-      this.surface.appendChild(el);
+      this.content.appendChild(el);
       this.mounted.set(p, { el, canvas: null });
     }
     // 关键：绝对定位的页面不撑起滚动容器的内容高度。
@@ -133,7 +124,40 @@ export class ScrollReader {
     const spacer = document.createElement("div");
     spacer.className = "scroll-spacer";
     spacer.style.height = `${top}px`;
-    this.surface.appendChild(spacer);
+    this.content.appendChild(spacer);
+  }
+
+  /// 缩放手势期间的即时预览：只对内容层做 transform，不重建 DOM。
+  /// 视觉上以视口中心为锚缩放（transform-origin 设在中心对应的文档坐标）。
+  previewZoom(factor: number): void {
+    const clamped = Math.min(3, Math.max(0.5, factor));
+    const centerX = this.surface.scrollLeft + this.surface.clientWidth / 2;
+    const centerY = this.surface.scrollTop + this.surface.clientHeight / 2;
+    this.content.style.transformOrigin = `${centerX}px ${centerY}px`;
+    this.content.style.transform = `scale(${clamped / this.zoom})`;
+  }
+
+  /// 缩放手势结束：提交真实缩放（重布局 + 重渲染高清），移除 transform。
+  async commitZoom(factor: number): Promise<void> {
+    // 记录缩放前视口中心所在的页和页内比例，缩放后恢复。
+    const centerY = this.surface.scrollTop + this.surface.clientHeight / 2;
+    const anchorPage = this.pageAtOffset(centerY);
+    const anchorLayout = this.layouts[anchorPage - 1];
+    const ratioInPage = anchorLayout
+      ? (centerY - anchorLayout.top) / anchorLayout.displayHeight
+      : 0.5;
+
+    this.content.style.transform = "";
+    this.zoom = factor;
+    this.pageWidth = this.availableWidth * this.zoom;
+    await this.layout();
+
+    const newLayout = this.layouts[anchorPage - 1];
+    if (newLayout) {
+      this.surface.scrollTop = newLayout.top + newLayout.displayHeight * ratioInPage - this.surface.clientHeight / 2;
+    }
+    await this.renderVisible(anchorPage);
+    this.emitPage();
   }
 
   /// 渲染视口附近的页（惰性，已渲染的不重绘）。
@@ -264,7 +288,8 @@ export class ScrollReader {
   }
 
   clear(): void {
-    this.surface.innerHTML = "";
+    this.content.innerHTML = "";
+    this.content.style.transform = "";
     this.mounted.clear();
     this.layouts = [];
   }

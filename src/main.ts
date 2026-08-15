@@ -649,6 +649,9 @@ function setupReaderSurface() {
   // ---- 触控板捏合缩放 ----
   // macOS 触控板捏合在 WKWebView 里触发 gesturechange 事件（scale 是相对倍数）；
   // Ctrl+滚轮是通用兜底。两者都接，同一手势只走一条路径。
+  //
+  // 手势期间用 CSS transform 即时预览（不重建 DOM、不重渲染，GPU 平滑）；
+  // 手势结束才提交真实缩放（重布局 + 重渲染高清画面）。
   let gestureBaseZoom = zoomFactor;
   let gestureActive = false;
 
@@ -668,9 +671,9 @@ function setupReaderSurface() {
       const scale = (e as unknown as { scale?: number }).scale;
       if (typeof scale !== "number" || !reader) return;
       const next = clampZoom(gestureBaseZoom * scale);
-      if (Math.abs(next - zoomFactor) > 0.01) {
+      if (Math.abs(next - zoomFactor) > 0.005) {
         zoomFactor = next;
-        void applyZoom();
+        reader.previewZoom(next);
       }
     }) as EventListener,
   );
@@ -680,10 +683,16 @@ function setupReaderSurface() {
     ((e: Event) => {
       e.preventDefault();
       gestureActive = false;
+      if (reader) {
+        void reader.commitZoom(zoomFactor);
+        updateBottomBarZoom();
+      }
     }) as EventListener,
   );
 
-  // 兜底：Ctrl+滚轮缩放（普通鼠标也适用）。
+  // 兜底：Ctrl+滚轮缩放（普通鼠标也适用）。连续滚轮只做预览，
+  // 停止滚动约 180ms 后提交真实缩放。
+  let wheelCommitTimer: number | undefined;
   readerSurface.addEventListener(
     "wheel",
     (e) => {
@@ -694,7 +703,15 @@ function setupReaderSurface() {
       const next = clampZoom(zoomFactor * factor);
       if (Math.abs(next - zoomFactor) > 0.005) {
         zoomFactor = next;
-        void applyZoom();
+        if (reader) reader.previewZoom(next);
+        updateBottomBarZoom();
+        window.clearTimeout(wheelCommitTimer);
+        wheelCommitTimer = window.setTimeout(() => {
+          if (reader) {
+            void reader.commitZoom(zoomFactor);
+            updateBottomBarZoom();
+          }
+        }, 180);
       }
     },
     { passive: false },
