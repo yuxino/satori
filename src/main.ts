@@ -606,6 +606,64 @@ function setupReaderSurface() {
     regionStart = null;
     if (region) void askRegionQuestion(region);
   });
+
+  // ---- 触控板捏合缩放 ----
+  // macOS 触控板捏合在 WKWebView 里触发 gesturechange 事件（scale 是相对倍数）；
+  // Ctrl+滚轮是通用兜底。两者都接，同一手势只走一条路径。
+  let gestureBaseZoom = zoomFactor;
+  let gestureActive = false;
+
+  readerSurface.addEventListener(
+    "gesturestart",
+    ((e: Event) => {
+      e.preventDefault();
+      gestureActive = true;
+      gestureBaseZoom = zoomFactor;
+    }) as EventListener,
+  );
+
+  readerSurface.addEventListener(
+    "gesturechange",
+    ((e: Event) => {
+      e.preventDefault();
+      const scale = (e as unknown as { scale?: number }).scale;
+      if (typeof scale !== "number" || !reader) return;
+      const next = clampZoom(gestureBaseZoom * scale);
+      if (Math.abs(next - zoomFactor) > 0.01) {
+        zoomFactor = next;
+        void applyZoom();
+      }
+    }) as EventListener,
+  );
+
+  readerSurface.addEventListener(
+    "gestureend",
+    ((e: Event) => {
+      e.preventDefault();
+      gestureActive = false;
+    }) as EventListener,
+  );
+
+  // 兜底：Ctrl+滚轮缩放（普通鼠标也适用）。
+  readerSurface.addEventListener(
+    "wheel",
+    (e) => {
+      if (!e.ctrlKey || gestureActive) return;
+      e.preventDefault();
+      // deltaY > 0 表示向后滚（缩小），负值放大；取指数让手感平滑。
+      const factor = Math.exp(-e.deltaY * 0.002);
+      const next = clampZoom(zoomFactor * factor);
+      if (Math.abs(next - zoomFactor) > 0.005) {
+        zoomFactor = next;
+        void applyZoom();
+      }
+    },
+    { passive: false },
+  );
+}
+
+function clampZoom(z: number): number {
+  return Math.min(3, Math.max(0.5, z));
 }
 
 // ---- 键盘 ----

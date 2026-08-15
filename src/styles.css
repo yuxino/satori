@@ -41,14 +41,12 @@ body {
   position: absolute;
   inset: 0;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
   background: var(--paper-deep);
 }
 
 .scroll-page {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
   background: white;
   box-shadow: 0 4px 22px rgba(0, 0, 0, 0.1);
   overflow: hidden;

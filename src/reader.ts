@@ -61,14 +61,25 @@ export class ScrollReader {
     this.scrollToPage(targetPage, true);
   }
 
-  /// 缩放：改页面宽度，重建布局，尽量保持当前页位置。
+  /// 缩放：改页面宽度，重建布局，保持视口中心对应的文档位置不动。
   async setZoom(factor: number): Promise<void> {
-    const anchor = this.currentPage();
+    // 记录缩放前视口中心所在的页和页内比例，缩放后恢复。
+    const centerY = this.surface.scrollTop + this.surface.clientHeight / 2;
+    const anchorPage = this.pageAtOffset(centerY);
+    const anchorLayout = this.layouts[anchorPage - 1];
+    const ratioInPage = anchorLayout
+      ? (centerY - anchorLayout.top) / anchorLayout.displayHeight
+      : 0.5;
+
     this.zoom = factor;
     this.pageWidth = this.availableWidth * this.zoom;
     await this.layout();
-    this.scrollToPage(anchor, true);
-    await this.renderVisible(anchor);
+
+    const newLayout = this.layouts[anchorPage - 1];
+    if (newLayout) {
+      this.surface.scrollTop = newLayout.top + newLayout.displayHeight * ratioInPage - this.surface.clientHeight / 2;
+    }
+    await this.renderVisible(anchorPage);
     this.emitPage();
   }
 
@@ -80,6 +91,10 @@ export class ScrollReader {
     // 批量预热所有页尺寸，避免逐页串行等待。
     await this.doc.prefetchSizes(1, this.doc.pageCount);
 
+    // 页面左侧位置：窄于窗口时居中，宽于窗口时从 0 开始以便横向滚动。
+    const surfaceW = this.surface.clientWidth;
+    const left = Math.max(0, (surfaceW - this.pageWidth) / 2);
+
     let top = 0;
     for (let p = 1; p <= this.doc.pageCount; p++) {
       const { width, height } = await this.doc.pageSize(p);
@@ -90,6 +105,7 @@ export class ScrollReader {
       const el = document.createElement("div");
       el.className = "scroll-page";
       el.dataset.page = String(p);
+      el.style.left = `${left}px`;
       el.style.width = `${this.pageWidth}px`;
       el.style.height = `${displayHeight}px`;
       el.style.top = `${this.layouts[p - 1].top}px`;
