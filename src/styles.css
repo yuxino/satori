@@ -151,28 +151,33 @@ body {
   background: #7d6ba9;
 }
 
-/* ---- 老师面板：底部安静滑出 ---- */
+/* ---- 老师：右下角悬浮卡片 ---- */
 
 #teacher-sheet {
   position: absolute;
-  left: 0;
-  right: 0;
-  /* 坐在底部工具栏上方，提问时底栏仍可见可用。 */
-  bottom: 46px;
+  right: 16px;
+  bottom: 58px; /* 底部工具栏上方 */
+  width: 400px;
+  max-width: calc(100% - 32px);
+  max-height: 62%;
   z-index: 40;
   background: var(--sheet);
-  border-top: 1px solid var(--line);
-  border-radius: 12px 12px 0 0;
-  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.12);
-  transform: translateY(105%);
-  transition: transform 0.28s ease;
-  max-height: calc(55% - 46px);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 12px 44px rgba(0, 0, 0, 0.18);
   display: flex;
   flex-direction: column;
+  opacity: 0;
+  transform: translateY(14px) scale(0.97);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  overflow: hidden;
 }
 
 #teacher-sheet.open {
-  transform: translateY(0);
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
 }
 
 #teacher-sheet .sheet-header {
@@ -180,8 +185,14 @@ body {
   align-items: center;
   justify-content: center;
   position: relative;
-  padding-top: 8px;
+  padding: 10px 0 4px;
   flex-shrink: 0;
+  cursor: grab;
+  user-select: none;
+}
+
+#teacher-sheet .sheet-header:active {
+  cursor: grabbing;
 }
 
 #teacher-sheet .grip {
@@ -189,17 +200,12 @@ body {
   width: 44px;
   border-radius: 2px;
   background: var(--line);
-  cursor: pointer;
-}
-
-#teacher-sheet .grip:hover {
-  background: var(--ink-faint);
 }
 
 #teacher-sheet .sheet-close {
   position: absolute;
-  right: 14px;
-  top: 10px;
+  right: 10px;
+  top: 8px;
   border: none;
   background: transparent;
   color: var(--ink-faint);
@@ -214,12 +220,12 @@ body {
 
 #teacher-sheet .qa-scroll {
   overflow-y: auto;
-  padding: 8px 28px 16px;
+  padding: 6px 20px 12px;
   flex: 1;
 }
 
 #teacher-sheet .turn {
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 #teacher-sheet .turn.question {
@@ -230,9 +236,10 @@ body {
 
 #teacher-sheet .turn.answer {
   font-family: var(--serif);
-  font-size: 17px;
-  line-height: 1.85;
+  font-size: 16px;
+  line-height: 1.8;
   color: var(--ink);
+  white-space: pre-wrap;
 }
 
 #teacher-sheet .turn.answer.streaming::after {
@@ -259,7 +266,7 @@ body {
   background: transparent;
   color: var(--ink-soft);
   font-size: 13px;
-  padding: 6px 14px;
+  padding: 5px 13px;
   border-radius: 999px;
   cursor: pointer;
   font-family: var(--sans);
@@ -274,17 +281,18 @@ body {
 
 #teacher-sheet .composer {
   display: flex;
-  gap: 10px;
-  padding: 12px 28px 18px;
+  gap: 8px;
+  padding: 10px 20px 14px;
   border-top: 1px solid var(--line);
+  flex-shrink: 0;
 }
 
 #teacher-sheet .composer input {
   flex: 1;
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 10px 18px;
-  font-size: 14px;
+  padding: 8px 16px;
+  font-size: 13px;
   font-family: var(--sans);
   background: var(--paper);
   color: var(--ink);
@@ -299,8 +307,8 @@ body {
   border: none;
   background: var(--lavender);
   color: white;
-  font-size: 14px;
-  padding: 10px 22px;
+  font-size: 13px;
+  padding: 8px 18px;
   border-radius: 999px;
   cursor: pointer;
   font-family: var(--sans);
@@ -309,6 +317,40 @@ body {
 #teacher-sheet .composer button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* ---- 悬浮「问」按钮 ---- */
+
+#ask-fab {
+  position: absolute;
+  right: 16px;
+  bottom: 58px;
+  z-index: 35;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: var(--lavender);
+  color: white;
+  font-size: 15px;
+  font-family: var(--sans);
+  cursor: pointer;
+  box-shadow: 0 6px 22px rgba(141, 123, 184, 0.45);
+  transition: transform 0.15s, background 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#ask-fab:hover {
+  transform: scale(1.08);
+  background: #7d6ba9;
+}
+
+/* 老师面板打开时，悬浮按钮淡出避免重叠。 */
+#teacher-sheet.open ~ #ask-fab {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* ---- 选中胶囊 ---- */

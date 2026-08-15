@@ -88,6 +88,8 @@ async function boot() {
     await openBook(book);
   }
   setupReaderSurface();
+  setupAskFab();
+  setupSheetDrag();
 
   // 阅读面尺寸变化时重新铺满（保留当前页）。用 ResizeObserver 监听
   // 阅读面本身，比 window resize 更可靠——初次加载时窗口事件可能丢失，
@@ -701,6 +703,49 @@ function clampZoom(z: number): number {
   return Math.min(3, Math.max(0.5, z));
 }
 
+// ---- 悬浮「问」按钮：点一下问当前页 ----
+function setupAskFab() {
+  const fab = document.getElementById("ask-fab") as HTMLButtonElement;
+  fab.addEventListener("click", () => {
+    if (teacherSheet.classList.contains("open")) {
+      teacherSheet.classList.remove("open");
+      return;
+    }
+    void askPageQuestion();
+  });
+}
+
+// ---- 老师卡片可拖动 ----
+function setupSheetDrag() {
+  let dragging = false;
+  let offsetX = 0;
+  let offsetY = 0;
+
+  teacherSheet.addEventListener("mousedown", (e) => {
+    // 只在拖拽条/头部区域拖动，不干扰输入框与按钮。
+    const target = e.target as HTMLElement;
+    if (target.closest("input") || target.closest("button") || target.closest(".qa-scroll") || target.closest(".composer")) return;
+    if (!target.closest(".sheet-header") && !target.classList.contains("grip")) return;
+    dragging = true;
+    const rect = teacherSheet.getBoundingClientRect();
+    offsetX = e.clientX - rect.left;
+    offsetY = e.clientY - rect.top;
+    e.preventDefault();
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    teacherSheet.style.right = "auto";
+    teacherSheet.style.bottom = "auto";
+    teacherSheet.style.left = `${Math.max(8, e.clientX - offsetX)}px`;
+    teacherSheet.style.top = `${Math.max(8, e.clientY - offsetY)}px`;
+  });
+
+  window.addEventListener("mouseup", () => {
+    dragging = false;
+  });
+}
+
 // ---- 键盘 ----
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
@@ -791,13 +836,7 @@ function renderBottomBar() {
     }
   });
 
-  // 问这一页 / 回看（原顶部浮层的功能并入底部栏）。
-  const askBtn = document.createElement("button");
-  askBtn.className = "action-btn";
-  askBtn.textContent = "问这一页";
-  askBtn.title = "让老师解释当前页";
-  askBtn.addEventListener("click", () => void askPageQuestion());
-
+  // 回看（原顶部浮层的功能并入底部栏）。
   const reviewBtn = document.createElement("button");
   reviewBtn.className = "action-btn";
   reviewBtn.textContent = "回看";
@@ -856,7 +895,7 @@ function renderBottomBar() {
   });
   zoomGroup.append(zoomOut, zoomPct, zoomIn);
 
-  bottomBar.append(prev, next, askBtn, reviewBtn, pageNum, thumbs, zoomGroup);
+  bottomBar.append(prev, next, reviewBtn, pageNum, thumbs, zoomGroup);
   updateBottomBarZoom();
 
   // 打开书时一次性渲染全部缩略图（缓存），滚动时只更新高亮。
