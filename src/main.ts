@@ -31,7 +31,6 @@ function showFatalError(message: string) {
 
 import {
   askVisual,
-  clearApiKey,
   emptyStore,
   listModelOptions,
   loadStore,
@@ -303,7 +302,7 @@ async function reopenQA(entry: QAEntry) {
 // ---- 提问：整页 ----
 async function askPageQuestion() {
   const question = "这一页在讲什么？用大白话讲。";
-  await askQuestion(question, null);
+  await askQuestion(question);
 }
 
 // ---- 提问：框选区域（扫描版也能用） ----
@@ -395,7 +394,7 @@ async function exportEvidence(pages: number[]): Promise<{ page: number; jpeg: st
 }
 
 // ---- 核心提问闭环 ----
-async function askQuestion(question: string, selectionText: string | null) {
+async function askQuestion(question: string) {
   if (!currentDoc || !apiKey) {
     openSettings();
     return;
@@ -533,7 +532,7 @@ function appendActions(answerNode: HTMLDivElement, lastQuestion: string) {
     const btn = document.createElement("button");
     btn.textContent = b.label;
     btn.addEventListener("click", () => {
-      void askFollowUp(b.prompt);
+      void followUp(b.prompt);
     });
     actions.appendChild(btn);
   }
@@ -585,10 +584,6 @@ async function followUp(text: string) {
   } finally {
     streaming = false;
   }
-}
-
-async function askFollowUp(prompt: string) {
-  await followUp(prompt);
 }
 
 // ---- 持久化 ----
