@@ -74,19 +74,6 @@ pub fn save_dev_key(app: AppHandle, api_key: String) -> Result<(), String> {
     fs::write(&path, &normalized).map_err(|e| format!("写入开发 Key 文件失败：{e}"))
 }
 
-#[tauri::command]
-pub fn clear_api_key() -> Result<(), String> {
-    match Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
-        Ok(entry) => {
-            entry
-                .delete_credential()
-                .map_err(|e| format!("无法删除钥匙串条目：{e}"))?;
-            Ok(())
-        }
-        Err(e) => Err(format!("无法访问钥匙串：{e}")),
-    }
-}
-
 fn read_entry(service: &str, account: &str) -> Result<Option<String>, String> {
     let entry = Entry::new(service, account).map_err(|e| format!("无法访问钥匙串：{e}"))?;
     match entry.get_password() {

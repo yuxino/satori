@@ -98,7 +98,6 @@ pub fn run() {
             keychain::read_api_key,
             keychain::save_api_key,
             keychain::save_dev_key,
-            keychain::clear_api_key,
             store::load_store,
             store::save_store,
             store::resolve_book_path,
