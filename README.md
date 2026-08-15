@@ -1,25 +1,24 @@
 <div align="center">
   <img src="Resources/Assets/satori-icon.png" width="112" alt="satori">
   <h1>satori</h1>
-  <p>Understanding-first PDF reading space for macOS</p>
+  <p>Local-first PDF reader with AI explanations for macOS</p>
   <p>
     <a href="README_ZH.md">简体中文</a>
     · <a href="README_JA.md">日本語</a>
   </p>
 </div>
 
-`Satori` comes from the Japanese word 悟り (satori, "enlightenment") — the moment of understanding.
+`Satori` comes from the Japanese word 悟り (satori, "enlightenment").
 
-Satori is a local-first macOS app for actually understanding PDF textbooks. Open a book and read the page full-screen; when a passage doesn't click, frame it and a patient teacher explains it in plain language, then steps away so you can keep reading.
+Satori is a macOS app for reading PDF textbooks. You read the page full-screen; when something doesn't make sense, select it and Satori explains that part based on the page you're looking at.
 
-## What it does
+## Features
 
-- **Open and read** — continuous scrolling PDF reader; text-native and scanned books both work (no OCR setup needed).
-- **Ask about anything on the page** — frame a paragraph, a diagram, or a code block and get a plain-language explanation grounded in that page.
-- **A teacher that talks like a person** — short answers, main point first, jargon mapped to plain terms; follow up with "explain more", "give an example", or "say it differently".
-- **Remembers your place** — reading position and Q&A history stay on your Mac; reopen and pick up where you left off.
+- **PDF reading** — continuous scrolling; works with text-native and scanned PDFs.
+- **Explain anything on the page** — select a paragraph, figure, or code block and get an explanation based on that page.
+- **Reading history** — reading position and past Q&A are saved on your Mac.
 
-## Get started
+## Getting started
 
 Requires macOS 14+.
 
@@ -36,6 +35,6 @@ npx tauri build
 
 ## Privacy
 
-Books, reading position, and Q&A history stay local. To get explanations, Satori calls Alibaba Cloud Model Studio (Qwen) on demand with the page image; responses are not stored by the provider.
+Books, reading position, and Q&A history stay on your Mac. Explanations are generated on demand by Alibaba Cloud Model Studio (Qwen) using the current page image; responses are not stored by the provider.
 
 [MIT](LICENSE) © 2026 yuxino
