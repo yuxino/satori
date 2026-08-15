@@ -130,7 +130,7 @@ export class ScrollReader {
       for (const p of toRender) {
         const mount = this.mounted.get(p);
         if (!mount) continue;
-        const canvas = await this.doc.renderPageToCanvas(p, this.canvasScale());
+        const canvas = await this.doc.renderPageToCanvas(p, this.canvasScale(p));
         canvas.style.width = "100%";
         canvas.style.height = "100%";
         mount.el.appendChild(canvas);
@@ -145,9 +145,13 @@ export class ScrollReader {
     }
   }
 
-  private canvasScale(): number {
-    // 渲染分辨率按显示尺寸的 2 倍，兼顾清晰度与内存。
-    return (this.pageWidth * 2) / 72;
+  /// 每页的渲染分辨率：显示宽度 × 2（视网膜清晰度）。
+  /// 用该页逻辑宽度换算 PDF.js 的 scale，避免硬编码导致超大 canvas
+  /// 触发浏览器限制而模糊。
+  private canvasScale(page: number): number {
+    const layout = this.layouts[page - 1];
+    if (!layout) return 2;
+    return (this.pageWidth * 2) / layout.logicalWidth;
   }
 
   /// 当前视口中心的页码。
