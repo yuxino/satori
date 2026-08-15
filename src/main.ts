@@ -54,6 +54,7 @@ const readingBar = document.getElementById("reading-bar") as HTMLDivElement;
 const teacherSheet = document.getElementById("teacher-sheet") as HTMLDivElement;
 const tocDrawer = document.getElementById("toc-drawer") as HTMLDivElement;
 const selectionCapsule = document.getElementById("selection-capsule") as HTMLButtonElement;
+const bottomBar = document.getElementById("bottom-bar") as HTMLDivElement;
 
 // ---- 状态 ----
 let store: Store = emptyStore();
@@ -106,6 +107,7 @@ async function relayoutOnResize() {
 
 // ---- 空书架 ----
 function showEmptyState() {
+  bottomBar.style.display = "none";
   readerSurface.innerHTML = `
     <div id="empty-state">
       <div class="hint">打开就开始理解</div>
@@ -141,11 +143,13 @@ async function openBook(book: BookRecord) {
     currentDoc = await PDFDocument.load(url);
     currentPage = Math.min(Math.max(resolved.last_page, 1), currentDoc.pageCount);
     readerSurface.innerHTML = "";
+    bottomBar.style.display = "flex";
     reader = new ScrollReader(readerSurface, currentDoc, {
       onPageChange: (page) => {
         currentPage = page;
         updateReadingBarLabel();
         schedulePersistPosition();
+        scheduleBottomBarUpdate();
       },
       onRegionSelected: (region) => {
         void askRegionQuestion(region);
@@ -154,6 +158,7 @@ async function openBook(book: BookRecord) {
     await reader.open(currentPage);
     readerSurface.addEventListener("scroll", () => void reader?.onScroll(), { passive: true });
     updateReadingBar();
+    renderBottomBar();
     showReopenCue(resolved);
     buildTOC();
     // 更新书籍列表（路径可能被修正）。
@@ -743,6 +748,143 @@ async function applyZoom() {
   if (!reader) return;
   await reader.setZoom(zoomFactor);
   updateReadingBar();
+  updateBottomBarZoom();
+}
+
+// ---- 底部工具栏（macOS 原生阅读器风格） ----
+
+const THUMB_COUNT = 13; // 当前页前后各渲染多少缩略图
+const THUMB_WIDTH = 34;
+
+function renderBottomBar() {
+  bottomBar.innerHTML = "";
+
+  // 上一页 / 下一页
+  const prev = document.createElement("button");
+  prev.className = "nav-btn";
+  prev.innerHTML = "‹";
+  prev.title = "上一页";
+  prev.addEventListener("click", () => {
+    if (reader && currentPage > 1) {
+      reader.scrollToPage(currentPage - 1);
+      void reader.onScroll();
+    }
+  });
+  const next = document.createElement("button");
+  next.className = "nav-btn";
+  next.innerHTML = "›";
+  next.title = "下一页";
+  next.addEventListener("click", () => {
+    if (reader && currentPage < currentDoc!.pageCount) {
+      reader.scrollToPage(currentPage + 1);
+      void reader.onScroll();
+    }
+  });
+
+  const pageNum = document.createElement("span");
+  pageNum.className = "page-num";
+  pageNum.textContent = `${currentPage} / ${currentDoc?.pageCount ?? 0}`;
+
+  const thumbs = document.createElement("div");
+  thumbs.className = "thumbs";
+  thumbs.addEventListener("click", (e) => {
+    const t = (e.target as HTMLElement).closest(".thumb") as HTMLElement | null;
+    if (!t || !reader) return;
+    const page = Number(t.dataset.page);
+    if (page) {
+      reader.scrollToPage(page);
+      void reader.onScroll();
+    }
+  });
+
+  // 缩放控制
+  const zoomGroup = document.createElement("div");
+  zoomGroup.className = "zoom-group";
+  const zoomOut = document.createElement("button");
+  zoomOut.textContent = "−";
+  zoomOut.title = "缩小";
+  zoomOut.addEventListener("click", () => {
+    zoomFactor = clampZoom(zoomFactor - 0.25);
+    void applyZoom();
+  });
+  const zoomPct = document.createElement("span");
+  zoomPct.className = "zoom-pct";
+  zoomPct.title = "回到适合宽度";
+  zoomPct.addEventListener("click", () => {
+    zoomFactor = 1;
+    void applyZoom();
+  });
+  const zoomIn = document.createElement("button");
+  zoomIn.textContent = "+";
+  zoomIn.title = "放大";
+  zoomIn.addEventListener("click", () => {
+    zoomFactor = clampZoom(zoomFactor + 0.25);
+    void applyZoom();
+  });
+  zoomGroup.append(zoomOut, zoomPct, zoomIn);
+
+  bottomBar.append(prev, pageNum, thumbs, zoomGroup);
+  updateBottomBarZoom();
+  void updateThumbnails();
+}
+
+function updateBottomBarZoom() {
+  const pct = bottomBar.querySelector(".zoom-pct") as HTMLElement | null;
+  if (pct) pct.textContent = `${Math.round(zoomFactor * 100)}%`;
+}
+
+/// 缩略图防抖更新：滚动/翻页后重建当前页附近的缩略图。
+let thumbTimer: number | undefined;
+function scheduleBottomBarUpdate() {
+  window.clearTimeout(thumbTimer);
+  thumbTimer = window.setTimeout(() => void updateThumbnails(), 120);
+}
+
+async function updateThumbnails() {
+  if (!currentDoc) return;
+  const thumbs = bottomBar.querySelector(".thumbs");
+  if (!thumbs) return;
+
+  const pageNum = bottomBar.querySelector(".page-num") as HTMLElement | null;
+  if (pageNum) pageNum.textContent = `${currentPage} / ${currentDoc.pageCount}`;
+
+  // 清理旧的缩略图。
+  thumbs.innerHTML = "";
+  const start = Math.max(1, currentPage - THUMB_COUNT);
+  const end = Math.min(currentDoc.pageCount, currentPage + THUMB_COUNT);
+
+  const jobs: Promise<void>[] = [];
+  for (let p = start; p <= end; p++) {
+    jobs.push(renderThumb(thumbs as HTMLElement, p));
+  }
+  await Promise.all(jobs);
+
+  // 高亮当前页并滚动到可见位置。
+  const active = thumbs.querySelector(`.thumb[data-page="${currentPage}"]`) as HTMLElement | null;
+  if (active) {
+    active.classList.add("active");
+    active.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+}
+
+async function renderThumb(container: HTMLElement, page: number): Promise<void> {
+  if (!currentDoc) return;
+  const thumb = document.createElement("div");
+  thumb.className = "thumb";
+  thumb.dataset.page = String(page);
+  thumb.title = `第 ${page} 页`;
+  container.appendChild(thumb);
+
+  try {
+    const size = await currentDoc.pageSize(page);
+    const h = Math.round((size.height / size.width) * THUMB_WIDTH);
+    const canvas = await currentDoc.renderPageToCanvas(page, THUMB_WIDTH / size.width);
+    canvas.style.width = `${THUMB_WIDTH}px`;
+    canvas.style.height = `${h}px`;
+    thumb.appendChild(canvas);
+  } catch {
+    // 缩略图渲染失败不阻塞阅读。
+  }
 }
 
 function persistReadingPosition() {

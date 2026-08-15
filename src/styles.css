@@ -43,6 +43,8 @@ body {
   overflow-y: auto;
   overflow-x: auto;
   background: var(--paper-deep);
+  /* 底部工具栏占位，最后一页不被遮挡。 */
+  padding-bottom: 46px;
 }
 
 .scroll-page {
@@ -438,6 +440,135 @@ body {
   border: none;
   background: var(--lavender);
   color: white;
+}
+
+/* ---- 底部工具栏：macOS 原生阅读器风格 ---- */
+
+#bottom-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 25;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  background: rgba(247, 244, 238, 0.82);
+  backdrop-filter: blur(14px);
+  border-top: 1px solid var(--line);
+  user-select: none;
+}
+
+#bottom-bar .nav-btn {
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 15px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: var(--sans);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#bottom-bar .nav-btn:hover {
+  background: var(--lavender-soft);
+  color: var(--lavender);
+}
+
+#bottom-bar .page-num {
+  font-size: 12px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+  min-width: 52px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+#bottom-bar .thumbs {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+  height: 100%;
+}
+
+#bottom-bar .thumb {
+  flex-shrink: 0;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  background: white;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+  opacity: 0.75;
+  transition: opacity 0.15s, border-color 0.15s;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#bottom-bar .thumb:hover {
+  opacity: 1;
+}
+
+#bottom-bar .thumb.active {
+  border-color: var(--lavender);
+  opacity: 1;
+}
+
+#bottom-bar .thumb canvas {
+  display: block;
+}
+
+#bottom-bar .zoom-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 4px;
+  background: rgba(255, 253, 248, 0.6);
+}
+
+#bottom-bar .zoom-group button {
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 14px;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+
+#bottom-bar .zoom-group button:hover {
+  background: var(--lavender-soft);
+  color: var(--lavender);
+}
+
+#bottom-bar .zoom-pct {
+  font-size: 12px;
+  color: var(--ink-soft);
+  min-width: 40px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+#bottom-bar .zoom-pct:hover {
+  color: var(--lavender);
 }
 
 /* ---- 目录抽屉 ---- */
