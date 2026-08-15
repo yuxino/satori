@@ -4,8 +4,13 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 
 // 现代 pdfjs-dist 的 worker 通过同源 URL 加载；在 Vite 下直接 import。
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+// 扫描件常用 JBIG2/JPEG2000 压缩，需要 wasm 解码器；指向 wasm 目录。
+import jbig2WasmUrl from "pdfjs-dist/wasm/jbig2.wasm?url";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+
+/// 从单个 wasm 文件 URL 推导 wasm 目录（PDF.js 按目录加载各解码器）。
+const wasmBase = jbig2WasmUrl.substring(0, jbig2WasmUrl.lastIndexOf("/"));
 
 export class PDFDocument {
   private doc: PDFDocumentProxy;
@@ -20,6 +25,8 @@ export class PDFDocument {
     const loadingTask = pdfjsLib.getDocument({
       url,
       useSystemFonts: true,
+      // 提供 wasm 解码器，否则 JBIG2/CCITT 扫描页无法解码（空白页）。
+      wasmUrl: wasmBase,
     });
     const doc = await loadingTask.promise;
     return new PDFDocument(doc);
