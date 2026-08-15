@@ -551,6 +551,12 @@ body {
   color: var(--lavender);
 }
 
+#bottom-bar .book-btn {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 #bottom-bar .page-num {
   font-size: 12px;
   color: var(--ink-soft);
@@ -558,6 +564,106 @@ body {
   min-width: 52px;
   text-align: center;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+#bottom-bar .page-num:hover {
+  color: var(--lavender);
+}
+
+#bottom-bar .page-jump-input {
+  width: 52px;
+  border: 1px solid var(--lavender);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+  font-family: var(--sans);
+  text-align: center;
+  background: var(--sheet);
+  color: var(--ink);
+  outline: none;
+}
+
+/* ---- 书菜单 ---- */
+
+#book-menu {
+  position: absolute;
+  left: 8px;
+  bottom: 50px;
+  z-index: 65;
+  min-width: 260px;
+  max-width: 340px;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#book-menu .book-menu-title {
+  font-size: 11px;
+  color: var(--ink-faint);
+  letter-spacing: 1px;
+  padding: 4px 10px 6px;
+}
+
+#book-menu .book-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+#book-menu .book-menu-item:hover {
+  background: var(--lavender-soft);
+}
+
+#book-menu .book-menu-item.current {
+  color: var(--lavender);
+  font-weight: 600;
+}
+
+#book-menu .book-menu-item.muted {
+  color: var(--ink-faint);
+  cursor: default;
+}
+
+#book-menu .book-menu-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#book-menu .book-menu-info {
+  font-size: 11px;
+  color: var(--ink-faint);
+  flex-shrink: 0;
+}
+
+#book-menu .book-menu-open {
+  margin-top: 4px;
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+
+#book-menu .book-menu-open:hover {
+  border-color: var(--lavender);
+  color: var(--lavender);
+  background: var(--lavender-soft);
 }
 
 #bottom-bar .thumbs {

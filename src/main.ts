@@ -836,6 +836,16 @@ function renderBottomBar() {
     }
   });
 
+  // 书：显示当前书名，点击弹出书列表（切换书）。
+  const bookBtn = document.createElement("button");
+  bookBtn.className = "action-btn book-btn";
+  bookBtn.textContent = currentBook?.name ?? "书";
+  bookBtn.title = "切换书";
+  bookBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleBookMenu();
+  });
+
   // 回看（原顶部浮层的功能并入底部栏）。
   const reviewBtn = document.createElement("button");
   reviewBtn.className = "action-btn";
@@ -846,9 +856,37 @@ function renderBottomBar() {
     tocDrawer.classList.toggle("open");
   });
 
+  // 页码：点击变成输入框，输入页码回车跳转。
   const pageNum = document.createElement("span");
   pageNum.className = "page-num";
+  pageNum.title = "点击输入页码跳转";
   pageNum.textContent = `${currentPage} / ${currentDoc?.pageCount ?? 0}`;
+  pageNum.addEventListener("click", () => {
+    if (!currentDoc) return;
+    pageNum.innerHTML = "";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.inputMode = "numeric";
+    input.className = "page-jump-input";
+    input.value = String(currentPage);
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.stopPropagation();
+        const target = Math.min(Math.max(Number(input.value) || 1, 1), currentDoc!.pageCount);
+        if (reader) {
+          reader.scrollToPage(target);
+          void reader.onScroll();
+        }
+        renderBottomBarPageLabel();
+      } else if (ev.key === "Escape") {
+        renderBottomBarPageLabel();
+      }
+    });
+    input.addEventListener("blur", () => renderBottomBarPageLabel());
+    pageNum.appendChild(input);
+    input.focus();
+    input.select();
+  });
 
   const thumbs = document.createElement("div");
   thumbs.className = "thumbs";
@@ -895,7 +933,7 @@ function renderBottomBar() {
   });
   zoomGroup.append(zoomOut, zoomPct, zoomIn);
 
-  bottomBar.append(prev, next, reviewBtn, pageNum, thumbs, zoomGroup);
+  bottomBar.append(bookBtn, prev, next, reviewBtn, pageNum, thumbs, zoomGroup);
   updateBottomBarZoom();
 
   // 打开书时一次性渲染全部缩略图（缓存），滚动时只更新高亮。
@@ -905,6 +943,80 @@ function renderBottomBar() {
 function updateBottomBarZoom() {
   const pct = bottomBar.querySelector(".zoom-pct") as HTMLElement | null;
   if (pct) pct.textContent = `${Math.round(zoomFactor * 100)}%`;
+}
+
+/// 重建底部栏页码标签（页码输入框失焦/提交后调用）。
+function renderBottomBarPageLabel() {
+  const pageNum = bottomBar.querySelector(".page-num") as HTMLElement | null;
+  if (!pageNum) return;
+  pageNum.innerHTML = "";
+  pageNum.textContent = `${currentPage} / ${currentDoc?.pageCount ?? 0}`;
+}
+
+// ---- 书菜单：列出导入的书，点击切换 ----
+let bookMenuEl: HTMLDivElement | null = null;
+
+function toggleBookMenu() {
+  if (bookMenuEl) {
+    bookMenuEl.remove();
+    bookMenuEl = null;
+    return;
+  }
+  const menu = document.createElement("div");
+  menu.id = "book-menu";
+  bookMenuEl = menu;
+
+  const title = document.createElement("div");
+  title.className = "book-menu-title";
+  title.textContent = "我的书";
+  menu.appendChild(title);
+
+  if (store.books.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "book-menu-item muted";
+    empty.textContent = "还没有书。";
+    menu.appendChild(empty);
+  } else {
+    for (const book of store.books) {
+      const item = document.createElement("div");
+      item.className = "book-menu-item";
+      item.dataset.bookId = book.id;
+      const name = document.createElement("span");
+      name.className = "book-menu-name";
+      name.textContent = book.name;
+      name.title = book.path;
+      const info = document.createElement("span");
+      info.className = "book-menu-info";
+      info.textContent = book.id === currentBook?.id ? "正在读" : `读到第 ${book.last_page} 页`;
+      item.append(name, info);
+      if (book.id === currentBook?.id) item.classList.add("current");
+      item.addEventListener("click", () => {
+        menu.remove();
+        bookMenuEl = null;
+        if (book.id !== currentBook?.id) void openBook(book);
+      });
+      menu.appendChild(item);
+    }
+  }
+
+  const openNew = document.createElement("button");
+  openNew.className = "book-menu-open";
+  openNew.textContent = "打开一本新书…";
+  openNew.addEventListener("click", () => {
+    menu.remove();
+    bookMenuEl = null;
+    void pickAndOpenBook();
+  });
+  menu.appendChild(openNew);
+
+  bottomBar.appendChild(menu);
+  // 点击菜单外部关闭。
+  window.addEventListener("mousedown", (e) => {
+    if (bookMenuEl && !bookMenuEl.contains(e.target as Node)) {
+      bookMenuEl.remove();
+      bookMenuEl = null;
+    }
+  }, { once: true });
 }
 
 /// 滚动/翻页后：只更新页码 + 移动高亮框 + 让当前缩略图可见。不重建 DOM。
