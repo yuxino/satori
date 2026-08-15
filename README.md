@@ -1,7 +1,7 @@
 <div align="center">
   <img src="Resources/Assets/satori-icon.png" width="112" alt="satori">
   <h1>satori</h1>
-  <p>Local-first PDF reader with AI explanations for macOS</p>
+  <p>读 PDF 时看不懂的地方，选中它，AI 给你讲。</p>
   <p>
     <a href="README_ZH.md">简体中文</a>
     · <a href="README_JA.md">日本語</a>
@@ -10,15 +10,10 @@
 
 `Satori` comes from the Japanese word 悟り (satori, "enlightenment").
 
-Satori is a macOS app for reading PDF textbooks. You read the page full-screen; when something doesn't make sense, select it and Satori explains that part based on the page you're looking at.
+A macOS app for reading PDF textbooks. Open a book, read full-screen, and when a paragraph, figure, or code block doesn't make sense — select it and get an explanation of that part.
 
-## Features
-
-- **PDF reading** — continuous scrolling; works with text-native and scanned PDFs.
-- **Explain anything on the page** — select a paragraph, figure, or code block and get an explanation based on that page.
-- **Reading history** — reading position and past Q&A are saved on your Mac.
-
-## Getting started
+- Works with text-native and scanned PDFs.
+- Reading position and past Q&A are saved on your Mac.
 
 Requires macOS 14+.
 
@@ -27,14 +22,6 @@ npm install
 npx tauri dev
 ```
 
-Build the app:
-
-```bash
-npx tauri build
-```
-
-## Privacy
-
-Books, reading position, and Q&A history stay on your Mac. Explanations are generated on demand by Alibaba Cloud Model Studio (Qwen) using the current page image; responses are not stored by the provider.
+Books and history stay on your Mac. Explanations are generated on demand by Alibaba Cloud Model Studio (Qwen) from the current page image.
 
 [MIT](LICENSE) © 2026 yuxino
