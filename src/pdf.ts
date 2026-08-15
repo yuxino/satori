@@ -9,8 +9,9 @@ import jbig2WasmUrl from "pdfjs-dist/wasm/jbig2.wasm?url";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
-/// 从单个 wasm 文件 URL 推导 wasm 目录（PDF.js 按目录加载各解码器）。
-const wasmBase = jbig2WasmUrl.substring(0, jbig2WasmUrl.lastIndexOf("/"));
+/// 从单个 wasm 文件 URL 推导 wasm 目录（PDF.js 按目录加载各解码器，
+/// 要求目录 URL 以斜杠结尾）。
+const wasmBase = jbig2WasmUrl.substring(0, jbig2WasmUrl.lastIndexOf("/") + 1);
 
 export class PDFDocument {
   private doc: PDFDocumentProxy;
