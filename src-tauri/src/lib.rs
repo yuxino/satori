@@ -1,6 +1,7 @@
 mod keychain;
 mod qwen;
 mod store;
+mod thumbs;
 
 use tauri::{Emitter, Manager};
 
@@ -101,6 +102,8 @@ pub fn run() {
             store::load_store,
             store::save_store,
             store::resolve_book_path,
+            thumbs::load_thumb,
+            thumbs::save_thumb,
             qwen::ask_visual,
         ])
         .run(tauri::generate_context!())

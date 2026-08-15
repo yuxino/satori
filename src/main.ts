@@ -39,6 +39,8 @@ import {
   saveApiKey,
   saveDevKey,
   saveStore,
+  loadThumb,
+  saveThumb,
   type BookRecord,
   type HistoryTurn,
   type ModelOption,
@@ -1262,8 +1264,6 @@ async function renderThumb(page: number): Promise<void> {
   // 绝对定位：第 page 页的横坐标 = (page-1) * THUMB_STEP。
   thumb.style.left = `${(page - 1) * THUMB_STEP}px`;
 
-  // 先拿到尺寸放占位（pageSize 有缓存，很快），再异步渲染 canvas。
-  // 这样展开瞬间所有缩略图位置就位（骨架），图片随后渐进填充——秒出排布。
   const size = await currentDoc.pageSize(page);
   const h = Math.round((size.height / size.width) * THUMB_WIDTH);
   thumb.style.width = `${THUMB_WIDTH}px`;
@@ -1271,12 +1271,39 @@ async function renderThumb(page: number): Promise<void> {
   thumbBarEl.appendChild(thumb);
   thumbElements.set(page, thumb);
 
+  // 优先读磁盘缓存（之前渲染过 → 秒出，不再解码）。
+  const bookPath = currentBook?.path ?? "";
+  let cached: string | null = null;
+  try {
+    cached = await loadThumb(bookPath, page);
+  } catch {
+    cached = null;
+  }
+  if (cached) {
+    const img = document.createElement("img");
+    img.src = `data:image/jpeg;base64,${cached}`;
+    img.style.width = `${THUMB_WIDTH}px`;
+    img.style.height = `${h}px`;
+    thumb.appendChild(img);
+    thumb.classList.remove("placeholder");
+    return;
+  }
+
+  // 未命中：渲染后写入缓存，下次秒出。
   try {
     const canvas = await currentDoc.renderPageToCanvas(page, THUMB_WIDTH / size.width);
     canvas.style.width = `${THUMB_WIDTH}px`;
     canvas.style.height = `${h}px`;
     thumb.appendChild(canvas);
     thumb.classList.remove("placeholder");
+    if (bookPath) {
+      try {
+        const jpeg = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+        void saveThumb(bookPath, page, jpeg);
+      } catch {
+        // 写缓存失败不影响显示。
+      }
+    }
   } catch {
     // 缩略图渲染失败不阻塞阅读。
   }

@@ -85,6 +85,16 @@ export function resolveBookPath(book: BookRecord): Promise<BookRecord> {
   return invoke<BookRecord>("resolve_book_path", { book });
 }
 
+// ---- 缩略图磁盘缓存 ----
+
+export function loadThumb(path: string, page: number): Promise<string | null> {
+  return invoke<string | null>("load_thumb", { path, page });
+}
+
+export function saveThumb(path: string, page: number, jpegBase64: string): Promise<void> {
+  return invoke("save_thumb", { path, page, jpegBase64 });
+}
+
 // ---- Qwen ----
 
 export function listModelOptions(): Promise<ModelOption[]> {
