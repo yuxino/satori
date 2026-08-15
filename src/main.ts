@@ -89,6 +89,7 @@ async function boot() {
   setupReaderSurface();
   setupAskFab();
   setupSheetDrag();
+  setupOutsideClickClose();
 
   // 阅读面尺寸变化时重新铺满（保留当前页）。用 ResizeObserver 监听
   // 阅读面本身，比 window resize 更可靠——初次加载时窗口事件可能丢失，
@@ -796,6 +797,30 @@ function setupSheetDrag() {
   window.addEventListener("mouseup", () => {
     dragging = false;
   });
+}
+
+// ---- 点空白收起老师卡片 ----
+function setupOutsideClickClose() {
+  // 捕获阶段：卡片打开时，点击卡片/底部栏/设置弹窗之外任意处就收起。
+  document.addEventListener(
+    "mousedown",
+    (e) => {
+      if (!teacherSheet.classList.contains("open")) return;
+      const target = e.target as HTMLElement;
+      // 点击卡片内部、底部栏、设置弹窗、书菜单时不收起。
+      if (
+        target.closest("#teacher-sheet") ||
+        target.closest("#bottom-bar") ||
+        target.closest("#settings-modal") ||
+        target.closest("#book-menu") ||
+        target.closest("#toc-drawer")
+      ) {
+        return;
+      }
+      teacherSheet.classList.remove("open");
+    },
+    true,
+  );
 }
 
 // ---- 键盘 ----
