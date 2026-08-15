@@ -46,7 +46,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleName</key>
   <string>satori dev</string>
   <key>CFBundleIdentifier</key>
-  <string>com.yuxino.satori.dev</string>
+  <string>com.yuxino.satori</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>LSApplicationCategoryType</key>
