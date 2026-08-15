@@ -89,13 +89,18 @@ async function boot() {
   }
   setupReaderSurface();
 
-  // 窗口尺寸变化时重新铺满（保留当前页）。
-  let resizeTimer: number | undefined;
-  window.addEventListener("resize", () => {
-    window.clearTimeout(resizeTimer);
-    resizeTimer = window.setTimeout(() => void relayoutOnResize(), 150);
+  // 阅读面尺寸变化时重新铺满（保留当前页）。用 ResizeObserver 监听
+  // 阅读面本身，比 window resize 更可靠——初次加载时窗口事件可能丢失，
+  // 而 ResizeObserver 在 WebView 真正完成布局后必然触发一次。
+  const resizeObserver = new ResizeObserver(() => {
+    if (!reader || !currentDoc) return;
+    window.clearTimeout(observerTimer);
+    observerTimer = window.setTimeout(() => void relayoutOnResize(), 120);
   });
+  resizeObserver.observe(readerSurface);
 }
+
+let observerTimer: number | undefined;
 
 async function relayoutOnResize() {
   if (!reader || !currentDoc) return;
@@ -142,6 +147,8 @@ async function openBook(book: BookRecord) {
     const url = convertFileSrc(resolved.path);
     currentDoc = await PDFDocument.load(url);
     currentPage = Math.min(Math.max(resolved.last_page, 1), currentDoc.pageCount);
+    // 每本书从「适合宽度」开始，不继承上次的缩放状态。
+    zoomFactor = 1;
     readerSurface.innerHTML = "";
     bottomBar.style.display = "flex";
     reader = new ScrollReader(readerSurface, currentDoc, {

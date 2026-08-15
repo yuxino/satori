@@ -19,6 +19,11 @@ const SIDE_MARGIN = 28;
 /// 视口上下各预渲染多少页。
 const RENDER_RADIUS = 2;
 
+/// 等待下一帧，确保布局完成后再读取尺寸。
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
 interface PageLayout {
   /// 显示高度（px）。
   displayHeight: number;
@@ -55,6 +60,9 @@ export class ScrollReader {
 
   /// 打开：建立页面骨架，滚动到指定页。
   async open(targetPage: number): Promise<void> {
+    // 等一帧：WebView 初次加载时 clientWidth 可能还是 0，
+    // 直接读会导致页面按错误比例建立（看起来"看不到"，缩放一下才正常）。
+    await nextFrame();
     this.pageWidth = this.availableWidth * this.zoom;
     await this.layout();
     await this.renderVisible(this.currentPage());
@@ -84,6 +92,13 @@ export class ScrollReader {
   }
 
   async layout(): Promise<void> {
+    // 防御：如果容器还没有可用宽度（未布局完成），等一帧再继续，
+    // 避免页面按 0 宽度建立、之后需要手动缩放才能看到。
+    if (this.surface.clientWidth <= 0) {
+      await nextFrame();
+      if (this.surface.clientWidth <= 0) await nextFrame();
+    }
+
     this.surface.innerHTML = "";
     this.mounted.clear();
     this.layouts = [];
