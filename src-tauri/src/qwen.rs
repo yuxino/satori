@@ -190,8 +190,9 @@ pub async fn ask_visual(
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();
     let mut full_text = String::new();
+    let mut done = false;
 
-    while let Some(chunk) = stream.next().await {
+    'outer: while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("读取响应失败：{e}"))?;
         buffer.push_str(&String::from_utf8_lossy(&chunk));
         // SSE 行以 \n 分隔；逐行解析 data: JSON。
@@ -203,6 +204,7 @@ pub async fn ask_visual(
             }
             let payload = line[5..].trim();
             if payload == "[DONE]" {
+                done = true;
                 break;
             }
             if let Ok(parsed) = serde_json::from_str::<ChatChunk>(payload) {
@@ -212,6 +214,9 @@ pub async fn ask_visual(
                     let _ = app.emit("qwen://chunk", content);
                 }
             }
+        }
+        if done {
+            break 'outer;
         }
     }
 

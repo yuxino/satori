@@ -166,7 +166,7 @@ async function openBook(book: BookRecord) {
       },
     });
     await reader.open(currentPage);
-    readerSurface.addEventListener("scroll", () => void reader?.onScroll(), { passive: true });
+    ensureScrollListener();
     hideLoading();
     renderBottomBar();
     showReopenCue(resolved);
@@ -196,6 +196,14 @@ function showLoading(message: string) {
 
 function hideLoading() {
   readerSurface.querySelector("#loading-overlay")?.remove();
+}
+
+/// 滚动监听只绑定一次（换书时 reader 变化，但监听器要复用）。
+let scrollListenerBound = false;
+function ensureScrollListener() {
+  if (scrollListenerBound) return;
+  scrollListenerBound = true;
+  readerSurface.addEventListener("scroll", () => void reader?.onScroll(), { passive: true });
 }
 
 // ---- 渲染：连续滚动阅读器接管，这里只做滚动/缩放入口 ----
@@ -593,6 +601,8 @@ function setupReaderSurface() {
   readerSurface.addEventListener("mousedown", (e) => {
     if (streaming) return;
     if (e.button !== 0) return;
+    // 缩放预览中页面坐标被 transform 扭曲，禁止框选。
+    if (reader?.isZoomPreviewing()) return;
     // 点击阅读栏/抽屉/面板时不触发框选。
     const target = e.target as HTMLElement;
     if (target.closest("#toc-drawer") || target.closest("#teacher-sheet")) return;
@@ -756,6 +766,8 @@ function setupSheetDrag() {
 
 // ---- 键盘 ----
 document.addEventListener("keydown", (e) => {
+  // 焦点在输入框/文本域时，方向键等不触发全局翻页/缩放，避免干扰输入。
+  const typing = document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA";
   if (e.key === "Escape") {
     teacherSheet.classList.remove("open");
     tocDrawer.classList.remove("open");
@@ -786,6 +798,7 @@ document.addEventListener("keydown", (e) => {
     void applyZoom();
     return;
   }
+  if (typing) return; // 输入中：不响应全局翻页/缩放
   if (!e.metaKey && (e.key === "ArrowRight" || e.key === "PageDown")) {
     if (reader && currentPage < currentDoc!.pageCount) {
       reader.scrollToPage(currentPage + 1);
@@ -908,6 +921,8 @@ function renderBottomBar() {
       void reader.onScroll();
     }
   });
+  // 缩略图条展开（悬停状态条）时校正高亮位置。
+  thumbs.addEventListener("mouseenter", () => scheduleBottomBarUpdate());
 
   // 高亮框：绝对定位在当前缩略图上，滚动时只移动它，不重建任何 DOM。
   const highlight = document.createElement("div");
@@ -1033,9 +1048,15 @@ function scheduleBottomBarUpdate() {
   const pageNum = bottomBar.querySelector(".page-num") as HTMLElement | null;
   if (pageNum) pageNum.textContent = `${currentPage} / ${currentDoc.pageCount}`;
 
+  // 缩略图条收起时（height 0）不做定位，展开时由 hover 触发一次校正。
+  const barRect = thumbBarEl.getBoundingClientRect();
+  if (barRect.height < 20) {
+    if (thumbHighlightEl) thumbHighlightEl.style.display = "none";
+    return;
+  }
+
   const active = thumbElements.get(currentPage);
-  if (active && thumbBarEl) {
-    const barRect = thumbBarEl.getBoundingClientRect();
+  if (active) {
     const thumbRect = active.getBoundingClientRect();
     // 高亮框跟随当前缩略图。
     if (thumbHighlightEl) {

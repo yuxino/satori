@@ -19,11 +19,6 @@ const SIDE_MARGIN = 28;
 /// 视口上下各预渲染多少页。
 const RENDER_RADIUS = 2;
 
-/// 等待下一帧，确保布局完成后再读取尺寸。
-function nextFrame(): Promise<void> {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
-}
-
 interface PageLayout {
   /// 显示高度（px）。
   displayHeight: number;
@@ -66,13 +61,27 @@ export class ScrollReader {
 
   /// 打开：建立页面骨架，滚动到指定页。
   async open(targetPage: number): Promise<void> {
-    // 等一帧：WebView 初次加载时 clientWidth 可能还是 0，
-    // 直接读会导致页面按错误比例建立（看起来"看不到"，缩放一下才正常）。
-    await nextFrame();
+    await this.waitForWidth();
     this.pageWidth = this.availableWidth * this.zoom;
     await this.layout();
     await this.renderVisible(this.currentPage());
     this.scrollToPage(targetPage, true);
+  }
+
+  /// 等待滚动容器获得真实宽度（WebView 初次布局可能晚于脚本执行）。
+  /// 轮询 requestAnimationFrame，最多等 2 秒；超时也继续，避免永久挂起。
+  private waitForWidth(): Promise<void> {
+    return new Promise((resolve) => {
+      const deadline = performance.now() + 2000;
+      const poll = () => {
+        if (this.surface.clientWidth > 0 || performance.now() > deadline) {
+          resolve();
+          return;
+        }
+        requestAnimationFrame(poll);
+      };
+      poll();
+    });
   }
 
   /// 缩放：改页面宽度，重建布局，保持视口中心对应的文档位置不动。
@@ -82,12 +91,9 @@ export class ScrollReader {
   }
 
   async layout(): Promise<void> {
-    // 防御：如果容器还没有可用宽度（未布局完成），等一帧再继续，
-    // 避免页面按 0 宽度建立、之后需要手动缩放才能看到。
-    if (this.surface.clientWidth <= 0) {
-      await nextFrame();
-      if (this.surface.clientWidth <= 0) await nextFrame();
-    }
+    // 防御：等宽度就绪（WebView 初次布局晚于脚本执行时，
+    // clientWidth 为 0，页面会按错误比例建立、需要手动缩放才正常）。
+    await this.waitForWidth();
 
     // 清空内容层（保留 content 本身，避免重复嵌套）。
     this.content.innerHTML = "";
@@ -135,6 +141,11 @@ export class ScrollReader {
     const centerY = this.surface.scrollTop + this.surface.clientHeight / 2;
     this.content.style.transformOrigin = `${centerX}px ${centerY}px`;
     this.content.style.transform = `scale(${clamped / this.zoom})`;
+  }
+
+  /// 是否处于缩放手势预览中（此时页面坐标被 transform 扭曲，禁用框选）。
+  isZoomPreviewing(): boolean {
+    return this.content.style.transform !== "";
   }
 
   /// 缩放手势结束：提交真实缩放（重布局 + 重渲染高清），移除 transform。
@@ -267,10 +278,12 @@ export class ScrollReader {
     const page = this.pageAtOffset(docY + h / 2);
     const layout = this.layouts[page - 1];
     const mount = this.mounted.get(page);
-    if (!layout || !mount) return null;
+    // 页面可能已被懒渲染卸载（元素不在 DOM 里），此时拿不到准确坐标。
+    if (!layout || !mount || !mount.el.isConnected) return null;
 
     // 用页面元素的实际屏幕位置换算，避免缩放假设。
     const pageRect = mount.el.getBoundingClientRect();
+    if (pageRect.width === 0 || pageRect.height === 0) return null;
     const xInPage = x - pageRect.left;
     const yInPage = y - pageRect.top;
     const kx = layout.logicalWidth / pageRect.width;
