@@ -98,63 +98,6 @@ body {
 
 /* ---- 阅读栏：悬停出现，自动淡出 ---- */
 
-#reading-bar {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  margin-top: 14px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 8px 18px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--paper) 88%, transparent);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
-  backdrop-filter: blur(10px);
-  opacity: 0;
-  transition: opacity 0.25s ease;
-  z-index: 20;
-  pointer-events: none;
-}
-
-#reading-bar.visible {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-#reading-bar .page-label {
-  font-size: 13px;
-  color: var(--ink-soft);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-#reading-bar .chapter-label {
-  font-size: 13px;
-  color: var(--ink-soft);
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-#reading-bar button {
-  border: none;
-  background: var(--lavender-soft);
-  color: var(--lavender);
-  font-size: 13px;
-  padding: 6px 14px;
-  border-radius: 999px;
-  cursor: pointer;
-  font-family: var(--sans);
-  transition: background 0.15s;
-}
-
-#reading-bar button:hover {
-  background: #dcd3ee;
-}
-
 /* ---- 空书架 ---- */
 
 #empty-state {
@@ -497,6 +440,24 @@ body {
 }
 
 #bottom-bar .nav-btn:hover {
+  background: var(--lavender-soft);
+  color: var(--lavender);
+}
+
+#bottom-bar .action-btn {
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 13px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: var(--sans);
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+#bottom-bar .action-btn:hover {
   background: var(--lavender-soft);
   color: var(--lavender);
 }

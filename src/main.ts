@@ -51,7 +51,6 @@ import { ScrollReader, type RegionSelection } from "./reader";
 
 // ---- DOM ----
 const readerSurface = document.getElementById("reader-surface") as HTMLDivElement;
-const readingBar = document.getElementById("reading-bar") as HTMLDivElement;
 const teacherSheet = document.getElementById("teacher-sheet") as HTMLDivElement;
 const tocDrawer = document.getElementById("toc-drawer") as HTMLDivElement;
 const selectionCapsule = document.getElementById("selection-capsule") as HTMLButtonElement;
@@ -155,7 +154,6 @@ async function openBook(book: BookRecord) {
     reader = new ScrollReader(readerSurface, currentDoc, {
       onPageChange: (page) => {
         currentPage = page;
-        updateReadingBarLabel();
         schedulePersistPosition();
         scheduleBottomBarUpdate();
       },
@@ -165,7 +163,6 @@ async function openBook(book: BookRecord) {
     });
     await reader.open(currentPage);
     readerSurface.addEventListener("scroll", () => void reader?.onScroll(), { passive: true });
-    updateReadingBar();
     renderBottomBar();
     showReopenCue(resolved);
     buildTOC();
@@ -183,56 +180,6 @@ async function openBook(book: BookRecord) {
 }
 
 // ---- 渲染：连续滚动阅读器接管，这里只做滚动/缩放入口 ----
-
-// ---- 阅读栏 ----
-function updateReadingBar() {
-  readingBar.innerHTML = "";
-  updateReadingBarLabel();
-  const askButton = document.createElement("button");
-  askButton.textContent = "问这一页";
-  askButton.addEventListener("click", () => {
-    hideReadingBarSoon();
-    void askPageQuestion();
-  });
-
-  const tocButton = document.createElement("button");
-  tocButton.textContent = "回看";
-  tocButton.addEventListener("click", () => {
-    buildTOC();
-    tocDrawer.classList.toggle("open");
-  });
-
-  const settingsButton = document.createElement("button");
-  settingsButton.textContent = "设置";
-  settingsButton.addEventListener("click", () => openSettings());
-
-  readingBar.append(askButton, tocButton, settingsButton);
-  readingBar.classList.add("visible");
-  scheduleHideReadingBar();
-}
-
-function updateReadingBarLabel() {
-  const pageLabel = document.createElement("span");
-  pageLabel.className = "page-label";
-  pageLabel.textContent = `${currentPage} / ${currentDoc?.pageCount ?? 0}`;
-  // 阅读栏重建时保留已有按钮，只更新页码标签。
-  const existing = readingBar.querySelector(".page-label");
-  if (existing) {
-    existing.textContent = pageLabel.textContent;
-  } else {
-    readingBar.prepend(pageLabel);
-  }
-}
-
-let barHideTimer: number | undefined;
-function scheduleHideReadingBar() {
-  window.clearTimeout(barHideTimer);
-  barHideTimer = window.setTimeout(() => readingBar.classList.remove("visible"), 2500);
-}
-function hideReadingBarSoon() {
-  window.clearTimeout(barHideTimer);
-  readingBar.classList.remove("visible");
-}
 
 // ---- 重开提示 ----
 function showReopenCue(book: BookRecord) {
@@ -607,7 +554,7 @@ function setupReaderSurface() {
     if (e.button !== 0) return;
     // 点击阅读栏/抽屉/面板时不触发框选。
     const target = e.target as HTMLElement;
-    if (target.closest("#reading-bar") || target.closest("#toc-drawer") || target.closest("#teacher-sheet")) return;
+    if (target.closest("#toc-drawer") || target.closest("#teacher-sheet")) return;
     // 只有按下在页面元素上才开始框选。
     if (!target.closest(".scroll-page")) return;
 
@@ -772,7 +719,6 @@ document.addEventListener("keydown", (e) => {
 async function applyZoom() {
   if (!reader) return;
   await reader.setZoom(zoomFactor);
-  updateReadingBar();
   updateBottomBarZoom();
 }
 
@@ -812,6 +758,22 @@ function renderBottomBar() {
       reader.scrollToPage(currentPage + 1);
       void reader.onScroll();
     }
+  });
+
+  // 问这一页 / 回看（原顶部浮层的功能并入底部栏）。
+  const askBtn = document.createElement("button");
+  askBtn.className = "action-btn";
+  askBtn.textContent = "问这一页";
+  askBtn.title = "让老师解释当前页";
+  askBtn.addEventListener("click", () => void askPageQuestion());
+
+  const reviewBtn = document.createElement("button");
+  reviewBtn.className = "action-btn";
+  reviewBtn.textContent = "回看";
+  reviewBtn.title = "按页查看问过的问题";
+  reviewBtn.addEventListener("click", () => {
+    buildTOC();
+    tocDrawer.classList.toggle("open");
   });
 
   const pageNum = document.createElement("span");
@@ -863,7 +825,7 @@ function renderBottomBar() {
   });
   zoomGroup.append(zoomOut, zoomPct, zoomIn);
 
-  bottomBar.append(prev, pageNum, thumbs, zoomGroup);
+  bottomBar.append(prev, next, askBtn, reviewBtn, pageNum, thumbs, zoomGroup);
   updateBottomBarZoom();
 
   // 打开书时一次性渲染全部缩略图（缓存），滚动时只更新高亮。
