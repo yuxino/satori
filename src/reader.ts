@@ -210,19 +210,28 @@ export class ScrollReader {
     this.rendering = true;
     try {
       for (const p of toRender) {
+        // 渲染前再次检查：如果这一页已滚出视口附近（用户滚走了），
+        // 跳过它，优先渲染当前视口的页，避免"加载不出来"。
+        const now = this.currentPage();
+        if (p < now - RENDER_RADIUS || p > now + RENDER_RADIUS) continue;
         const mount = this.mounted.get(p);
-        if (!mount) continue;
+        if (!mount || !mount.el.isConnected) continue;
         const canvas = await this.doc.renderPageToCanvas(p, this.canvasScale(p));
+        // 渲染耗时较长，期间视口可能又变了；只有页还在时才挂载。
+        if (!mount.el.isConnected) continue;
         canvas.style.width = "100%";
         canvas.style.height = "100%";
         mount.el.appendChild(canvas);
         mount.canvas = canvas;
+        // 让出事件循环，滚动/交互不被长渲染阻塞。
+        await new Promise((r) => setTimeout(r, 0));
       }
     } finally {
       this.rendering = false;
       if (this.renderQueued) {
         this.renderQueued = false;
-        void this.renderVisible();
+        // 延迟一拍再渲染，避免同步递归；滚动中会合并多次触发。
+        setTimeout(() => void this.renderVisible(), 16);
       }
     }
   }

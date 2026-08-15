@@ -21,6 +21,7 @@ export interface QAEntry {
 
 export interface Settings {
   model_id: string;
+  zoom: number;
 }
 
 export interface Store {
@@ -53,7 +54,7 @@ export interface AskRequest {
 }
 
 export function emptyStore(): Store {
-  return { books: [], qa: [], settings: { model_id: "qwen3-vl-plus" } };
+  return { books: [], qa: [], settings: { model_id: "qwen3-vl-plus", zoom: 1 } };
 }
 
 // ---- Keychain ----

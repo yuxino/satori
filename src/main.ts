@@ -151,8 +151,8 @@ async function openBook(book: BookRecord) {
     const url = convertFileSrc(resolved.path);
     currentDoc = await PDFDocument.load(url);
     currentPage = Math.min(Math.max(resolved.last_page, 1), currentDoc.pageCount);
-    // 每本书从「适合宽度」开始，不继承上次的缩放状态。
-    zoomFactor = 1;
+    // 恢复上次记住的缩放倍数（默认 1 = 适合宽度）。
+    zoomFactor = clampZoom(store.settings.zoom || 1);
     readerSurface.innerHTML = "";
     bottomBar.style.display = "flex";
     reader = new ScrollReader(readerSurface, currentDoc, {
@@ -699,6 +699,7 @@ function setupReaderSurface() {
       if (reader) {
         void reader.commitZoom(zoomFactor);
         updateBottomBarZoom();
+        persistZoom();
       }
     }) as EventListener,
   );
@@ -723,6 +724,7 @@ function setupReaderSurface() {
           if (reader) {
             void reader.commitZoom(zoomFactor);
             updateBottomBarZoom();
+            persistZoom();
           }
         }, 180);
       }
@@ -831,6 +833,16 @@ async function applyZoom() {
   if (!reader) return;
   await reader.setZoom(zoomFactor);
   updateBottomBarZoom();
+  persistZoom();
+}
+
+/// 记住缩放倍数（跨会话），防抖写盘。
+let zoomPersistTimer: number | undefined;
+function persistZoom() {
+  if (!store) return;
+  store.settings.zoom = zoomFactor;
+  window.clearTimeout(zoomPersistTimer);
+  zoomPersistTimer = window.setTimeout(() => void persist(), 400);
 }
 
 // ---- 底部工具栏（macOS 原生阅读器风格） ----
