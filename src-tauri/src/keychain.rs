@@ -26,18 +26,22 @@ fn dev_key_file(app: &AppHandle) -> Result<PathBuf, String> {
 
 #[tauri::command]
 pub fn read_api_key(app: AppHandle) -> Result<Option<String>, String> {
-    // 1) 新条目存在则直接返回。
-    if let Some(key) = read_entry(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)? {
+    // 1) 开发文件优先：测试阶段有文件就直接用，完全不碰钥匙串，
+    //    避免 keyring 在 release 环境下的任何报错/授权弹窗。
+    if let Some(key) = read_dev_key(&app) {
         return Ok(Some(key));
     }
-    // 2) 尝试从旧版条目迁移。
-    if let Some(legacy) = read_entry(LEGACY_KEYCHAIN_SERVICE, LEGACY_KEYCHAIN_ACCOUNT)? {
-        if write_entry(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, &legacy).is_ok() {
-            return Ok(Some(legacy));
-        }
+    // 2) 钥匙串读取失败绝不让命令报错（否则前端会弹设置），
+    //    吞掉错误继续往下走。
+    if let Ok(Some(key)) = read_entry(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
+        return Ok(Some(key));
     }
-    // 3) 开发兜底文件（测试阶段免钥匙串）。
-    Ok(read_dev_key(&app))
+    // 3) 尝试从旧版条目迁移。
+    if let Ok(Some(legacy)) = read_entry(LEGACY_KEYCHAIN_SERVICE, LEGACY_KEYCHAIN_ACCOUNT) {
+        let _ = write_entry(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, &legacy);
+        return Ok(Some(legacy));
+    }
+    Ok(None)
 }
 
 fn read_dev_key(app: &AppHandle) -> Option<String> {
