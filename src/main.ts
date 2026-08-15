@@ -867,18 +867,18 @@ function persistZoom() {
 const THUMB_COUNT = 13; // 当前页前后各渲染多少缩略图
 const THUMB_WIDTH = 34;
 
-/// 缩略图缓存：page -> 已渲染的 DOM 元素（打开书时一次性渲染，滚动不重建）。
+/// 缩略图缓存：page -> 已渲染的 DOM 元素（虚拟滚动，只保留可视区附近）。
 let thumbElements = new Map<number, HTMLElement>();
 let thumbBarEl: HTMLElement | null = null;
-let thumbHighlightEl: HTMLElement | null = null;
 /// 拖动缩略图条后抑制误点击的时间戳。
 let suppressThumbClickUntil = 0;
+/// 每张缩略图占位宽度（含间距），用于虚拟滚动定位。
+const THUMB_STEP = THUMB_WIDTH + 6;
 
 function renderBottomBar() {
   bottomBar.innerHTML = "";
   thumbElements = new Map();
   thumbBarEl = null;
-  thumbHighlightEl = null;
 
   // 上一页 / 下一页
   const prev = document.createElement("button");
@@ -958,6 +958,12 @@ function renderBottomBar() {
   thumbs.className = "thumbs";
   thumbBarEl = thumbs;
 
+  // 撑起全书宽度的占位（虚拟滚动：滚动条能滑整本书）。
+  const spacer = document.createElement("div");
+  spacer.className = "thumbs-spacer";
+  spacer.style.width = `${Math.max(1, (currentDoc?.pageCount ?? 1) * THUMB_STEP)}px`;
+  thumbs.appendChild(spacer);
+
   // 按住拖动横滚 vs 点击缩略图跳页：拖动超过阈值后抑制 click。
   let thumbDrag = false;
   let thumbMoved = false;
@@ -975,6 +981,7 @@ function renderBottomBar() {
     const dx = e.clientX - thumbDragStartX;
     if (Math.abs(dx) > 4) thumbMoved = true;
     thumbs.scrollLeft = thumbDragStartScroll - dx;
+    scheduleThumbVirtualRender();
   });
   window.addEventListener("mouseup", () => {
     thumbDrag = false;
@@ -997,8 +1004,11 @@ function renderBottomBar() {
       void reader.onScroll();
     }
   });
-  // 缩略图条展开（悬停状态条）时校正高亮位置。
-  thumbs.addEventListener("mouseenter", () => scheduleBottomBarUpdate());
+  // 缩略图条展开（悬停状态条）时校正高亮位置并渲染可视区。
+  thumbs.addEventListener("mouseenter", () => {
+    scheduleBottomBarUpdate();
+    scheduleThumbVirtualRender();
+  });
 
   // 鼠标滚轮在缩略图条上转为横向滚动（默认纵向滚轮在横向容器上无效）。
   thumbs.addEventListener(
@@ -1006,15 +1016,13 @@ function renderBottomBar() {
     (e) => {
       e.preventDefault();
       thumbs.scrollLeft += e.deltaY + e.deltaX;
+      scheduleThumbVirtualRender();
     },
     { passive: false },
   );
 
-  // 高亮框：绝对定位在当前缩略图上，滚动时只移动它，不重建任何 DOM。
-  const highlight = document.createElement("div");
-  highlight.className = "thumb-highlight";
-  thumbs.appendChild(highlight);
-  thumbHighlightEl = highlight;
+  // 虚拟滚动：滑动缩略图条时渲染可视区附近的页面。
+  thumbs.addEventListener("scroll", () => scheduleThumbVirtualRender(), { passive: true });
 
   // 缩放控制
   const zoomGroup = document.createElement("div");
@@ -1128,43 +1136,28 @@ function toggleBookMenu() {
   }, { once: true });
 }
 
-/// 滚动/翻页后：更新页码、增量渲染当前页附近缩略图、移动高亮框。
+/// 滚动/翻页后：更新页码、把高亮框移到当前页缩略图、滚动缩略图条让当前页可见。
 function scheduleBottomBarUpdate() {
   if (!currentDoc || !thumbBarEl) return;
   const pageNum = bottomBar.querySelector(".page-num") as HTMLElement | null;
   if (pageNum) pageNum.textContent = `${currentPage} / ${currentDoc.pageCount}`;
 
-  // 增量补齐当前页附近的缩略图（打开书后滚动到新位置也能看到）。
-  void ensureThumbnailsAround(currentPage);
-
   // 缩略图条收起时（height 0）不做定位，展开时由 hover 触发一次校正。
   const barRect = thumbBarEl.getBoundingClientRect();
-  if (barRect.height < 20) {
-    if (thumbHighlightEl) thumbHighlightEl.style.display = "none";
-    return;
-  }
+  if (barRect.height < 20) return;
 
-  const active = thumbElements.get(currentPage);
-  if (active) {
-    const thumbRect = active.getBoundingClientRect();
-    // 高亮框跟随当前缩略图。
-    if (thumbHighlightEl) {
-      thumbHighlightEl.style.left = `${thumbRect.left - barRect.left}px`;
-      thumbHighlightEl.style.top = `${thumbRect.top - barRect.top}px`;
-      thumbHighlightEl.style.width = `${thumbRect.width}px`;
-      thumbHighlightEl.style.height = `${thumbRect.height}px`;
-      thumbHighlightEl.style.display = "block";
-    }
-    // 当前缩略图滚入视野（只横向滚动缩略图条本身，不碰页面滚动）。
-    const barW = barRect.width;
-    const thumbCenter = thumbRect.left - barRect.left + thumbRect.width / 2;
-    const target = thumbBarEl.scrollLeft + (thumbCenter - barW / 2);
-    thumbBarEl.scrollTo({ left: target, behavior: "smooth" });
+  // 高亮当前页缩略图（直接改 border 颜色，比浮动框更简单可靠）。
+  for (const [p, el] of thumbElements) {
+    el.style.borderColor = p === currentPage ? "var(--lavender)" : "transparent";
   }
+  // 让当前页缩略图滚入视野（只横向滚动缩略图条本身）。
+  const target = (currentPage - 1) * THUMB_STEP - barRect.width / 2 + THUMB_WIDTH / 2;
+  thumbBarEl.scrollTo({ left: Math.max(0, target), behavior: "smooth" });
+  // 滚动后渲染可视区。
+  scheduleThumbVirtualRender();
 }
 
-/// 确保当前页前后 THUMB_COUNT 页的缩略图已渲染（增量补缺，不重建已有）。
-/// 打开书和滚动/翻页都会调用，缩略图条始终跟随阅读位置。
+/// 打开书时渲染当前页附近的缩略图。
 async function renderAllThumbnails() {
   if (!currentDoc || !thumbBarEl) return;
   await ensureThumbnailsAround(currentPage);
@@ -1173,13 +1166,39 @@ async function renderAllThumbnails() {
 
 let thumbnailBusy = false;
 let thumbnailQueued = false;
+let thumbVirtualTimer: number | undefined;
 
-async function ensureThumbnailsAround(page: number) {
+/// 虚拟滚动：渲染缩略图条可视区附近的页面，回收远处的（防抖）。
+function scheduleThumbVirtualRender() {
+  window.clearTimeout(thumbVirtualTimer);
+  thumbVirtualTimer = window.setTimeout(() => void ensureThumbnailsAround(currentPage, true), 60);
+}
+
+/// 确保缩略图条可视区（±缓冲）附近的页已渲染；`fromScroll` 时按滚动位置算。
+async function ensureThumbnailsAround(page: number, fromScroll = false) {
   if (!currentDoc || !thumbBarEl) return;
-  const start = Math.max(1, page - THUMB_COUNT);
-  const end = Math.min(currentDoc.pageCount, page + THUMB_COUNT);
 
-  // 找缺失的页。
+  let start: number;
+  let end: number;
+  if (fromScroll && thumbBarEl.scrollWidth > 0) {
+    const viewLeft = thumbBarEl.scrollLeft;
+    const viewRight = viewLeft + thumbBarEl.clientWidth;
+    start = Math.max(1, Math.floor(viewLeft / THUMB_STEP) - 2);
+    end = Math.min(currentDoc.pageCount, Math.ceil(viewRight / THUMB_STEP) + 2);
+  } else {
+    start = Math.max(1, page - THUMB_COUNT);
+    end = Math.min(currentDoc.pageCount, page + THUMB_COUNT);
+  }
+
+  // 回收可视区之外的缩略图（虚拟滚动，避免全书几千页占内存）。
+  for (const [p, el] of thumbElements) {
+    if (p < start - 8 || p > end + 8) {
+      el.remove();
+      thumbElements.delete(p);
+    }
+  }
+
+  // 渲染缺失的页。
   const missing: number[] = [];
   for (let p = start; p <= end; p++) {
     if (!thumbElements.has(p)) missing.push(p);
@@ -1192,7 +1211,6 @@ async function ensureThumbnailsAround(page: number) {
   }
   thumbnailBusy = true;
   try {
-    // 批量渲染，但分批让出事件循环，避免开大书卡住。
     const BATCH = 4;
     for (let i = 0; i < missing.length; i += BATCH) {
       const batch = missing.slice(i, i + BATCH);
@@ -1203,7 +1221,7 @@ async function ensureThumbnailsAround(page: number) {
     thumbnailBusy = false;
     if (thumbnailQueued) {
       thumbnailQueued = false;
-      void ensureThumbnailsAround(currentPage);
+      void ensureThumbnailsAround(currentPage, true);
     }
   }
 }
@@ -1216,6 +1234,8 @@ async function renderThumb(page: number): Promise<void> {
   thumb.className = "thumb";
   thumb.dataset.page = String(page);
   thumb.title = `第 ${page} 页`;
+  // 绝对定位：第 page 页的横坐标 = (page-1) * THUMB_STEP。
+  thumb.style.left = `${(page - 1) * THUMB_STEP}px`;
   thumbBarEl.appendChild(thumb);
   thumbElements.set(page, thumb);
 
@@ -1226,6 +1246,7 @@ async function renderThumb(page: number): Promise<void> {
     canvas.style.width = `${THUMB_WIDTH}px`;
     canvas.style.height = `${h}px`;
     thumb.appendChild(canvas);
+    thumb.style.height = `${h + 4}px`;
   } catch {
     // 缩略图渲染失败不阻塞阅读。
   }

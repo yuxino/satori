@@ -664,7 +664,8 @@ body {
 }
 
 /* 缩略图：平时收起，悬停状态条时在条上方展开。
-   紧贴状态条顶部（无间隙），鼠标移动连续不中断。 */
+   紧贴状态条顶部（无间隙），鼠标移动连续不中断。
+   内部为虚拟滚动：占位撑宽，缩略图绝对定位。 */
 #bottom-bar .thumbs {
   position: absolute;
   left: 8px;
@@ -672,12 +673,9 @@ body {
   bottom: 100%;
   height: 0;
   opacity: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 0 4px;
+  padding: 0;
   scrollbar-width: none;
   transition: height 0.18s ease, opacity 0.18s ease;
   pointer-events: none;
@@ -692,21 +690,20 @@ body {
   height: 74px;
   opacity: 1;
   pointer-events: auto;
-  padding: 8px 4px;
 }
 
-/* 高亮框：绝对定位，滚动时由 JS 移动位置，不重建 DOM。 */
-#bottom-bar .thumb-highlight {
-  position: absolute;
-  display: none;
-  border: 2px solid var(--lavender);
-  border-radius: 4px;
+/* 撑起全书宽度的占位元素（虚拟滚动）。 */
+#bottom-bar .thumbs-spacer {
+  width: 1px;
+  height: 100%;
   pointer-events: none;
-  z-index: 1;
 }
 
+/* 缩略图绝对定位，由 JS 摆放。 */
 #bottom-bar .thumb {
-  flex-shrink: 0;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
   border: 2px solid transparent;
   border-radius: 4px;
   cursor: pointer;
@@ -715,9 +712,6 @@ body {
   opacity: 0.75;
   transition: opacity 0.15s;
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 #bottom-bar .thumb:hover {
