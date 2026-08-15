@@ -112,8 +112,13 @@ export class ScrollReader {
       this.surface.appendChild(el);
       this.mounted.set(p, { el, canvas: null });
     }
-    // 容器高度 = 最后一页底部。
-    this.surface.style.height = `${top}px`;
+    // 关键：绝对定位的页面不撑起滚动容器的内容高度。
+    // 必须用一个普通流式占位元素撑高容器，滚动条才会出现，
+    // 否则容器自身高度会覆盖窗口高度，页面既看不见也滚不动。
+    const spacer = document.createElement("div");
+    spacer.className = "scroll-spacer";
+    spacer.style.height = `${top}px`;
+    this.surface.appendChild(spacer);
   }
 
   /// 渲染视口附近的页（惰性，已渲染的不重绘）。

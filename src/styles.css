@@ -52,6 +52,13 @@ body {
   overflow: hidden;
 }
 
+/* 撑起滚动容器内容高度的占位元素（普通流式，不可见）。 */
+.scroll-spacer {
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
 .scroll-page canvas {
   display: block;
   width: 100%;
