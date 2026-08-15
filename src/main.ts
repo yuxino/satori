@@ -136,8 +136,11 @@ function updateReadingBar() {
   });
 
   const tocButton = document.createElement("button");
-  tocButton.textContent = "目录";
-  tocButton.addEventListener("click", () => tocDrawer.classList.toggle("open"));
+  tocButton.textContent = "回看";
+  tocButton.addEventListener("click", () => {
+    buildTOC();
+    tocDrawer.classList.toggle("open");
+  });
 
   const settingsButton = document.createElement("button");
   settingsButton.textContent = "设置";
@@ -180,17 +183,59 @@ function showReopenCue(book: BookRecord) {
   window.setTimeout(() => cue.remove(), 6000);
 }
 
-// ---- 目录 ----
+// ---- 目录与回看 ----
 function buildTOC() {
   tocDrawer.innerHTML = "";
-  // MVP：目录来自 PDF 大纲。扫描书没有大纲时留空。
-  void loadOutline();
+  const title = document.createElement("div");
+  title.className = "toc-section-title";
+  title.textContent = "回看 · 问过的";
+  tocDrawer.appendChild(title);
+
+  if (!currentBook) return;
+  const mine = store.qa
+    .filter((q) => q.book_id === currentBook!.id)
+    .sort((a, b) => b.ts - a.ts);
+
+  if (mine.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "toc-item depth-2";
+    empty.textContent = "还没有问过问题。划选一段，或点「问这一页」。";
+    tocDrawer.appendChild(empty);
+    return;
+  }
+
+  for (const entry of mine.slice(0, 50)) {
+    const item = document.createElement("div");
+    item.className = "toc-item depth-1";
+    const question = entry.question.length > 28 ? `${entry.question.slice(0, 28)}…` : entry.question;
+    item.textContent = `第 ${entry.page} 页 · ${question}`;
+    item.addEventListener("click", () => {
+      tocDrawer.classList.remove("open");
+      void reopenQA(entry);
+    });
+    tocDrawer.appendChild(item);
+  }
 }
 
-async function loadOutline() {
+async function reopenQA(entry: QAEntry) {
   if (!currentDoc) return;
-  // 从当前文档读取大纲（PDF.js 封装里补一个方法）。
-  // 这里先不实现，MVP 先保证提问闭环。
+  currentPage = Math.min(Math.max(entry.page, 1), currentDoc.pageCount);
+  persistReadingPosition();
+  await renderPage();
+  // 在老师面板里展示这条历史问答。
+  teacherSheet.innerHTML = "";
+  const scroll = document.createElement("div");
+  scroll.className = "qa-scroll";
+  const q = document.createElement("div");
+  q.className = "turn question";
+  q.textContent = entry.question;
+  scroll.appendChild(q);
+  const a = document.createElement("div");
+  a.className = "turn answer";
+  a.textContent = entry.answer;
+  scroll.appendChild(a);
+  teacherSheet.append(scroll);
+  teacherSheet.classList.add("open");
 }
 
 // ---- 提问：整页 ----
