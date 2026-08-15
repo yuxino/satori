@@ -13,25 +13,38 @@
 - 存储：本地 JSON（Application Support）；API Key 只进 macOS Keychain
 - 模型：百炼 `qwen3-vl-plus` 默认（可切 `qwen3-vl-flash` / `qwen-vl-max`），北京共享地址，`store: false`
 
-## Completed in the Tauri skeleton
+## Completed so far
 
 - 旧 Swift 代码迁入 `legacy-swift/` 并打 tag，工作区换新结构
 - Tauri 2 骨架：窗口、图标（从 satori-icon.png 生成全套）、capabilities、asset protocol
-- Rust 后端：`keychain.rs`（旧条目迁移 + 新 service 写入）、`store.rs`（书库/位置/Q&A JSON 持久化 + 损坏备份）、`qwen.rs`（百炼视觉流式客户端，老师讲法提示词）
-- 前端：PDF.js 渲染整窗书页、翻页（←/→ 或 PageUp/Down）、阅读位置保存、悬停阅读栏（页码 + 问这一页 + 回看 + 设置）、选中划词胶囊、底部老师面板（流式回答 + 再讲细一点/举个例子/换个说法 + 自由追问）、回看抽屉（按页列出 Q&A 并可跳回）、重开提示「上次读到第 N 页」、设置弹窗（Key + 模型选择）
-- `npx tauri dev` 可正常启动窗口；`cargo check` / `tsc` / `vite build` 全绿
+- Rust 后端：`keychain.rs`（旧条目迁移 + 新 service 写入，已开 `apple-native` feature）、`store.rs`（书库/位置/Q&A JSON 持久化 + 损坏备份）、`qwen.rs`（百炼视觉流式客户端，老师讲法提示词）
+- **Keychain 迁移已实际完成**：旧条目 `com.yuxino.satori.qwen.v2` 的 key 已用 `mimi Local Development` 证书（指纹匹配旧 ACL）读出并写入新条目 `com.yuxino.satori.qwen.v3`，验证一致（117 字符）。**用户无需再粘贴 API Key。** 关键修复：`keyring` 需 `apple-native` feature，否则永远读不到。
+- 前端阅读器（连续滚动式）：
+  - PDF.js 渲染，页面宽度铺满窗口、连续滚动、懒渲染视口附近页面
+  - 触控板捏合缩放（gesturechange）+ Ctrl+滚轮 + ⌘+/-，放大后横向滚动
+  - 框选任意区域 → 「框选理解」（扫描版也可用），证据=区域截图+整页
+  - 自然语言触发跨页证据（"接上文/下一页/还是不懂"自动带相邻页）
+  - Preview 风格底部工具栏：缩略图条（一次性渲染+缓存，滚动只移动高亮框）+ 翻页 + 缩放
+  - 中性工作台主题（浅灰+白纸），跟随系统深浅模式
+  - 错误捕获：白屏时显示具体错误而非空白
+- 应用菜单：打开调试工具（⌥⌘I，手动触发不自动开）、设置、退出
+- `scripts/dev-app.sh`：release 构建 + `custom-protocol`（已在 Cargo.toml 写死）打包真实 .app，Dock 图标圆角
 
-## Known facts from verification
+## Known facts / pitfalls（避免重踩）
 
-- 旧钥匙串条目（service `com.yuxino.satori.qwen.v2`）存在，但其 ACL 只信任旧签名 App，新 App 与 `security` 命令均读不到密码（exit 161）。**需要用户在新 App 设置里重新粘贴一次 API Key**（设计已预判此 fallback）。
-- WebKit 开发模式下的缓存目录警告无害。
+- **Tauri dev 模式 Dock 图标是方形**：debug 构建运行时覆盖图标且 macOS 不套蒙版；必须走 release + `custom-protocol`（详见 `docs/plans/2026-08-16-tauri-dock-icon-design.md`）
+- **白屏**：`custom-protocol` 决定前端资源是否嵌入二进制；dev-app.sh 用 `--features` 传可能不生效，已直接写进 Cargo.toml
+- **滚动容器**：绝对定位页面不撑起滚动高度，必须加普通流式 spacer 撑高，否则页面看不见也滚不动
+- **初次布局**：WebView 未完成布局时 clientWidth 为 0，页面按错误比例建立；需等一帧再量宽度 + ResizeObserver 兜底
+- **渲染模糊**：canvas scale 要按每页逻辑宽度算（显示宽度×2），硬编码 /72 会超 canvas 上限被降级
+- 旧钥匙串条目 ACL 只信任旧签名；新 App 用同证书同 bundle id 签名即可读
 
 ## Next milestone
 
-1. 用户在新 App 设置粘贴 API Key，验证 keychain 写入 + 读取闭环。
-2. 用真实教材（`lang.pdf` / `software.pdf` 扫描版 + `system.pdf` 文字版）按 MVP 验收标准跑一遍：打开书 → 翻到不懂页 → 划选/问整页 → 得到 3–6 句解释 → 举个例子 → 关掉重开回原页 → 回看找到问答。
-3. 验证「页面即证据」对扫描版的实际质量：页图直接送 `qwen3-vl-plus`，确认双栏/公式/图表可读。
-4. 观察流式首 token 延迟，必要时调 max_tokens / 图像压缩参数。
+1. 用真实教材（`lang.pdf` / `software.pdf` 扫描版 + `system.pdf` 文字版）按 MVP 验收标准跑一遍：打开书 → 翻到不懂页 → 框选/问整页 → 得到 3–6 句解释 → 举个例子 → 关掉重开回原页 → 回看找到问答。
+2. 验证「页面即证据」对扫描版的实际质量：页图直接送 `qwen3-vl-plus`，确认双栏/公式/图表可读。
+3. 观察流式首 token 延迟，必要时调 max_tokens / 图像压缩参数。
+4. 产品形态与 UI 细节继续琢磨（用户反馈阅读器观感、底部栏体验已多轮迭代，方向未定稿）。
 
 ## Open questions
 
