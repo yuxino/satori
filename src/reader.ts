@@ -107,23 +107,16 @@ export class ScrollReader {
     const surfaceW = this.surface.clientWidth;
     const left = Math.max(0, (surfaceW - this.pageWidth) / 2);
 
+    // 只计算尺寸/位置数据（供页码映射、滚动定位），不建 DOM——
+    // 几百页的书逐页建元素会卡，元素由 renderVisible 按需创建。
     let top = 0;
     for (let p = 1; p <= this.doc.pageCount; p++) {
       const { width, height } = await this.doc.pageSize(p);
       const displayHeight = (height / width) * this.pageWidth;
       this.layouts.push({ displayHeight, top, logicalWidth: width, logicalHeight: height });
       top += displayHeight + PAGE_GAP;
-
-      const el = document.createElement("div");
-      el.className = "scroll-page";
-      el.dataset.page = String(p);
-      el.style.left = `${left}px`;
-      el.style.width = `${this.pageWidth}px`;
-      el.style.height = `${displayHeight}px`;
-      el.style.top = `${this.layouts[p - 1].top}px`;
-      this.content.appendChild(el);
-      this.mounted.set(p, { el, canvas: null });
     }
+
     // 关键：绝对定位的页面不撑起滚动容器的内容高度。
     // 必须用一个普通流式占位元素撑高容器，滚动条才会出现，
     // 否则容器自身高度会覆盖窗口高度，页面既看不见也滚不动。
@@ -182,13 +175,31 @@ export class ScrollReader {
       if (p < start - RENDER_RADIUS * 2 || p > end + RENDER_RADIUS * 2) {
         mount.el.remove();
         mount.canvas = null;
+        this.mounted.delete(p);
       }
     }
 
+    // 按需创建视口附近的页面元素（惰性骨架），再渲染 canvas。
     const toRender: number[] = [];
+    const surfaceW = this.surface.clientWidth;
+    const left = Math.max(0, (surfaceW - this.pageWidth) / 2);
     for (let p = start; p <= end; p++) {
-      const mount = this.mounted.get(p);
-      if (mount && !mount.canvas) toRender.push(p);
+      let mount = this.mounted.get(p);
+      if (!mount) {
+        const layout = this.layouts[p - 1];
+        if (!layout) continue;
+        const el = document.createElement("div");
+        el.className = "scroll-page";
+        el.dataset.page = String(p);
+        el.style.left = `${left}px`;
+        el.style.width = `${this.pageWidth}px`;
+        el.style.height = `${layout.displayHeight}px`;
+        el.style.top = `${layout.top}px`;
+        this.content.appendChild(el);
+        mount = { el, canvas: null };
+        this.mounted.set(p, mount);
+      }
+      if (!mount.canvas) toRender.push(p);
     }
     if (toRender.length === 0) return;
 

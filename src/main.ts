@@ -598,6 +598,9 @@ function setupReaderSurface() {
   regionOverlay.id = "region-overlay";
   readerSurface.appendChild(regionOverlay);
 
+  /// 拖拽超过该像素才算框选（单击不触发提问）。
+  const DRAG_THRESHOLD = 6;
+
   readerSurface.addEventListener("mousedown", (e) => {
     if (streaming) return;
     if (e.button !== 0) return;
@@ -605,8 +608,8 @@ function setupReaderSurface() {
     if (reader?.isZoomPreviewing()) return;
     // 点击阅读栏/抽屉/面板时不触发框选。
     const target = e.target as HTMLElement;
-    if (target.closest("#toc-drawer") || target.closest("#teacher-sheet")) return;
-    // 只有按下在页面元素上才开始框选。
+    if (target.closest("#toc-drawer") || target.closest("#teacher-sheet") || target.closest("#bottom-bar")) return;
+    // 只有按下在页面元素上才记录起点。
     if (!target.closest(".scroll-page")) return;
 
     regionActive = true;
@@ -621,6 +624,11 @@ function setupReaderSurface() {
     const y = Math.min(regionStart.y, e.clientY);
     const w = Math.abs(e.clientX - regionStart.x);
     const h = Math.abs(e.clientY - regionStart.y);
+    // 未超过阈值不显示选框（单击时不闪烁）。
+    if (w < DRAG_THRESHOLD && h < DRAG_THRESHOLD) {
+      regionOverlay.style.display = "none";
+      return;
+    }
     regionOverlay.style.display = "block";
     regionOverlay.style.left = `${x}px`;
     regionOverlay.style.top = `${y}px`;
@@ -634,6 +642,12 @@ function setupReaderSurface() {
       return;
     }
     regionActive = false;
+    // 单击（位移小于阈值）不提问。
+    const moved = Math.hypot(e.clientX - regionStart.x, e.clientY - regionStart.y);
+    if (moved < DRAG_THRESHOLD) {
+      regionStart = null;
+      return;
+    }
     const region = reader.finishRegionSelect(
       regionStart.x,
       regionStart.y,
