@@ -11,6 +11,11 @@
   --lavender-soft: #e8e2f3;
   --line: #d2d2d7;
   --sheet: #ffffff;
+  /* 统一的浮层设计语言。 */
+  --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.14);
+  --shadow-pop: 0 14px 48px rgba(0, 0, 0, 0.2);
+  --radius-card: 14px;
+  --radius-pill: 999px;
   --serif: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
   --sans: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
 }
@@ -26,6 +31,8 @@
     --lavender-soft: #3a3547;
     --line: #3a3a3c;
     --sheet: #1c1c1e;
+    --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.5);
+    --shadow-pop: 0 14px 48px rgba(0, 0, 0, 0.6);
   }
 }
 
@@ -59,7 +66,7 @@ body {
   overflow-x: auto;
   background: var(--paper-deep);
   /* 底部工具栏占位，最后一页不被遮挡。 */
-  padding-bottom: 46px;
+  padding-bottom: 34px;
 }
 
 /* 内容层：缩放预览时对它做 transform。 */
@@ -156,8 +163,8 @@ body {
 #teacher-sheet {
   position: absolute;
   right: 16px;
-  bottom: 58px; /* 底部工具栏上方 */
-  width: 400px;
+  bottom: 44px; /* 状态条上方 */
+  width: 380px;
   max-width: calc(100% - 32px);
   max-height: 62%;
   z-index: 40;
@@ -324,7 +331,7 @@ body {
 #ask-fab {
   position: absolute;
   right: 16px;
-  bottom: 58px;
+  bottom: 44px;
   z-index: 35;
   width: 44px;
   height: 44px;
@@ -494,7 +501,7 @@ body {
   color: white;
 }
 
-/* ---- 底部工具栏：macOS 原生阅读器风格 ---- */
+/* ---- 底部状态条：极矮、默认半透明，悬停展开 ---- */
 
 #bottom-bar {
   position: absolute;
@@ -502,30 +509,36 @@ body {
   right: 0;
   bottom: 0;
   z-index: 25;
-  height: 46px;
+  height: 34px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 14px;
-  background: color-mix(in srgb, var(--paper) 82%, transparent);
-  backdrop-filter: blur(14px);
-  border-top: 1px solid var(--line);
+  gap: 10px;
+  padding: 0 12px;
+  background: color-mix(in srgb, var(--paper) 72%, transparent);
+  backdrop-filter: blur(16px);
+  border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
   user-select: none;
+  transition: background 0.2s ease;
+}
+
+#bottom-bar:hover {
+  background: color-mix(in srgb, var(--paper) 92%, transparent);
 }
 
 #bottom-bar .nav-btn {
   border: none;
   background: transparent;
   color: var(--ink-soft);
-  font-size: 15px;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
+  font-size: 14px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
   cursor: pointer;
   font-family: var(--sans);
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background 0.15s, color 0.15s;
 }
 
 #bottom-bar .nav-btn:hover {
@@ -537,9 +550,9 @@ body {
   border: none;
   background: transparent;
   color: var(--ink-soft);
-  font-size: 13px;
-  padding: 5px 12px;
-  border-radius: 999px;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
   font-family: var(--sans);
   white-space: nowrap;
@@ -552,16 +565,17 @@ body {
 }
 
 #bottom-bar .book-btn {
-  max-width: 160px;
+  max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-weight: 500;
 }
 
 #bottom-bar .page-num {
   font-size: 12px;
   color: var(--ink-soft);
   font-variant-numeric: tabular-nums;
-  min-width: 52px;
+  min-width: 50px;
   text-align: center;
   white-space: nowrap;
   cursor: pointer;
@@ -572,7 +586,7 @@ body {
 }
 
 #bottom-bar .page-jump-input {
-  width: 52px;
+  width: 50px;
   border: 1px solid var(--lavender);
   border-radius: 6px;
   padding: 2px 6px;
@@ -584,19 +598,124 @@ body {
   outline: none;
 }
 
-/* ---- 书菜单 ---- */
+/* 缩略图：平时收起，悬停状态条时在条上方展开。 */
+#bottom-bar .thumbs {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(100% + 6px);
+  height: 0;
+  opacity: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 4px;
+  scrollbar-width: none;
+  transition: height 0.18s ease, opacity 0.18s ease;
+  pointer-events: none;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--sheet) 88%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow-card);
+}
+
+#bottom-bar:hover .thumbs,
+#bottom-bar .thumbs:hover {
+  height: 74px;
+  opacity: 1;
+  pointer-events: auto;
+  padding: 8px 4px;
+}
+
+/* 高亮框：绝对定位，滚动时由 JS 移动位置，不重建 DOM。 */
+#bottom-bar .thumb-highlight {
+  position: absolute;
+  display: none;
+  border: 2px solid var(--lavender);
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+#bottom-bar .thumb {
+  flex-shrink: 0;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  background: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  opacity: 0.75;
+  transition: opacity 0.15s;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#bottom-bar .thumb:hover {
+  opacity: 1;
+}
+
+#bottom-bar .thumb canvas {
+  display: block;
+}
+
+#bottom-bar .zoom-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-radius: var(--radius-pill);
+  padding: 2px 4px;
+  background: color-mix(in srgb, var(--sheet) 55%, transparent);
+}
+
+#bottom-bar .zoom-group button {
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 13px;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font-family: var(--sans);
+}
+
+#bottom-bar .zoom-group button:hover {
+  background: var(--lavender-soft);
+  color: var(--lavender);
+}
+
+#bottom-bar .zoom-pct {
+  font-size: 11px;
+  color: var(--ink-soft);
+  min-width: 38px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+#bottom-bar .zoom-pct:hover {
+  color: var(--lavender);
+}
+
+/* ---- 书菜单（统一浮层语言） ---- */
 
 #book-menu {
   position: absolute;
   left: 8px;
-  bottom: 50px;
+  bottom: 42px;
   z-index: 65;
   min-width: 260px;
   max-width: 340px;
-  background: var(--sheet);
+  background: color-mix(in srgb, var(--sheet) 96%, transparent);
+  backdrop-filter: blur(20px);
   border: 1px solid var(--line);
-  border-radius: 12px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-pop);
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -666,105 +785,19 @@ body {
   background: var(--lavender-soft);
 }
 
-#bottom-bar .thumbs {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 4px 2px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
-  height: 100%;
-  position: relative;
-}
-
-/* 高亮框：绝对定位，滚动时由 JS 移动位置，不重建 DOM。 */
-#bottom-bar .thumb-highlight {
-  position: absolute;
-  display: none;
-  border: 2px solid var(--lavender);
-  border-radius: 4px;
-  pointer-events: none;
-  z-index: 1;
-}
-
-#bottom-bar .thumb {
-  flex-shrink: 0;
-  border: 2px solid transparent;
-  border-radius: 4px;
-  cursor: pointer;
-  background: white;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
-  opacity: 0.75;
-  transition: opacity 0.15s;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-#bottom-bar .thumb:hover {
-  opacity: 1;
-}
-
-#bottom-bar .thumb canvas {
-  display: block;
-}
-
-#bottom-bar .zoom-group {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 2px 4px;
-  background: color-mix(in srgb, var(--sheet) 60%, transparent);
-}
-
-#bottom-bar .zoom-group button {
-  border: none;
-  background: transparent;
-  color: var(--ink-soft);
-  font-size: 14px;
-  width: 26px;
-  height: 26px;
-  border-radius: 999px;
-  cursor: pointer;
-  font-family: var(--sans);
-}
-
-#bottom-bar .zoom-group button:hover {
-  background: var(--lavender-soft);
-  color: var(--lavender);
-}
-
-#bottom-bar .zoom-pct {
-  font-size: 12px;
-  color: var(--ink-soft);
-  min-width: 40px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-}
-
-#bottom-bar .zoom-pct:hover {
-  color: var(--lavender);
-}
-
-/* ---- 目录抽屉 ---- */
+/* ---- 回看抽屉 ---- */
 
 #toc-drawer {
   position: absolute;
   top: 0;
   left: 0;
-  bottom: 0;
+  bottom: 34px;
   width: 300px;
   z-index: 55;
-  background: var(--sheet);
+  background: color-mix(in srgb, var(--sheet) 96%, transparent);
+  backdrop-filter: blur(20px);
   border-right: 1px solid var(--line);
-  box-shadow: 8px 0 30px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-card);
   transform: translateX(-102%);
   transition: transform 0.28s ease;
   overflow-y: auto;
