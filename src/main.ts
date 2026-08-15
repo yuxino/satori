@@ -19,6 +19,7 @@ import {
   type Store,
 } from "./api";
 import { PDFDocument } from "./pdf";
+import { ScrollReader, type RegionSelection } from "./reader";
 
 // ---- DOM ----
 const readerSurface = document.getElementById("reader-surface") as HTMLDivElement;
@@ -32,14 +33,17 @@ let store: Store = emptyStore();
 let apiKey: string | null = null;
 let currentBook: BookRecord | null = null;
 let currentDoc: PDFDocument | null = null;
+let reader: ScrollReader | null = null;
 let currentPage = 1;
-/// 用户缩放倍数：1 = 自适应铺满，可 ⌘+/⌘- 调整。
+/// 用户缩放倍数：1 = 页面宽度铺满窗口，可 ⌘+/⌘- 调整。
 let zoomFactor = 1;
-/// 页边距（CSS px），页面铺满时四周保留的小留白。
-const PAGE_MARGIN = 24;
 let history: HistoryTurn[] = [];
-let lastSelection: { text: string; page: number } | null = null;
 let streaming = false;
+
+/// 框选状态。
+let regionOverlay: HTMLDivElement | null = null;
+let regionStart: { x: number; y: number } | null = null;
+let regionActive = false;
 
 // ---- 启动 ----
 async function boot() {
@@ -57,12 +61,20 @@ async function boot() {
   }
   setupReaderSurface();
 
-  // 窗口尺寸变化时重新自适应铺满。
+  // 窗口尺寸变化时重新铺满（保留当前页）。
   let resizeTimer: number | undefined;
   window.addEventListener("resize", () => {
     window.clearTimeout(resizeTimer);
-    resizeTimer = window.setTimeout(() => void renderPage(), 150);
+    resizeTimer = window.setTimeout(() => void relayoutOnResize(), 150);
   });
+}
+
+async function relayoutOnResize() {
+  if (!reader || !currentDoc) return;
+  const anchor = reader.currentPage();
+  await reader.setZoom(zoomFactor);
+  reader.scrollToPage(anchor, true);
+  void reader.onScroll();
 }
 
 // ---- 空书架 ----
@@ -102,7 +114,19 @@ async function openBook(book: BookRecord) {
     currentDoc = await PDFDocument.load(url);
     currentPage = Math.min(Math.max(resolved.last_page, 1), currentDoc.pageCount);
     readerSurface.innerHTML = "";
-    await renderPage();
+    reader = new ScrollReader(readerSurface, currentDoc, {
+      onPageChange: (page) => {
+        currentPage = page;
+        updateReadingBarLabel();
+        schedulePersistPosition();
+      },
+      onRegionSelected: (region) => {
+        void askRegionQuestion(region);
+      },
+    });
+    await reader.open(currentPage);
+    readerSurface.addEventListener("scroll", () => void reader?.onScroll(), { passive: true });
+    updateReadingBar();
     showReopenCue(resolved);
     buildTOC();
     // 更新书籍列表（路径可能被修正）。
@@ -118,41 +142,12 @@ async function openBook(book: BookRecord) {
   }
 }
 
-// ---- 渲染当前页（自适应铺满窗口） ----
-async function renderPage() {
-  if (!currentDoc) return;
-  readerSurface.innerHTML = "";
-
-  const surface = readerSurface.getBoundingClientRect();
-  const availW = Math.max(surface.width - PAGE_MARGIN * 2, 200);
-  const availH = Math.max(surface.height - PAGE_MARGIN * 2, 200);
-
-  // 页面在 scale=1 下的逻辑尺寸。
-  const { width, height } = await currentDoc.pageSize(currentPage);
-
-  // 基础缩放：让整页刚好铺满可用区域（保持比例）。
-  const fitScale = Math.min(availW / width, availH / height);
-  // 应用用户缩放倍数。
-  const scale = fitScale * zoomFactor;
-
-  const canvas = await currentDoc.renderPageToCanvas(currentPage, scale);
-  canvas.style.width = `${width * scale}px`;
-  canvas.style.height = `${height * scale}px`;
-  readerSurface.appendChild(canvas);
-  updateReadingBar();
-}
+// ---- 渲染：连续滚动阅读器接管，这里只做滚动/缩放入口 ----
 
 // ---- 阅读栏 ----
 function updateReadingBar() {
   readingBar.innerHTML = "";
-  const pageLabel = document.createElement("span");
-  pageLabel.className = "page-label";
-  pageLabel.textContent = `${currentPage} / ${currentDoc?.pageCount ?? 0}`;
-
-  const chapterLabel = document.createElement("span");
-  chapterLabel.className = "chapter-label";
-  chapterLabel.textContent = currentChapterLabel() ?? "";
-
+  updateReadingBarLabel();
   const askButton = document.createElement("button");
   askButton.textContent = "问这一页";
   askButton.addEventListener("click", () => {
@@ -171,9 +166,22 @@ function updateReadingBar() {
   settingsButton.textContent = "设置";
   settingsButton.addEventListener("click", () => openSettings());
 
-  readingBar.append(pageLabel, chapterLabel, askButton, tocButton, settingsButton);
+  readingBar.append(askButton, tocButton, settingsButton);
   readingBar.classList.add("visible");
   scheduleHideReadingBar();
+}
+
+function updateReadingBarLabel() {
+  const pageLabel = document.createElement("span");
+  pageLabel.className = "page-label";
+  pageLabel.textContent = `${currentPage} / ${currentDoc?.pageCount ?? 0}`;
+  // 阅读栏重建时保留已有按钮，只更新页码标签。
+  const existing = readingBar.querySelector(".page-label");
+  if (existing) {
+    existing.textContent = pageLabel.textContent;
+  } else {
+    readingBar.prepend(pageLabel);
+  }
 }
 
 let barHideTimer: number | undefined;
@@ -184,10 +192,6 @@ function scheduleHideReadingBar() {
 function hideReadingBarSoon() {
   window.clearTimeout(barHideTimer);
   readingBar.classList.remove("visible");
-}
-
-function currentChapterLabel(): string | null {
-  return null; // MVP：章节识别后续做，先只有页码。
 }
 
 // ---- 重开提示 ----
@@ -201,7 +205,10 @@ function showReopenCue(book: BookRecord) {
   resume.addEventListener("click", () => {
     currentPage = book.last_page;
     cue.remove();
-    void renderPage();
+    if (reader) {
+      reader.scrollToPage(book.last_page, true);
+      void reader.onScroll();
+    }
   });
   cue.appendChild(resume);
   readerSurface.appendChild(cue);
@@ -246,7 +253,10 @@ async function reopenQA(entry: QAEntry) {
   if (!currentDoc) return;
   currentPage = Math.min(Math.max(entry.page, 1), currentDoc.pageCount);
   persistReadingPosition();
-  await renderPage();
+  if (reader) {
+    reader.scrollToPage(currentPage);
+    void reader.onScroll();
+  }
   // 在老师面板里展示这条历史问答。
   teacherSheet.innerHTML = "";
   const scroll = document.createElement("div");
@@ -273,6 +283,57 @@ async function askPageQuestion() {
 async function askSelectionQuestion(selection: { text: string; page: number }) {
   const question = `解释一下我选的这段：\n${selection.text}`;
   await askQuestion(question, selection.text);
+}
+
+// ---- 提问：框选区域（扫描版也能用） ----
+async function askRegionQuestion(region: RegionSelection) {
+  if (!currentDoc || !apiKey) {
+    openSettings(true);
+    return;
+  }
+  if (streaming) return;
+
+  // 框选区域截图为最高优先证据，同时带上所在页全文作为上下文。
+  const regionJPEG = await currentDoc.exportRegionAsJPEG(region.page, region.rect);
+  const pageJPEG = await currentDoc.exportPageAsJPEG(region.page);
+  const question = "解释一下我框选的这块内容。如果看不清就直说，不要猜。";
+
+  history.push({ role: "user", content: `${question}（框选第 ${region.page} 页区域）` });
+
+  openTeacherSheet(question);
+  const answerNode = teacherSheet.querySelector(".turn.answer") as HTMLDivElement;
+  answerNode.classList.add("streaming");
+  answerNode.textContent = "";
+  streaming = true;
+  let fullText = "";
+
+  try {
+    fullText = await askVisual(
+      apiKey,
+      {
+        model: store.settings.model_id,
+        question,
+        evidence: [
+          { page: region.page, jpeg: regionJPEG },
+          { page: region.page, jpeg: pageJPEG },
+        ],
+        history: history.slice(-6, -1),
+      },
+      (chunk) => {
+        fullText += chunk;
+        answerNode.textContent = fullText;
+      },
+    );
+    history.push({ role: "assistant", content: fullText });
+    answerNode.classList.remove("streaming");
+    appendActions(answerNode, question);
+    await saveQA(`${question}（框选区域）`, fullText);
+  } catch (err) {
+    answerNode.textContent = `出错了：${String(err)}`;
+    answerNode.classList.remove("streaming");
+  } finally {
+    streaming = false;
+  }
 }
 
 /// 决定一次提问带哪些页的图作为证据。规则基于自然语言触发，
@@ -324,7 +385,6 @@ async function askQuestion(question: string, selectionText: string | null) {
   const pages = evidencePages(question);
   const evidence = await exportEvidence(pages);
   history.push({ role: "user", content: question });
-  lastSelection = selectionText ? { text: selectionText, page: currentPage } : null;
 
   openTeacherSheet(question);
   const answerNode = teacherSheet.querySelector(".turn.answer") as HTMLDivElement;
@@ -495,30 +555,56 @@ async function saveQA(question: string, answer: string) {
   await persist();
 }
 
-// ---- 选中胶囊 ----
+// ---- 框选交互：拖拽画框，松开发问。文字版与扫描版都可用 ----
 function setupReaderSurface() {
-  document.addEventListener("mouseup", () => {
+  // 选框浮层。
+  regionOverlay = document.createElement("div");
+  regionOverlay.id = "region-overlay";
+  readerSurface.appendChild(regionOverlay);
+
+  readerSurface.addEventListener("mousedown", (e) => {
     if (streaming) return;
-    const sel = window.getSelection();
-    const text = sel?.toString().trim();
-    if (text && text.length > 0 && sel && !sel.isCollapsed) {
-      const range = sel.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      selectionCapsule.style.display = "block";
-      selectionCapsule.style.left = `${rect.left}px`;
-      selectionCapsule.style.top = `${Math.max(rect.bottom + 8, 40)}px`;
-      lastSelection = { text, page: currentPage };
-    } else {
-      selectionCapsule.style.display = "none";
-    }
-  });
-  selectionCapsule.addEventListener("click", () => {
+    if (e.button !== 0) return;
+    // 点击阅读栏/抽屉/面板时不触发框选。
+    const target = e.target as HTMLElement;
+    if (target.closest("#reading-bar") || target.closest("#toc-drawer") || target.closest("#teacher-sheet")) return;
+    // 只有按下在页面元素上才开始框选。
+    if (!target.closest(".scroll-page")) return;
+
+    regionActive = true;
+    regionStart = { x: e.clientX, y: e.clientY };
     selectionCapsule.style.display = "none";
-    if (lastSelection) void askSelectionQuestion(lastSelection);
+    e.preventDefault();
   });
-  // 翻页/点击时收起胶囊
-  document.addEventListener("mousedown", (e) => {
-    if (e.target !== selectionCapsule) selectionCapsule.style.display = "none";
+
+  window.addEventListener("mousemove", (e) => {
+    if (!regionActive || !regionStart || !regionOverlay) return;
+    const x = Math.min(regionStart.x, e.clientX);
+    const y = Math.min(regionStart.y, e.clientY);
+    const w = Math.abs(e.clientX - regionStart.x);
+    const h = Math.abs(e.clientY - regionStart.y);
+    regionOverlay.style.display = "block";
+    regionOverlay.style.left = `${x}px`;
+    regionOverlay.style.top = `${y}px`;
+    regionOverlay.style.width = `${w}px`;
+    regionOverlay.style.height = `${h}px`;
+  });
+
+  window.addEventListener("mouseup", (e) => {
+    if (!regionActive || !regionStart || !reader) {
+      regionActive = false;
+      return;
+    }
+    regionActive = false;
+    const region = reader.finishRegionSelect(
+      regionStart.x,
+      regionStart.y,
+      e.clientX,
+      e.clientY,
+      regionOverlay!,
+    );
+    regionStart = null;
+    if (region) void askRegionQuestion(region);
   });
 }
 
@@ -535,46 +621,57 @@ document.addEventListener("keydown", (e) => {
   if (e.metaKey && e.key === ",") {
     openSettings();
   }
-  // 缩放：⌘+/⌘- 调整，⌘0 回到自适应。
+  // 缩放：⌘+/⌘- 调整，⌘0 回到铺满宽度。
   if (e.metaKey && (e.key === "=" || e.key === "+")) {
     e.preventDefault();
     zoomFactor = Math.min(3, zoomFactor + 0.15);
-    void renderPage();
+    void applyZoom();
     return;
   }
   if (e.metaKey && e.key === "-") {
     e.preventDefault();
     zoomFactor = Math.max(0.5, zoomFactor - 0.15);
-    void renderPage();
+    void applyZoom();
     return;
   }
   if (e.metaKey && e.key === "0") {
     e.preventDefault();
     zoomFactor = 1;
-    void renderPage();
+    void applyZoom();
     return;
   }
   if (!e.metaKey && (e.key === "ArrowRight" || e.key === "PageDown")) {
-    if (currentDoc && currentPage < currentDoc.pageCount) {
-      currentPage += 1;
-      persistReadingPosition();
-      void renderPage();
+    if (reader && currentPage < currentDoc!.pageCount) {
+      reader.scrollToPage(currentPage + 1);
+      void reader.onScroll();
     }
   }
   if (!e.metaKey && (e.key === "ArrowLeft" || e.key === "PageUp")) {
-    if (currentPage > 1) {
-      currentPage -= 1;
-      persistReadingPosition();
-      void renderPage();
+    if (reader && currentPage > 1) {
+      reader.scrollToPage(currentPage - 1);
+      void reader.onScroll();
     }
   }
 });
+
+async function applyZoom() {
+  if (!reader) return;
+  await reader.setZoom(zoomFactor);
+  updateReadingBar();
+}
 
 function persistReadingPosition() {
   if (!currentBook) return;
   currentBook.last_page = currentPage;
   store.books = store.books.map((b) => (b.id === currentBook!.id ? currentBook! : b));
   void persist();
+}
+
+/// 滚动触发时防抖保存阅读位置。
+let persistTimer: number | undefined;
+function schedulePersistPosition() {
+  window.clearTimeout(persistTimer);
+  persistTimer = window.setTimeout(persistReadingPosition, 800);
 }
 
 // ---- 设置 ----

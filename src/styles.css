@@ -35,22 +35,38 @@ body {
   position: relative;
 }
 
-/* ---- 书桌：整窗书页 ---- */
+/* ---- 书桌：连续滚动阅读器 ---- */
 
 #reader-surface {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: var(--paper-deep);
 }
 
-#reader-surface canvas {
-  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.12);
+.scroll-page {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
   background: white;
-  /* 尺寸由 JS 按自适应计算显式设置，这里不再强制缩放。 */
+  box-shadow: 0 4px 22px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.scroll-page canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#region-overlay {
+  position: fixed;
+  z-index: 60;
+  display: none;
+  border: 2px solid var(--lavender);
+  background: rgba(141, 123, 184, 0.15);
+  pointer-events: none;
 }
 
 /* ---- 阅读栏：悬停出现，自动淡出 ---- */

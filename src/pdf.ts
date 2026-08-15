@@ -14,6 +14,8 @@ export interface RenderedPage {
 
 export class PDFDocument {
   private doc: PDFDocumentProxy;
+  /// 页面尺寸缓存（scale=1），连续滚动时避免反复异步取尺寸。
+  private sizeCache = new Map<number, { width: number; height: number }>();
 
   private constructor(doc: PDFDocumentProxy) {
     this.doc = doc;
@@ -32,11 +34,26 @@ export class PDFDocument {
     return this.doc.numPages;
   }
 
-  /// 页面在 scale=1 下的逻辑尺寸（PDF 点）。用于自适应缩放计算。
+  /// 页面在 scale=1 下的逻辑尺寸（PDF 点）。带缓存。
   async pageSize(pageNumber: number): Promise<{ width: number; height: number }> {
+    const cached = this.sizeCache.get(pageNumber);
+    if (cached) return cached;
     const page = await this.doc.getPage(pageNumber);
     const viewport = page.getViewport({ scale: 1 });
-    return { width: viewport.width, height: viewport.height };
+    const size = { width: viewport.width, height: viewport.height };
+    this.sizeCache.set(pageNumber, size);
+    return size;
+  }
+
+  /// 批量预热页面尺寸（连续滚动布局需要提前知道总高度）。
+  async prefetchSizes(from: number, to: number): Promise<void> {
+    const batch: Promise<void>[] = [];
+    for (let p = Math.max(1, from); p <= Math.min(this.doc.numPages, to); p++) {
+      if (!this.sizeCache.has(p)) {
+        batch.push(this.pageSize(p).then(() => undefined));
+      }
+    }
+    await Promise.all(batch);
   }
 
   async renderPageToCanvas(pageNumber: number, scale: number): Promise<HTMLCanvasElement> {
