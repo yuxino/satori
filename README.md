@@ -1,7 +1,7 @@
 <div align="center">
   <img src="Resources/Assets/satori-icon.png" width="112" alt="satori">
   <h1>satori</h1>
-  <p>选中 PDF 里看不懂的部分，获得基于当前页的解释。</p>
+  <p>Select what you don't understand in a PDF and get an explanation based on that page.</p>
   <p>
     <a href="README_ZH.md">简体中文</a>
     · <a href="README_JA.md">日本語</a>
