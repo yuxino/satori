@@ -442,23 +442,6 @@ body {
   pointer-events: none;
 }
 
-/* ---- 选中胶囊 ---- */
-
-#selection-capsule {
-  position: absolute;
-  z-index: 50;
-  display: none;
-  border: none;
-  background: var(--lavender);
-  color: white;
-  font-size: 13px;
-  padding: 6px 16px;
-  border-radius: 999px;
-  cursor: pointer;
-  font-family: var(--sans);
-  box-shadow: 0 4px 14px rgba(141, 123, 184, 0.4);
-}
-
 /* ---- 重开提示 ---- */
 
 #reopen-cue {

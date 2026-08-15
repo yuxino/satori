@@ -54,7 +54,6 @@ import { renderMarkdown } from "./markdown";
 const readerSurface = document.getElementById("reader-surface") as HTMLDivElement;
 const teacherSheet = document.getElementById("teacher-sheet") as HTMLDivElement;
 const tocDrawer = document.getElementById("toc-drawer") as HTMLDivElement;
-const selectionCapsule = document.getElementById("selection-capsule") as HTMLButtonElement;
 const bottomBar = document.getElementById("bottom-bar") as HTMLDivElement;
 
 // ---- 状态 ----
@@ -81,7 +80,7 @@ async function boot() {
 
   if (store.books.length > 0 && !apiKey) {
     // 有书但没有 Key：先问 Key（老师需要能说话）。
-    openSettings(true);
+    openSettings();
   } else if (store.books.length === 0) {
     showEmptyState();
   } else {
@@ -149,6 +148,20 @@ async function openBook(book: BookRecord) {
     const resolved = await resolveBookPath(book);
     currentBook = resolved;
     const url = convertFileSrc(resolved.path);
+
+    // 换书前清理旧状态：销毁旧文档释放 worker/内存、重置对话历史、
+    // 收起面板与菜单，避免跨书串扰。
+    reader?.clear();
+    currentDoc?.destroy();
+    currentDoc = null;
+    reader = null;
+    history = [];
+    teacherSheet.classList.remove("open");
+    tocDrawer.classList.remove("open");
+    bookMenuEl?.remove();
+    bookMenuEl = null;
+    hideLoading();
+
     currentDoc = await PDFDocument.load(url);
     currentPage = Math.min(Math.max(resolved.last_page, 1), currentDoc.pageCount);
     // 恢复上次记住的缩放倍数（默认 1 = 适合宽度）。
@@ -293,16 +306,10 @@ async function askPageQuestion() {
   await askQuestion(question, null);
 }
 
-// ---- 提问：选中段 ----
-async function askSelectionQuestion(selection: { text: string; page: number }) {
-  const question = `解释一下我选的这段：\n${selection.text}`;
-  await askQuestion(question, selection.text);
-}
-
 // ---- 提问：框选区域（扫描版也能用） ----
 async function askRegionQuestion(region: RegionSelection) {
   if (!currentDoc || !apiKey) {
-    openSettings(true);
+    openSettings();
     return;
   }
   if (streaming) return;
@@ -390,7 +397,7 @@ async function exportEvidence(pages: number[]): Promise<{ page: number; jpeg: st
 // ---- 核心提问闭环 ----
 async function askQuestion(question: string, selectionText: string | null) {
   if (!currentDoc || !apiKey) {
-    openSettings(true);
+    openSettings();
     return;
   }
   if (streaming) return;
@@ -443,6 +450,18 @@ function setAnswerContent(el: HTMLElement, text: string) {
 
 function openTeacherSheet(question: string) {
   teacherSheet.innerHTML = "";
+
+  // 如果卡片之前被拖出可视区（比如窗口缩小了），回到默认位置。
+  const rect = teacherSheet.getBoundingClientRect();
+  if (
+    teacherSheet.style.left !== "" &&
+    (rect.left > window.innerWidth - 40 || rect.top > window.innerHeight - 40 || rect.left < -40 || rect.top < 40)
+  ) {
+    teacherSheet.style.left = "";
+    teacherSheet.style.top = "";
+    teacherSheet.style.right = "";
+    teacherSheet.style.bottom = "";
+  }
 
   // 头部：拖拽条 + 关闭按钮。
   const header = document.createElement("div");
@@ -614,7 +633,6 @@ function setupReaderSurface() {
 
     regionActive = true;
     regionStart = { x: e.clientX, y: e.clientY };
-    selectionCapsule.style.display = "none";
     e.preventDefault();
   });
 
@@ -771,8 +789,13 @@ function setupSheetDrag() {
     if (!dragging) return;
     teacherSheet.style.right = "auto";
     teacherSheet.style.bottom = "auto";
-    teacherSheet.style.left = `${Math.max(8, e.clientX - offsetX)}px`;
-    teacherSheet.style.top = `${Math.max(8, e.clientY - offsetY)}px`;
+    // 限制在窗口可视范围内，避免拖出屏幕后找不到。
+    const w = teacherSheet.offsetWidth;
+    const h = teacherSheet.offsetHeight;
+    const maxX = Math.max(8, window.innerWidth - w - 8);
+    const maxY = Math.max(8, window.innerHeight - h - 8);
+    teacherSheet.style.left = `${Math.min(Math.max(8, e.clientX - offsetX), maxX)}px`;
+    teacherSheet.style.top = `${Math.min(Math.max(8, e.clientY - offsetY), maxY)}px`;
   });
 
   window.addEventListener("mouseup", () => {
@@ -787,7 +810,6 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     teacherSheet.classList.remove("open");
     tocDrawer.classList.remove("open");
-    selectionCapsule.style.display = "none";
   }
   if (e.metaKey && e.key === "t") {
     tocDrawer.classList.toggle("open");
@@ -1101,16 +1123,17 @@ function scheduleBottomBarUpdate() {
 }
 
 /// 一次性渲染当前页附近的缩略图并缓存。滚动时不调用。
+/// 串行渲染并让出事件循环，避免开大书时并发渲染卡住。
 async function renderAllThumbnails() {
   if (!currentDoc || !thumbBarEl) return;
   const start = Math.max(1, currentPage - THUMB_COUNT);
   const end = Math.min(currentDoc.pageCount, currentPage + THUMB_COUNT);
 
-  const jobs: Promise<void>[] = [];
   for (let p = start; p <= end; p++) {
-    jobs.push(renderThumb(p));
+    await renderThumb(p);
+    // 让出事件循环，避免阻塞打开书的主流程。
+    await new Promise((r) => setTimeout(r, 0));
   }
-  await Promise.all(jobs);
   scheduleBottomBarUpdate();
 }
 
@@ -1152,7 +1175,7 @@ function schedulePersistPosition() {
 }
 
 // ---- 设置 ----
-function openSettings(force: boolean = false) {
+function openSettings() {
   const modal = document.createElement("div");
   modal.id = "settings-modal";
   modal.className = "open";

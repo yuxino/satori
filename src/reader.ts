@@ -64,8 +64,10 @@ export class ScrollReader {
     await this.waitForWidth();
     this.pageWidth = this.availableWidth * this.zoom;
     await this.layout();
-    await this.renderVisible(this.currentPage());
+    // 直接渲染目标页附近（跳到上次读的页，不等 scroll 事件异步触发）。
+    await this.renderVisible(targetPage);
     this.scrollToPage(targetPage, true);
+    this.emitPage();
   }
 
   /// 等待滚动容器获得真实宽度（WebView 初次布局可能晚于脚本执行）。

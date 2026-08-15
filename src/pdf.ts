@@ -7,11 +7,6 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
-export interface RenderedPage {
-  page: number;
-  scale: number;
-}
-
 export class PDFDocument {
   private doc: PDFDocumentProxy;
   /// 页面尺寸缓存（scale=1），连续滚动时避免反复异步取尺寸。

@@ -123,22 +123,29 @@ pub fn save_store(app: AppHandle, store: Store) -> Result<(), String> {
     fs::write(&path, raw).map_err(|e| format!("写入存储失败：{e}"))
 }
 
-/// 书文件可能被移动或改名：如果记录的路径不存在，尝试在同目录下按文件名找回。
+/// 书文件可能被移动或改名：如果记录的路径不存在，尝试在常见位置
+/// （原路径的父目录、用户文档目录、桌面）按文件名找回。
 #[tauri::command]
-pub fn resolve_book_path(app: AppHandle, book: BookRecord) -> Result<BookRecord, String> {
+pub fn resolve_book_path(book: BookRecord) -> Result<BookRecord, String> {
     let path = PathBuf::from(&book.path);
     if path.exists() {
         return Ok(book);
     }
-    // 尝试文件名兜底（例如沙箱重定向或路径前缀变化）。
     if let Some(name) = path.file_name() {
-        if let Some(dir) = app
-            .path()
-            .app_data_dir()
-            .ok()
-            .and_then(|d| d.parent().map(|p| p.to_path_buf()))
-        {
-            let candidate = dir.join(name);
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Some(parent) = path.parent() {
+            candidates.push(parent.join(name));
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            candidates.push(PathBuf::from(&home).join("Desktop").join(name));
+            candidates.push(PathBuf::from(&home).join("Documents").join(name));
+            candidates.push(PathBuf::from(&home).join("Downloads").join(name));
+        }
+        // 也试试当前工作目录（开发时书常放在项目附近）。
+        if let Ok(cwd) = std::env::current_dir() {
+            candidates.push(cwd.join(name));
+        }
+        for candidate in candidates {
             if candidate.exists() {
                 let mut fixed = book.clone();
                 fixed.path = candidate.to_string_lossy().to_string();

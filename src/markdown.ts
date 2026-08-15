@@ -7,7 +7,6 @@ export function renderMarkdown(text: string): DocumentFragment {
   const frag = document.createDocumentFragment();
   const lines = text.replace(/\r\n/g, "\n").split("\n");
 
-  let i = 0;
   let listType: "ul" | "ol" | null = null;
   let listEl: HTMLElement | null = null;
   let paraEl: HTMLElement | null = null;
