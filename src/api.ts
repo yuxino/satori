@@ -1,0 +1,101 @@
+// 与 Rust 后端交互的封装：命令调用 + 流式事件。
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+
+export interface BookRecord {
+  id: string;
+  name: string;
+  path: string;
+  last_page: number;
+  added_at: number;
+}
+
+export interface QAEntry {
+  id: string;
+  book_id: string;
+  page: number;
+  question: string;
+  answer: string;
+  ts: number;
+}
+
+export interface Settings {
+  model_id: string;
+}
+
+export interface Store {
+  books: BookRecord[];
+  qa: QAEntry[];
+  settings: Settings;
+}
+
+export interface ModelOption {
+  id: string;
+  title: string;
+  explanation: string;
+}
+
+export interface HistoryTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface AskRequest {
+  model: string;
+  question: string;
+  image_base64: string | null;
+  history: HistoryTurn[];
+}
+
+export function emptyStore(): Store {
+  return { books: [], qa: [], settings: { model_id: "qwen3-vl-plus" } };
+}
+
+// ---- Keychain ----
+
+export function readApiKey(): Promise<string | null> {
+  return invoke<string | null>("read_api_key");
+}
+
+export function saveApiKey(apiKey: string): Promise<void> {
+  return invoke("save_api_key", { apiKey });
+}
+
+export function clearApiKey(): Promise<void> {
+  return invoke("clear_api_key");
+}
+
+// ---- Store ----
+
+export function loadStore(): Promise<Store> {
+  return invoke<Store>("load_store");
+}
+
+export function saveStore(store: Store): Promise<void> {
+  return invoke("save_store", { store });
+}
+
+export function resolveBookPath(book: BookRecord): Promise<BookRecord> {
+  return invoke<BookRecord>("resolve_book_path", { book });
+}
+
+// ---- Qwen ----
+
+export function listModelOptions(): Promise<ModelOption[]> {
+  return invoke<ModelOption[]>("list_model_options");
+}
+
+export async function askVisual(apiKey: string, request: AskRequest, onChunk: (text: string) => void): Promise<string> {
+  let fullText = "";
+  const unlisten = await listen<string>("qwen://chunk", (event) => {
+    fullText += event.payload;
+    onChunk(event.payload);
+  });
+  try {
+    // invoke 返回完整文本；chunk 事件用于流式展示。
+    fullText = await invoke<string>("ask_visual", { apiKey, request });
+  } finally {
+    unlisten();
+  }
+  return fullText;
+}

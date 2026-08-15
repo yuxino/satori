@@ -10,3 +10,11 @@ dist/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+# Node
+node_modules/
+.npm-cache/
+
+# Rust / Tauri
+src-tauri/target/
+.cargo-home/
