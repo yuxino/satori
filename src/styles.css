@@ -243,26 +243,47 @@ body {
   font-family: var(--sans);
 }
 
-/* GitHub 风格热力格子图 */
+/* GitHub 风格热力格子图：铺满容器（列等分，格子占满列宽）。 */
 .activity-grid {
   display: flex;
+  flex-wrap: wrap;
   gap: 3px;
-  padding: 10px 12px;
+  padding: 12px;
   background: var(--sheet);
   border: 1px solid var(--line);
   border-radius: 12px;
-  width: fit-content;
+  width: 100%;
+}
+
+/* 月份标签行占满第一行，内部 26 列与下方格子列对齐。 */
+.grid-header {
+  flex: 0 0 100%;
+  display: flex;
+  gap: 3px;
+  margin-bottom: 3px;
+}
+
+.grid-header-col {
+  flex: 1;
+  font-size: 10px;
+  color: var(--ink-faint);
+  font-family: var(--sans);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .grid-col {
+  flex: 1 1 0;
+  min-width: 0; /* 避免内容撑开，保证列均分容器宽度 */
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
 
 .grid-cell {
-  width: 11px;
-  height: 11px;
+  width: 100%;
+  height: 20px;
   border-radius: 2px;
   background: var(--paper);
 }

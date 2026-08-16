@@ -266,7 +266,7 @@ function statChip(value: string, label: string): HTMLDivElement {
   return chip;
 }
 
-/// 最近 26 周的 GitHub 风格热力格子图（列 = 周，行 = 周一..周日）。
+/// 最近 26 周的 GitHub 风格热力格子图（列 = 周，行 = 周一..周日，铺满容器）。
 function buildActivityGrid(): HTMLDivElement {
   const weeks = 26;
   const today = new Date();
@@ -275,6 +275,24 @@ function buildActivityGrid(): HTMLDivElement {
 
   const grid = document.createElement("div");
   grid.className = "activity-grid";
+
+  // 月份标签行：列首次进入新月份时标一个「X月」。
+  const header = document.createElement("div");
+  header.className = "grid-header";
+  let prevMonth = -1;
+  for (let w = weeks - 1; w >= 0; w--) {
+    const date = new Date(monday);
+    date.setDate(monday.getDate() - w * 7);
+    const hc = document.createElement("div");
+    hc.className = "grid-header-col";
+    if (date.getMonth() !== prevMonth) {
+      hc.textContent = `${date.getMonth() + 1}月`;
+      prevMonth = date.getMonth();
+    }
+    header.appendChild(hc);
+  }
+  grid.appendChild(header);
+
   for (let w = weeks - 1; w >= 0; w--) {
     const col = document.createElement("div");
     col.className = "grid-col";
