@@ -56,6 +56,8 @@ export class ScrollReader {
   private snapTimer: number | undefined;
   /// 上次吸附/翻页到的页码（页内滚动不重复吸附）。
   private lastSnapPage = 0;
+  /// layout 代次号：并发 layout 保护（旧代次中途放弃）。
+  private layoutGen = 0;
 
   constructor(surface: HTMLDivElement, doc: PDFDocument, cb: ReaderCallbacks = {}) {
     this.surface = surface;
@@ -89,13 +91,18 @@ export class ScrollReader {
     await this.commitZoom(this.zoom);
   }
 
-  /// 等待滚动容器获得真实宽度（WebView 初次布局可能晚于脚本执行）。
+  /// 等待滚动容器获得真实尺寸（WebView 初次布局可能晚于脚本执行）。
+  /// 宽高都就绪才继续——翻页模式的「适合视口」依赖高度，高度未就绪时
+  /// 算出的页面尺寸是错的，会连锁引发页码错乱。
   /// 轮询 requestAnimationFrame，最多等 2 秒；超时也继续，避免永久挂起。
   private waitForWidth(): Promise<void> {
     return new Promise((resolve) => {
       const deadline = performance.now() + 2000;
       const poll = () => {
-        if (this.surface.clientWidth > 0 || performance.now() > deadline) {
+        if (
+          (this.surface.clientWidth > 0 && this.surface.clientHeight > 0) ||
+          performance.now() > deadline
+        ) {
           resolve();
           return;
         }
@@ -112,9 +119,14 @@ export class ScrollReader {
   }
 
   async layout(): Promise<void> {
-    // 防御：等宽度就绪（WebView 初次布局晚于脚本执行时，
-    // clientWidth 为 0，页面会按错误比例建立、需要手动缩放才正常）。
+    // 防御：等尺寸就绪（WebView 初次布局晚于脚本执行时，
+    // clientWidth/Height 为 0，页面会按错误比例建立、需要手动缩放才正常）。
     await this.waitForWidth();
+
+    // 并发保护：ResizeObserver 可能在 open/commitZoom 的异步 layout 中途
+    // 再触发一次 layout。用代次号让旧的 layout 中途放弃，避免两个 layout
+    // 交错写坏 layouts（页面 top 不一致 → 页码错乱 → 吸附级联翻到最后一页）。
+    const gen = ++this.layoutGen;
 
     // 清空内容层（保留 content 本身，避免重复嵌套）。
     this.content.innerHTML = "";
@@ -123,6 +135,7 @@ export class ScrollReader {
 
     // 批量预热所有页尺寸，避免逐页串行等待。
     await this.doc.prefetchSizes(1, this.doc.pageCount);
+    if (gen !== this.layoutGen) return; // 已有更新的 layout 接管
 
     const surfaceW = this.surface.clientWidth;
     const surfaceH = this.surface.clientHeight;
@@ -134,6 +147,7 @@ export class ScrollReader {
     const sizes: { width: number; height: number }[] = [];
     for (let p = 1; p <= this.doc.pageCount; p++) {
       sizes.push(await this.doc.pageSize(p));
+      if (gen !== this.layoutGen) return;
     }
 
     /// 翻页模式的缩放：zoom=1 时页面/展开恰好放进视口（宽高都不超出）。
@@ -338,9 +352,10 @@ export class ScrollReader {
 
   /// 当前视口中心所在页（双页时按中心点横坐标落在左/右页）。
   currentPage(): number {
-    const cx = this.surface.scrollLeft + this.surface.clientWidth / 2;
-    const cy = this.surface.scrollTop + this.surface.clientHeight / 2;
-    return this.pageAtPoint(cx, cy);
+    // pageAtPoint 的参数是「视口坐标」：它内部会加 scrollTop 换算文档位置，
+    // 并把 clientX/Y 与页面元素的屏幕矩形比较。这里只传视口中心即可，
+    // 不能传 scrollTop + 中心（会重复加 scrollTop → 页码约翻倍 → 吸附级联到最后一页）。
+    return this.pageAtPoint(this.surface.clientWidth / 2, this.surface.clientHeight / 2);
   }
 
   private pageAtOffset(y: number): number {
@@ -371,9 +386,11 @@ export class ScrollReader {
         return p; // 点明确落在这页里
       }
       const dist = Math.abs(clientX - (r.left + r.width / 2));
-      if (dist <= bestDist) {
+      // 注意用严格 <：双页模式下左页与下一行左页的水平距离相同（都居中），
+      // 若用 <= 会把「当前行」换成「下一行」→ 吸附每拍前进一行，级联到最后一页。
+      if (dist < bestDist) {
         bestDist = dist;
-        best = p; // 平手取更小页号（左页）
+        best = p; // 平手取更小页号（当前行的左页）
       }
     }
     return best;
