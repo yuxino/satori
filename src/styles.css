@@ -292,6 +292,23 @@ body {
   opacity: 0.3;
 }
 
+/* 图例：少 → 多 */
+.home-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--ink-faint);
+  font-family: var(--sans);
+}
+
+.home-legend .grid-cell {
+  width: 10px;
+  height: 10px;
+  flex: none;
+}
+
 .grid-cell.level-1 {
   background: #e2d8f2;
 }
@@ -313,10 +330,13 @@ body {
 }
 
 .home-book {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
   background: var(--sheet);
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 14px 16px;
+  padding: 12px 14px;
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
@@ -325,6 +345,35 @@ body {
   transform: translateY(-1px);
   border-color: var(--lavender);
   box-shadow: var(--shadow-card);
+}
+
+/* 迷你封面：缩略图或占位块。 */
+.home-book-cover {
+  flex-shrink: 0;
+  width: 44px;
+  height: 58px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: linear-gradient(160deg, var(--lavender-soft), var(--lavender));
+  color: #fff;
+  font-size: 20px;
+  font-family: var(--sans);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(125, 107, 169, 0.3);
+}
+
+.home-book-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.home-book-body {
+  flex: 1;
+  min-width: 0;
 }
 
 .home-book-name {

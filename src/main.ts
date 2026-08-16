@@ -196,6 +196,18 @@ function renderHome() {
   activitySection.appendChild(stats);
 
   activitySection.appendChild(buildActivityGrid());
+
+  // 图例：少 → 多
+  const legend = document.createElement("div");
+  legend.className = "home-legend";
+  legend.append(document.createTextNode("少"));
+  for (let lv = 0; lv <= 4; lv++) {
+    const swatch = document.createElement("span");
+    swatch.className = `grid-cell level-${lv}`;
+    legend.appendChild(swatch);
+  }
+  legend.append(document.createTextNode("多"));
+  activitySection.appendChild(legend);
   wrap.appendChild(activitySection);
 
   // 我的书
@@ -326,6 +338,25 @@ function buildBookCard(book: BookRecord): HTMLDivElement {
   const card = document.createElement("div");
   card.className = "home-book";
 
+  // 左侧迷你封面：读缓存好的第 1 页缩略图；没有缓存就放一个占位块。
+  const cover = document.createElement("div");
+  cover.className = "home-book-cover";
+  const initial = (book.name.replace(/\.pdf$/i, "") || "书").slice(0, 1);
+  cover.textContent = initial;
+  void loadThumb(book.path, 1)
+    .then((b64) => {
+      if (!b64 || !cover.isConnected) return;
+      const img = document.createElement("img");
+      img.src = `data:image/jpeg;base64,${b64}`;
+      img.alt = "";
+      cover.textContent = "";
+      cover.appendChild(img);
+    })
+    .catch(() => undefined);
+
+  const body = document.createElement("div");
+  body.className = "home-book-body";
+
   const name = document.createElement("div");
   name.className = "home-book-name";
   name.textContent = book.name.replace(/\.pdf$/i, "");
@@ -337,8 +368,8 @@ function buildBookCard(book: BookRecord): HTMLDivElement {
   meta.textContent = total
     ? `第 ${book.last_page} / ${total} 页 · 问过 ${qCount} 次`
     : `读到了第 ${book.last_page} 页 · 问过 ${qCount} 次`;
-  card.appendChild(name);
-  card.appendChild(meta);
+  body.appendChild(name);
+  body.appendChild(meta);
 
   if (total && total > 0) {
     const bar = document.createElement("div");
@@ -347,9 +378,10 @@ function buildBookCard(book: BookRecord): HTMLDivElement {
     fill.className = "home-progress-fill";
     fill.style.width = `${Math.min(100, Math.round((book.last_page / total) * 100))}%`;
     bar.appendChild(fill);
-    card.appendChild(bar);
+    body.appendChild(bar);
   }
 
+  card.append(cover, body);
   card.addEventListener("click", () => void openBook(book));
   return card;
 }
