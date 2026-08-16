@@ -67,6 +67,12 @@ body {
   background: var(--paper-deep);
   /* 底部工具栏占位，最后一页不被遮挡。 */
   padding-bottom: 34px;
+  /* 翻页模式：不显示滚动条，靠 ←/→ 或滚轮翻页。 */
+  scrollbar-width: none;
+}
+
+#reader-surface::-webkit-scrollbar {
+  display: none;
 }
 
 /* 内容层：缩放预览时对它做 transform。 */

@@ -1414,16 +1414,10 @@ document.addEventListener("keydown", (e) => {
   }
   if (typing) return; // 输入中：不响应全局翻页/缩放
   if (!e.metaKey && (e.key === "ArrowRight" || e.key === "PageDown")) {
-    if (reader && currentPage < currentDoc!.pageCount) {
-      reader.scrollToPage(currentPage + 1);
-      void reader.onScroll();
-    }
+    reader?.flipPage(1);
   }
   if (!e.metaKey && (e.key === "ArrowLeft" || e.key === "PageUp")) {
-    if (reader && currentPage > 1) {
-      reader.scrollToPage(currentPage - 1);
-      void reader.onScroll();
-    }
+    reader?.flipPage(-1);
   }
 });
 
@@ -1468,22 +1462,12 @@ function renderBottomBar() {
   prev.className = "nav-btn";
   prev.innerHTML = "‹";
   prev.title = "上一页";
-  prev.addEventListener("click", () => {
-    if (reader && currentPage > 1) {
-      reader.scrollToPage(currentPage - 1);
-      void reader.onScroll();
-    }
-  });
+  prev.addEventListener("click", () => reader?.flipPage(-1));
   const next = document.createElement("button");
   next.className = "nav-btn";
   next.innerHTML = "›";
   next.title = "下一页";
-  next.addEventListener("click", () => {
-    if (reader && currentPage < currentDoc!.pageCount) {
-      reader.scrollToPage(currentPage + 1);
-      void reader.onScroll();
-    }
-  });
+  next.addEventListener("click", () => reader?.flipPage(1));
 
   // 书：显示当前书名，点击弹出书列表（切换书）。
   const bookBtn = document.createElement("button");

@@ -41,16 +41,21 @@ export class ScrollReader {
   private doc: PDFDocument;
   private cb: ReaderCallbacks;
 
-  /// 当前缩放：1 = 页面宽度正好铺满可用宽度。
+  /// 当前缩放：1 = 页面（或展开）恰好放进视口（宽高都不超出）。
   private zoom = 1;
-  /// 双页模式（书本展开）：两页并排，1 = 展开宽度铺满可用宽度。
+  /// 翻页模式：始终把当前页（或展开）整页放进视口并居中，滚动后吸附回整页，
+  /// 前后翻页用 ←/→（双页按行翻）。这是默认阅读方式，不自由下拉。
+  private flip = true;
+  /// 双页模式（书本展开）：两页并排，缩放按整个展开算。
   private spread = false;
-  /// 页面显示宽度（px）= 可用宽度 × zoom。
-  private pageWidth = 800;
   private layouts: PageLayout[] = [];
   private mounted = new Map<number, { el: HTMLDivElement; canvas: HTMLCanvasElement | null }>();
   private rendering = false;
   private renderQueued = false;
+  /// 翻页吸附的防抖定时器。
+  private snapTimer: number | undefined;
+  /// 上次吸附/翻页到的页码（页内滚动不重复吸附）。
+  private lastSnapPage = 0;
 
   constructor(surface: HTMLDivElement, doc: PDFDocument, cb: ReaderCallbacks = {}) {
     this.surface = surface;
@@ -61,21 +66,17 @@ export class ScrollReader {
     this.surface.appendChild(this.content);
   }
 
-  private get availableWidth(): number {
-    return Math.max(this.surface.clientWidth - SIDE_MARGIN * 2, 200);
-  }
-
   /// 打开：建立页面骨架，滚动到指定页。
-  /// initialZoom 是打开时就要用的缩放（1 = 适合宽度），
+  /// initialZoom 是打开时就要用的缩放（1 = 页面恰好放进视口），
   /// spread 为 true 时按双页（书本展开）布局。
   async open(targetPage: number, initialZoom = 1, spread = false): Promise<void> {
     await this.waitForWidth();
     this.zoom = initialZoom;
     this.spread = spread;
-    this.pageWidth = this.availableWidth * this.zoom;
     await this.layout();
     // 直接渲染目标页附近（跳到上次读的页，不等 scroll 事件异步触发）。
     await this.renderVisible(targetPage);
+    this.lastSnapPage = targetPage;
     this.scrollToPage(targetPage, true);
     this.emitPage();
   }
@@ -123,9 +124,10 @@ export class ScrollReader {
     // 批量预热所有页尺寸，避免逐页串行等待。
     await this.doc.prefetchSizes(1, this.doc.pageCount);
 
-    // 页面左侧位置：窄于窗口时居中，宽于窗口时从 0 开始以便横向滚动。
     const surfaceW = this.surface.clientWidth;
-    const left = Math.max(0, (surfaceW - this.pageWidth) / 2);
+    const surfaceH = this.surface.clientHeight;
+    const availW = Math.max(surfaceW - SIDE_MARGIN * 2, 100);
+    const availH = Math.max(surfaceH - 40, 200);
 
     // 只计算尺寸/位置数据（供页码映射、滚动定位），不建 DOM——
     // 几百页的书逐页建元素会卡，元素由 renderVisible 按需创建。
@@ -134,59 +136,79 @@ export class ScrollReader {
       sizes.push(await this.doc.pageSize(p));
     }
 
+    /// 翻页模式的缩放：zoom=1 时页面/展开恰好放进视口（宽高都不超出）。
+    const fitScale = (lw: number, lh: number) =>
+      Math.min(availW / lw, availH / lh) * this.zoom;
+
     if (!this.spread) {
-      // ---- 单页：从上到下排列 ----
+      // ---- 单页：每页适合视口，水平居中，从上到下排列 ----
       let top = 0;
       for (let p = 1; p <= this.doc.pageCount; p++) {
         const { width, height } = sizes[p - 1];
-        const displayHeight = (height / width) * this.pageWidth;
+        const w = width * fitScale(width, height);
+        const h = height * fitScale(width, height);
         this.layouts.push({
-          displayHeight,
+          displayHeight: h,
           top,
-          left,
-          width: this.pageWidth,
+          left: Math.max(0, (surfaceW - w) / 2),
+          width: w,
           logicalWidth: width,
           logicalHeight: height,
         });
-        top += displayHeight + PAGE_GAP;
+        top += h + PAGE_GAP;
       }
+      const spacer = document.createElement("div");
+      spacer.className = "scroll-spacer";
+      spacer.style.height = `${top}px`;
+      this.content.appendChild(spacer);
       return;
     }
 
     // ---- 双页（书本展开）：两页并排成一行 ----
     // 第 1 页（封面）单独在右；之后 (2,3)、(4,5)… 偶数页在左、奇数页在右，
-    // 像翻开的书。行高取该行两页的较大者，两页顶端对齐。
-    const pageW = Math.max((this.pageWidth - PAGE_GAP) / 2, 40);
-    const leftX = left;
-    const rightX = left + this.pageWidth / 2 + PAGE_GAP / 2;
-    // 行号：p=1 → 0；(p>=2) → floor((p-2)/2)+1
+    // 像翻开的书。每行按「适合视口」缩放，行高取该行两页的较大者。
     const rowOf = (p: number) => (p <= 1 ? 0 : Math.floor((p - 2) / 2) + 1);
+    const numRows = rowOf(this.doc.pageCount);
 
     let rowTop = 0;
-    let curRow = -1;
-    let rowMaxH = 0;
-    for (let p = 1; p <= this.doc.pageCount; p++) {
-      const row = rowOf(p);
-      if (row !== curRow) {
-        // 新行开始：把上一行的高度加进 top。
-        if (curRow >= 0) rowTop += rowMaxH + PAGE_GAP;
-        curRow = row;
-        rowMaxH = 0;
+    for (let row = 0; row <= numRows; row++) {
+      // 本行的页
+      const rowPages: number[] = [];
+      for (let p = 1; p <= this.doc.pageCount; p++) {
+        if (rowOf(p) === row) rowPages.push(p);
       }
-      const { width, height } = sizes[p - 1];
-      const displayHeight = (height / width) * pageW;
-      const isRight = p % 2 === 1; // 奇数页在右（含第 1 页封面）
-      rowMaxH = Math.max(rowMaxH, displayHeight);
-      this.layouts.push({
-        displayHeight,
-        top: rowTop,
-        left: isRight ? rightX : leftX,
-        width: pageW,
-        logicalWidth: width,
-        logicalHeight: height,
-      });
+      if (rowPages.length === 0) continue;
+      // 行逻辑尺寸（scale=1）
+      let rowLW = 0;
+      let rowLH = 0;
+      for (const p of rowPages) {
+        const { width, height } = sizes[p - 1];
+        rowLW += width;
+        rowLH = Math.max(rowLH, height);
+      }
+      rowLW += (rowPages.length - 1) * PAGE_GAP; // 页间书缝
+      const scale = fitScale(rowLW, rowLH);
+
+      let x = Math.max(0, (surfaceW - rowLW * scale) / 2);
+      let rowMaxH = 0;
+      for (const p of rowPages) {
+        const { width, height } = sizes[p - 1];
+        const w = width * scale;
+        const h = height * scale;
+        rowMaxH = Math.max(rowMaxH, h);
+        this.layouts.push({
+          displayHeight: h,
+          top: rowTop,
+          left: x,
+          width: w,
+          logicalWidth: width,
+          logicalHeight: height,
+        });
+        x += w + PAGE_GAP;
+      }
+      rowTop += rowMaxH + PAGE_GAP;
     }
-    const totalHeight = rowTop + rowMaxH;
+    const totalHeight = Math.max(0, rowTop - PAGE_GAP);
 
     // 关键：绝对定位的页面不撑起滚动容器的内容高度。
     // 必须用一个普通流式占位元素撑高容器，滚动条才会出现，
@@ -224,13 +246,13 @@ export class ScrollReader {
 
     this.content.style.transform = "";
     this.zoom = factor;
-    this.pageWidth = this.availableWidth * this.zoom;
     await this.layout();
 
     const newLayout = this.layouts[anchorPage - 1];
     if (newLayout) {
       this.surface.scrollTop = newLayout.top + newLayout.displayHeight * ratioInPage - this.surface.clientHeight / 2;
     }
+    this.lastSnapPage = anchorPage;
     await this.renderVisible(anchorPage);
     this.emitPage();
   }
@@ -357,15 +379,59 @@ export class ScrollReader {
     return best;
   }
 
+  /// 翻页模式：前后翻（双页按行翻，单页按页翻），目标页垂直居中。
+  flipPage(delta: 1 | -1): void {
+    const step = this.spread ? 2 : 1;
+    const from = this.currentPage();
+    const target = Math.max(1, Math.min(this.doc.pageCount, from + step * delta));
+    this.lastSnapPage = target; // 平滑动画期间不吸附
+    this.scrollToPage(target, false);
+  }
+
   scrollToPage(page: number, instant = false): void {
-    const target = this.layouts[page - 1]?.top ?? 0;
+    const layout = this.layouts[page - 1];
+    if (!layout) return;
+    let target = layout.top;
+    if (this.flip && layout.displayHeight <= this.surface.clientHeight) {
+      // 页面放得下：垂直居中。
+      target = layout.top - (this.surface.clientHeight - layout.displayHeight) / 2;
+    }
+    // 页面比视口高：对齐顶部，用户可在页内滚动（翻页模式只在跨页时吸附）。
+    const max = Math.max(0, this.surface.scrollHeight - this.surface.clientHeight);
+    target = Math.max(0, Math.min(target, max));
     this.surface.scrollTo({ top: target, behavior: instant ? "auto" : "smooth" });
   }
 
-  /// 滚动事件处理：更新页码、惰性渲染。
+  /// 滚动事件处理：更新页码、惰性渲染；翻页模式等滚动停稳后吸附回整页。
   async onScroll(): Promise<void> {
     this.emitPage();
     await this.renderVisible();
+    if (this.flip) this.scheduleSnap();
+  }
+
+  /// 翻页模式的吸附：滚动停稳（连续两次采样位置相同）后回到最近的整页（居中）。
+  private lastScrollTop = -1;
+  private scheduleSnap(): void {
+    window.clearTimeout(this.snapTimer);
+    this.snapTimer = window.setTimeout(() => {
+      const top = this.surface.scrollTop;
+      if (top !== this.lastScrollTop) {
+        // 还在滚动（平滑动画或用户拖动中）：记录位置，再等一拍。
+        this.lastScrollTop = top;
+        this.scheduleSnap();
+        return;
+      }
+      this.snapToPage();
+    }, 120);
+  }
+
+  /// 吸附到当前页（居中/顶部对齐）；只在跨页时触发，页内滚动不打扰。
+  snapToPage(): void {
+    if (!this.flip) return;
+    const page = this.currentPage();
+    if (page === this.lastSnapPage) return;
+    this.lastSnapPage = page;
+    this.scrollToPage(page, true);
   }
 
   private emitPage() {
