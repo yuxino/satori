@@ -314,10 +314,11 @@ export class ScrollReader {
     return (layout.width * 2) / layout.logicalWidth;
   }
 
-  /// 当前视口中心的页码。
+  /// 当前视口中心所在页（双页时按中心点横坐标落在左/右页）。
   currentPage(): number {
-    const centerY = this.surface.scrollTop + this.surface.clientHeight / 2;
-    return this.pageAtOffset(centerY);
+    const cx = this.surface.scrollLeft + this.surface.clientWidth / 2;
+    const cy = this.surface.scrollTop + this.surface.clientHeight / 2;
+    return this.pageAtPoint(cx, cy);
   }
 
   private pageAtOffset(y: number): number {
@@ -329,6 +330,31 @@ export class ScrollReader {
       else hi = mid - 1;
     }
     return Math.max(1, Math.min(this.doc.pageCount, lo + 1));
+  }
+
+  /// 屏幕坐标（clientX/Y）落在哪一页。单页模式按纵坐标即可；
+  /// 双页模式同一行左右两页的纵坐标相同，必须用横坐标区分——
+  /// 返回矩形包含该点的页面；书缝等空白处选横向上最近的一页
+  /// （双页时书缝居中，会选左页，页码显示与主流阅读器一致）。
+  private pageAtPoint(clientX: number, clientY: number): number {
+    const near = this.pageAtOffset(clientY + this.surface.scrollTop);
+    let best = near;
+    let bestDist = Infinity;
+    for (let p = Math.max(1, near - 1); p <= Math.min(this.doc.pageCount, near + 1); p++) {
+      const mount = this.mounted.get(p);
+      if (!mount || !mount.el.isConnected) continue;
+      const r = mount.el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+        return p; // 点明确落在这页里
+      }
+      const dist = Math.abs(clientX - (r.left + r.width / 2));
+      if (dist <= bestDist) {
+        bestDist = dist;
+        best = p; // 平手取更小页号（左页）
+      }
+    }
+    return best;
   }
 
   scrollToPage(page: number, instant = false): void {
@@ -362,9 +388,9 @@ export class ScrollReader {
     overlay.style.display = "none";
     if (w < 12 || h < 12) return null;
 
-    // 屏幕坐标（含滚动）落在哪一页。
-    const docY = y + this.surface.scrollTop;
-    const page = this.pageAtOffset(docY + h / 2);
+    // 屏幕坐标（含滚动）落在哪一页：按选区中心点定位，
+    // 双页模式下同一行左右页纵坐标相同，中心点落在哪页就选哪页。
+    const page = this.pageAtPoint(x + w / 2, y + h / 2);
     const layout = this.layouts[page - 1];
     const mount = this.mounted.get(page);
     // 页面可能已被懒渲染卸载（元素不在 DOM 里），此时拿不到准确坐标。
