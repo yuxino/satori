@@ -12,8 +12,13 @@
 - 工具链：Tauri 2 + Vite + TS + PDF.js（决策见 `docs/decisions/0010-tauri-rewrite.md`）
 - 存储：本地 JSON（Application Support）；API Key 只进 macOS Keychain
 - 模型：百炼 `qwen3-vl-plus` 默认（可切 `qwen3-vl-flash` / `qwen-vl-max`），北京共享地址，`store: false`
+- 版本：Git tag `v3.0.0`（Tauri 重写主线，main 分支）；旧 Swift 版 tag `legacy-swift`
 
 ## Completed so far
+
+- **AI 交互打磨**：悬浮球重设计（渐变圆 + 白色四角星图标 + 悬停上浮 + 悬停浮现「问这一页」标签）、讲解卡片顶部渐变 accent 条、流式回答前「正在讲…」三点动画、发送按钮悬停反馈、框选选区圆角柔边
+- **流式回答自动滚动**：首问/框选回答随内容增长自动滚到底（追问原本就有）
+- **清理**：删除未用 import/参数；移除旧全局 `settings.zoom`（缩放已按书记录，没记过的书打开即适合宽度，不再继承旧的 0.5）
 
 - 旧 Swift 代码迁入 `legacy-swift/` 并打 tag，工作区换新结构
 - Tauri 2 骨架：窗口、图标、capabilities、asset protocol
