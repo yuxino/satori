@@ -516,6 +516,8 @@ async function askRegionQuestion(region: RegionSelection) {
       (chunk) => {
         fullText += chunk;
         setAnswerContent(answerNode, fullText);
+        const sc = teacherSheet.querySelector(".qa-scroll");
+        if (sc) sc.scrollTop = sc.scrollHeight;
       },
     );
     history.push({ role: "assistant", content: fullText });
@@ -600,6 +602,8 @@ async function askQuestion(question: string) {
       (chunk) => {
         fullText += chunk;
         setAnswerContent(answerNode, fullText);
+        const sc = teacherSheet.querySelector(".qa-scroll");
+        if (sc) sc.scrollTop = sc.scrollHeight;
       },
     );
     history.push({ role: "assistant", content: fullText });
