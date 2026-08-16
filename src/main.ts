@@ -247,10 +247,51 @@ function showReopenCue(book: BookRecord) {
 // ---- 目录与回看 ----
 function buildTOC() {
   tocDrawer.innerHTML = "";
-  const title = document.createElement("div");
-  title.className = "toc-section-title";
-  title.textContent = "回看 · 问过的";
-  tocDrawer.appendChild(title);
+
+  // 第一区：PDF 目录（章节快速跳转）。
+  const tocTitle = document.createElement("div");
+  tocTitle.className = "toc-section-title";
+  tocTitle.textContent = "目录";
+  tocDrawer.appendChild(tocTitle);
+
+  if (currentDoc) {
+    void currentDoc.getOutline().then((outline) => {
+      // 异步返回时抽屉可能已重建，安全判断。
+      if (!tocDrawer.isConnected) return;
+      if (outline.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "toc-item depth-2";
+        empty.textContent = "这本书没有内置目录（扫描书常见）。";
+        tocDrawer.appendChild(empty);
+        return;
+      }
+      for (const item of outline) {
+        const el = document.createElement("div");
+        el.className = `toc-item depth-${Math.min(item.depth + 1, 3)}`;
+        el.textContent = item.title;
+        el.title = `跳到第 ${item.page} 页`;
+        el.addEventListener("click", () => {
+          tocDrawer.classList.remove("open");
+          if (reader) {
+            reader.scrollToPage(item.page);
+            void reader.onScroll();
+          }
+        });
+        tocDrawer.appendChild(el);
+      }
+    });
+  } else {
+    const empty = document.createElement("div");
+    empty.className = "toc-item depth-2";
+    empty.textContent = "打开一本书后这里会显示目录。";
+    tocDrawer.appendChild(empty);
+  }
+
+  // 第二区：回看 · 问过的。
+  const reviewTitle = document.createElement("div");
+  reviewTitle.className = "toc-section-title";
+  reviewTitle.textContent = "回看 · 问过的";
+  tocDrawer.appendChild(reviewTitle);
 
   if (!currentBook) return;
   const mine = store.qa
@@ -260,7 +301,7 @@ function buildTOC() {
   if (mine.length === 0) {
     const empty = document.createElement("div");
     empty.className = "toc-item depth-2";
-    empty.textContent = "还没有问过问题。划选一段，或点「问这一页」。";
+    empty.textContent = "还没有问过问题。框选一段，或点「问这一页」。";
     tocDrawer.appendChild(empty);
     return;
   }
@@ -939,11 +980,11 @@ function renderBottomBar() {
     toggleBookMenu();
   });
 
-  // 回看（原顶部浮层的功能并入底部栏）。
+  // 目录：章节快速跳转 + 回看历史。
   const reviewBtn = document.createElement("button");
   reviewBtn.className = "action-btn";
-  reviewBtn.textContent = "回看";
-  reviewBtn.title = "按页查看问过的问题";
+  reviewBtn.textContent = "目录";
+  reviewBtn.title = "章节跳转与问答回看";
   reviewBtn.addEventListener("click", () => {
     buildTOC();
     tocDrawer.classList.toggle("open");

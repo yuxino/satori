@@ -13,6 +13,13 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 /// 要求目录 URL 以斜杠结尾）。
 const wasmBase = jbig2WasmUrl.substring(0, jbig2WasmUrl.lastIndexOf("/") + 1);
 
+/// PDF 大纲目录项（扁平化，含层级深度）。
+export interface OutlineItem {
+  title: string;
+  page: number;
+  depth: number;
+}
+
 export class PDFDocument {
   private doc: PDFDocumentProxy;
   /// 页面尺寸缓存（scale=1），连续滚动时避免反复异步取尺寸。
@@ -57,6 +64,36 @@ export class PDFDocument {
       }
     }
     await Promise.all(batch);
+  }
+
+  /// 读取 PDF 大纲（目录），扁平化为带层级和页码的列表。
+  /// 没有大纲时返回空数组（扫描书可能没有内置目录）。
+  async getOutline(): Promise<OutlineItem[]> {
+    const outline = await this.doc.getOutline();
+    if (!outline || outline.length === 0) return [];
+    const result: OutlineItem[] = [];
+    const walk = async (nodes: Array<Record<string, unknown>>, depth: number) => {
+      for (const node of nodes) {
+        const title = String(node.title ?? "");
+        let page = 0;
+        const dest = node.dest as string | Array<unknown> | null | undefined;
+        if (typeof dest === "string") {
+          const resolved = await this.doc.getDestination(dest);
+          if (resolved) page = (await this.doc.getPageIndex(resolved[0] as { num: number; gen: number })) + 1;
+        } else if (Array.isArray(dest) && dest.length > 0) {
+          try {
+            page = (await this.doc.getPageIndex(dest[0] as { num: number; gen: number })) + 1;
+          } catch {
+            page = 0;
+          }
+        }
+        if (title && page > 0) result.push({ title, page, depth });
+        const children = node.items as Array<Record<string, unknown>> | undefined;
+        if (children && children.length > 0) await walk(children, depth + 1);
+      }
+    };
+    await walk(outline as Array<Record<string, unknown>>, 0);
+    return result;
   }
 
   async renderPageToCanvas(pageNumber: number, scale: number): Promise<HTMLCanvasElement> {
