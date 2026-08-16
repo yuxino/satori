@@ -168,7 +168,9 @@ async function openBook(book: BookRecord) {
     bookMenuEl = null;
     hideLoading();
 
-    currentDoc = await PDFDocument.load(url);
+    currentDoc = await PDFDocument.load(url, (loaded, total) => {
+      if (total > 0) updateLoading(`正在打开书… ${Math.round((loaded / total) * 100)}%`);
+    });
     currentPage = Math.min(Math.max(resolved.last_page, 1), currentDoc.pageCount);
     // 恢复上次记住的缩放倍数（默认 1 = 适合宽度）。
     zoomFactor = clampZoom(store.settings.zoom || 1);
@@ -190,8 +192,9 @@ async function openBook(book: BookRecord) {
     renderBottomBar();
     showReopenCue(resolved);
     buildTOC();
-    // 扫描书无内置目录时自动识别（异步，不阻塞阅读）。
-    void maybeExtractScannedOutline();
+    // 扫描书无内置目录时自动识别。延迟到开书高峰（首屏渲染 + 缩略图预热）之后，
+    // 避免 3x 高清目录页渲染与首屏抢资源导致卡顿。
+    window.setTimeout(() => void maybeExtractScannedOutline(), 1500);
     // 更新书籍列表（路径可能被修正）。
     store.books = store.books.map((b) => (b.id === resolved.id ? resolved : b));
     await persist();
@@ -213,6 +216,12 @@ function showLoading(message: string) {
   overlay.id = "loading-overlay";
   overlay.textContent = message;
   readerSurface.appendChild(overlay);
+}
+
+/// 更新加载提示文字（如进度百分比）。
+function updateLoading(text: string) {
+  const overlay = readerSurface.querySelector("#loading-overlay") as HTMLElement | null;
+  if (overlay) overlay.textContent = text;
 }
 
 function hideLoading() {
@@ -343,16 +352,21 @@ const outlineAttempted = new Set<string>();
 async function maybeExtractScannedOutline() {
   if (!currentDoc || !apiKey) return;
   if (!currentBook) return;
+  // 捕获本次处理的书身份：延迟调用期间可能已切书，检测到变化立即放弃。
+  const bookId = currentBook.id;
+  const doc = currentDoc;
   // 已有目录（内置或之前恢复过）就不再处理。
   if (currentBook.outline.length > 0) return;
   // 本会话已试过且失败，不再重试（避免每次打开都花两次 API）。
-  if (outlineAttempted.has(currentBook.id)) return;
-  outlineAttempted.add(currentBook.id);
+  if (outlineAttempted.has(bookId)) return;
+  outlineAttempted.add(bookId);
 
-  const native = await currentDoc.getOutline();
+  const native = await doc.getOutline();
   if (native.length > 0) return;
+  // 提取大纲期间用户切书了：放弃。
+  if (currentDoc !== doc || currentBook?.id !== bookId) return;
 
-  const pageCount = currentDoc.pageCount;
+  const pageCount = doc.pageCount;
   // 目录通常在书前部；从第 2 页起取约 10 页（跳过封面/书名页）。
   const frontFrom = 2;
   const frontTo = Math.min(pageCount, 11);
@@ -360,17 +374,20 @@ async function maybeExtractScannedOutline() {
 
   try {
     // 1) 渲染目录候选页 → Qwen 提取目录（印刷页码）。
-    const pages = await exportEvidence([...Array(frontTo - frontFrom + 1)].map((_, i) => frontFrom + i));
+    const pages = await exportEvidence([...Array(frontTo - frontFrom + 1)].map((_, i) => frontFrom + i), 3);
+    if (currentDoc !== doc || currentBook?.id !== bookId) return;
     const entries = await extractOutline(apiKey, {
       model: store.settings.model_id,
       pages,
     });
     if (entries.length === 0) return;
+    if (currentDoc !== doc || currentBook?.id !== bookId) return;
 
     // 过滤非正文条目（编者的话/前言/目录/附录/参考文献/后记 等），
     // 避免把前置/后置内容当成章节。
     const frontMatterRe = /^(编者的话|前言|序|目录|绪论|附录|参考文献|后记|致谢|出版说明|内容简介|学习目标|使用说明)/;
     const bodyEntries = entries.filter((e) => !frontMatterRe.test(e.title.trim()));
+    if (bodyEntries.length === 0) return;
 
     // 2) 找第一章在正文里的实际 PDF 页码 → 算出偏移。
     const chapters = bodyEntries.filter((e) => e.depth === 0);
@@ -381,7 +398,8 @@ async function maybeExtractScannedOutline() {
     // 候选正文页：目录页（PDF 11 页后）到书前 1/4，扫这一段找第一章。
     const probeFrom = Math.min(Math.max(frontTo + 1, 11), pageCount);
     const probeTo = Math.min(pageCount, probeFrom + 15);
-    const probePages = await exportEvidence([...Array(probeTo - probeFrom + 1)].map((_, i) => probeFrom + i));
+    const probePages = await exportEvidence([...Array(probeTo - probeFrom + 1)].map((_, i) => probeFrom + i), 3);
+    if (currentDoc !== doc || currentBook?.id !== bookId) return;
     const foundPdfPage = await findPageByTitle(
       apiKey,
       store.settings.model_id,
@@ -389,6 +407,7 @@ async function maybeExtractScannedOutline() {
       probePages,
     );
     if (foundPdfPage === 0) return; // 定位失败，放弃（保留无目录状态）。
+    if (currentDoc !== doc || currentBook?.id !== bookId) return;
 
     // 偏移 = 第一章实际 PDF 页 - 第一章印刷页。
     const offset = foundPdfPage as number - firstChapter.page;
@@ -517,11 +536,11 @@ function evidencePages(question: string): number[] {
 }
 
 /// 把若干页渲染成 JPEG 数组，供 Rust 端作为多图证据。
-async function exportEvidence(pages: number[]): Promise<{ page: number; jpeg: string }[]> {
+async function exportEvidence(pages: number[], scale = 1.5): Promise<{ page: number; jpeg: string }[]> {
   const out: { page: number; jpeg: string }[] = [];
   for (const page of pages) {
     if (!currentDoc) continue;
-    const jpeg = await currentDoc.exportPageAsJPEG(page);
+    const jpeg = await currentDoc.exportPageAsJPEG(page, scale);
     out.push({ page, jpeg });
   }
   return out;

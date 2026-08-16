@@ -29,13 +29,17 @@ export class PDFDocument {
     this.doc = doc;
   }
 
-  static async load(url: string): Promise<PDFDocument> {
+  static async load(url: string, onProgress?: (loaded: number, total: number) => void): Promise<PDFDocument> {
     const loadingTask = pdfjsLib.getDocument({
       url,
       useSystemFonts: true,
       // 提供 wasm 解码器，否则 JBIG2/CCITT 扫描页无法解码（空白页）。
       wasmUrl: wasmBase,
     });
+    // onProgress 是 DocumentInitParameters 的加载进度回调。
+    loadingTask.onProgress = (p: { loaded: number; total: number }) => {
+      onProgress?.(p.loaded, p.total);
+    };
     const doc = await loadingTask.promise;
     return new PDFDocument(doc);
   }
@@ -43,6 +47,9 @@ export class PDFDocument {
   get pageCount(): number {
     return this.doc.numPages;
   }
+
+  /// 大纲缓存（PDF 大纲是文档级数据，解析一次即可）。
+  private outlineCache: OutlineItem[] | null = null;
 
   /// 页面在 scale=1 下的逻辑尺寸（PDF 点）。带缓存。
   async pageSize(pageNumber: number): Promise<{ width: number; height: number }> {
@@ -69,8 +76,13 @@ export class PDFDocument {
   /// 读取 PDF 大纲（目录），扁平化为带层级和页码的列表。
   /// 没有大纲时返回空数组（扫描书可能没有内置目录）。
   async getOutline(): Promise<OutlineItem[]> {
+    if (this.outlineCache) return this.outlineCache;
     const outline = await this.doc.getOutline();
-    if (!outline || outline.length === 0) return [];
+    if (!outline || outline.length === 0) {
+      // 空目录也缓存（避免每次打开抽屉都重新查）。
+      this.outlineCache = [];
+      return [];
+    }
     const result: OutlineItem[] = [];
     const walk = async (nodes: Array<Record<string, unknown>>, depth: number) => {
       for (const node of nodes) {
@@ -93,6 +105,7 @@ export class PDFDocument {
       }
     };
     await walk(outline as Array<Record<string, unknown>>, 0);
+    this.outlineCache = result;
     return result;
   }
 
