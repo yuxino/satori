@@ -16,6 +16,8 @@ pub struct BookRecord {
     pub added_at: u64,
     /// 目录（含扫描书恢复的），空 = 尚无。持久化，打开秒显示。
     pub outline: Vec<OutlineEntry>,
+    /// 这本书自己的缩放倍数（1 = 适合宽度）。None = 用全局默认。
+    pub zoom: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +47,7 @@ impl Default for BookRecord {
             last_page: 1,
             added_at: 0,
             outline: Vec::new(),
+            zoom: None,
         }
     }
 }

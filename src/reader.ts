@@ -60,8 +60,11 @@ export class ScrollReader {
   }
 
   /// 打开：建立页面骨架，滚动到指定页。
-  async open(targetPage: number): Promise<void> {
+  /// initialZoom 是打开时就要用的缩放（1 = 适合宽度），
+  /// 直接建布局，避免先按 100% 渲染再跳变。
+  async open(targetPage: number, initialZoom = 1): Promise<void> {
     await this.waitForWidth();
+    this.zoom = initialZoom;
     this.pageWidth = this.availableWidth * this.zoom;
     await this.layout();
     // 直接渲染目标页附近（跳到上次读的页，不等 scroll 事件异步触发）。

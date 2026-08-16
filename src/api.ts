@@ -9,6 +9,8 @@ export interface BookRecord {
   last_page: number;
   added_at: number;
   outline: OutlineEntry[];
+  /** 这本书自己的缩放倍数（1 = 适合宽度）；缺省用全局默认。 */
+  zoom?: number;
 }
 
 export interface OutlineEntry {

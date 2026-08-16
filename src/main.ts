@@ -178,8 +178,9 @@ async function openBook(book: BookRecord) {
       if (total > 0) updateLoading(`正在打开书… ${Math.round((loaded / total) * 100)}%`);
     });
     currentPage = Math.min(Math.max(resolved.last_page, 1), currentDoc.pageCount);
-    // 恢复上次记住的缩放倍数（默认 1 = 适合宽度）。
-    zoomFactor = clampZoom(store.settings.zoom || 1);
+    // 恢复这本书自己的缩放倍数；没记过就用全局默认（1 = 适合宽度）。
+    // 每本书记住各自的缩放，切书时不会互相串。
+    zoomFactor = clampZoom(resolved.zoom ?? store.settings.zoom ?? 1);
     readerSurface.innerHTML = "";
     bottomBar.style.display = "flex";
     reader = new ScrollReader(readerSurface, currentDoc, {
@@ -192,7 +193,8 @@ async function openBook(book: BookRecord) {
         void askRegionQuestion(region);
       },
     });
-    await reader.open(currentPage);
+    // 打开时直接应用这本书的缩放，避免先按 100% 渲染再跳变。
+    await reader.open(currentPage, zoomFactor);
     ensureScrollListener();
     hideLoading();
     renderBottomBar();
@@ -305,9 +307,10 @@ function buildTOC() {
   if (currentDoc) {
     void currentDoc.getOutline().then((native) => {
       if (native.length > 0) {
-        // PDF 自带大纲优先。
+        // PDF 自带大纲优先。同样清洗前置内容（封面/前言/考试大纲/参考答案…），
+        // 与扫描目录识别保持一致。
         renderOutline(
-          native.map((n) => ({ title: n.title, page: n.page, depth: n.depth })),
+          cleanOutline(native.map((n) => ({ title: n.title, page: n.page, depth: n.depth }))),
           "",
         );
         return;
@@ -357,6 +360,29 @@ function buildTOC() {
 /// 本次会话已尝试过目录恢复的书（避免失败后每次打开都重试烧 API）。
 const outlineAttempted = new Set<string>();
 
+/// 判断标题是否为「前置/考试说明类」条目（封面、前言、大纲、考核目标、
+/// 题型举例、参考答案、附录、参考文献、后记 等），这些不该出现在章节目录里。
+/// 标题常带前缀：罗马数字（I II III…）、书名前缀，所以不只匹配开头词，
+/// 还查「包含词」与「前缀」两类形态。
+function isFrontMatterTitle(title: string): boolean {
+  const t = title.trim();
+  const frontMatterRe =
+    /^(编者的话|前言|序|目录|绪论|大纲|课程性质|考核目标|课程内容|考核要求|题型举例|参考答案|附录|参考文献|后记|致谢|出版说明|内容简介|学习目标|使用说明|自学考试|组编)/;
+  const frontMatterContains = /(考试大纲|自学考试|考核目标|考核要求|题型举例|参考答案|课程性质|课程内容|课程目标|出版说明)/;
+  const frontMatterPrefix = /^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩIVX]+[、.\s:：]|^第[一二三四五六七八九十百]+部分/;
+  return frontMatterRe.test(t) || frontMatterContains.test(t) || frontMatterPrefix.test(t);
+}
+
+/// 目录清洗：先丢掉第一个「第X章/篇」条目之前的所有条目（封面/前言/大纲/
+/// 参考答案 等前置内容），再做关键字过滤。若过滤后为空则原样返回——
+/// 宁可保留原目录，也不给用户一个空目录。
+function cleanOutline(entries: OutlineEntry[]): OutlineEntry[] {
+  const firstChapter = entries.findIndex((e) => /第[一二三四五六七八九十\d]+[章篇]/.test(e.title));
+  const body = firstChapter > 0 ? entries.slice(firstChapter) : entries;
+  const filtered = body.filter((e) => !isFrontMatterTitle(e.title));
+  return filtered.length > 0 ? filtered : entries;
+}
+
 /// 打开书时调用：PDF 无内置大纲且没有持久化目录时，
 /// 用 Qwen 读目录页提取章节，再定位第一章算出偏移，映射成 PDF 页码。
 async function maybeExtractScannedOutline() {
@@ -397,17 +423,9 @@ async function maybeExtractScannedOutline() {
     if (entries.length === 0) return;
     if (currentDoc !== doc || currentBook?.id !== bookId) return;
 
-    // 过滤非正文条目（编者的话/前言/序/目录/考试大纲/考核目标/题型举例/参考答案 等），
-    // 避免把前置/后置内容当成章节。标题常带前缀：罗马数字（I II III…）或书名前缀，
-    // 单靠 ^ 锚定的开头词会漏掉，所以再加「包含词」和「前缀」两条规则。
-    const frontMatterRe =
-      /^(编者的话|前言|序|目录|绪论|大纲|课程性质|考核目标|课程内容|考核要求|题型举例|参考答案|附录|参考文献|后记|致谢|出版说明|内容简介|学习目标|使用说明|自学考试|组编)/;
-    const frontMatterContains = /(考试大纲|自学考试|考核目标|考核要求|题型举例|参考答案|课程性质|课程内容|课程目标|出版说明)/;
-    const frontMatterPrefix = /^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩIVX]+[、.\s:：]|^第[一二三四五六七八九十百]+部分/;
-    const bodyEntries = entries.filter((e) => {
-      const t = e.title.trim();
-      return !frontMatterRe.test(t) && !frontMatterContains.test(t) && !frontMatterPrefix.test(t);
-    });
+    // 清洗目录：去前置/考试说明条目（封面/前言/考试大纲/考核目标/题型举例/
+    // 参考答案 等），与内置目录的清洗规则一致。
+    const bodyEntries = cleanOutline(entries);
     if (bodyEntries.length === 0) return;
 
     // 2) 找第一章：优先选标题带「第X章」的 depth=0 条目（取最小印刷页），
@@ -1071,11 +1089,13 @@ async function applyZoom() {
   persistZoom();
 }
 
-/// 记住缩放倍数（跨会话），防抖写盘。
+/// 记住缩放倍数：写进当前书（每本书各自的缩放）+ 全局默认（新书的起点），
+/// 防抖写盘。
 let zoomPersistTimer: number | undefined;
 function persistZoom() {
   if (!store) return;
   store.settings.zoom = zoomFactor;
+  if (currentBook) currentBook.zoom = zoomFactor;
   window.clearTimeout(zoomPersistTimer);
   zoomPersistTimer = window.setTimeout(() => void persist(), 400);
 }
