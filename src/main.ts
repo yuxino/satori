@@ -169,11 +169,17 @@ function renderHome() {
   // 标题 + （正在读书时）返回按钮
   const header = document.createElement("div");
   header.className = "home-header";
+  const brand = document.createElement("div");
+  brand.className = "home-brand";
+  const logo = document.createElement("span");
+  logo.className = "home-logo";
+  logo.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5l2.4 7.1 7.1 2.4-7.1 2.4L12 21.5l-2.4-7.1-7.1-2.4 7.1-2.4z" /></svg>`;
   const title = document.createElement("h1");
   title.textContent = "satori";
+  brand.append(logo, title);
   const sub = document.createElement("p");
   sub.textContent = "读懂你手上的 PDF";
-  header.append(title, sub);
+  header.append(brand, sub);
   if (currentDoc) {
     const closeBtn = document.createElement("button");
     closeBtn.className = "home-close";
@@ -262,8 +268,13 @@ function renderHome() {
       const book = store.books.find((b) => b.id === entry.book_id);
       const item = document.createElement("button");
       item.className = "home-recent-item";
-      const q = entry.question.length > 40 ? `${entry.question.slice(0, 40)}…` : entry.question;
-      item.textContent = `${book?.name ?? "书"} · 第 ${entry.page} 页 · ${q}`;
+      const badge = document.createElement("span");
+      badge.className = "home-recent-badge";
+      badge.textContent = `${book?.name.replace(/\.pdf$/i, "") ?? "书"} · P${entry.page}`;
+      const q = document.createElement("span");
+      q.className = "home-recent-q";
+      q.textContent = entry.question.length > 40 ? `${entry.question.slice(0, 40)}…` : entry.question;
+      item.append(badge, q);
       item.addEventListener("click", () => {
         const target = store.books.find((b) => b.id === entry.book_id);
         if (target) void openBook(target);
@@ -398,21 +409,35 @@ function buildBookCard(book: BookRecord): HTMLDivElement {
   meta.className = "home-book-meta";
   const qCount = store.qa.filter((q) => q.book_id === book.id).length;
   const total = book.pageCount;
+  const pct = total && total > 0 ? Math.min(100, Math.round((book.last_page / total) * 100)) : 0;
   meta.textContent = total
     ? `第 ${book.last_page} / ${total} 页 · 问过 ${qCount} 次`
     : `读到了第 ${book.last_page} 页 · 问过 ${qCount} 次`;
   body.appendChild(name);
   body.appendChild(meta);
 
+  const barRow = document.createElement("div");
+  barRow.className = "home-progress-row";
   if (total && total > 0) {
     const bar = document.createElement("div");
     bar.className = "home-progress";
     const fill = document.createElement("div");
     fill.className = "home-progress-fill";
-    fill.style.width = `${Math.min(100, Math.round((book.last_page / total) * 100))}%`;
+    fill.style.width = `${pct}%`;
     bar.appendChild(fill);
-    body.appendChild(bar);
+    barRow.appendChild(bar);
+    const pctLabel = document.createElement("span");
+    pctLabel.className = "home-progress-pct";
+    pctLabel.textContent = `${pct}%`;
+    barRow.appendChild(pctLabel);
+    body.appendChild(barRow);
   }
+
+  // 悬停提示「继续阅读」
+  const hint = document.createElement("span");
+  hint.className = "home-book-hint";
+  hint.textContent = book.id === currentBook?.id ? "返回阅读 →" : "继续阅读 →";
+  body.appendChild(hint);
 
   card.append(cover, body);
   card.addEventListener("click", () => void openBook(book));

@@ -221,15 +221,39 @@ body {
   position: relative;
 }
 
+/* 品牌行：四角星徽标 + 标题。 */
+.home-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.home-logo {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: linear-gradient(145deg, #a796d4 0%, #8d7bb8 55%, #7c6aa8 100%);
+  box-shadow: 0 4px 12px rgba(125, 107, 169, 0.35);
+}
+
+.home-logo svg {
+  display: block;
+}
+
 .home-header h1 {
   font-family: var(--serif);
-  font-size: 34px;
+  font-size: 32px;
   letter-spacing: 3px;
   color: var(--ink);
 }
 
 .home-header p {
-  margin-top: 6px;
+  margin: 8px 0 0 46px;
   font-size: 14px;
   color: var(--ink-soft);
   font-family: var(--sans);
@@ -267,6 +291,18 @@ body {
   font-weight: 600;
   color: var(--ink-soft);
   margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 分区标题前的薰衣草小竖条。 */
+.home-section h2::before {
+  content: "";
+  width: 4px;
+  height: 14px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #a796d4, #7c6aa8);
 }
 
 /* 统计卡片 */
@@ -285,6 +321,13 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.home-stat:hover {
+  transform: translateY(-1px);
+  border-color: var(--lavender);
+  box-shadow: var(--shadow-card);
 }
 
 .home-stat b {
@@ -441,8 +484,15 @@ body {
   font-family: var(--sans);
 }
 
-.home-progress {
+.home-progress-row {
   margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.home-progress {
+  flex: 1;
   height: 4px;
   border-radius: 2px;
   background: var(--paper);
@@ -453,6 +503,32 @@ body {
   height: 100%;
   border-radius: 2px;
   background: linear-gradient(90deg, #a796d4, #8d7bb8);
+  transition: width 0.3s ease;
+}
+
+.home-progress-pct {
+  font-size: 11px;
+  color: var(--ink-faint);
+  font-family: var(--sans);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+/* 悬停提示「继续阅读 →」：平时淡出，悬停浮现。 */
+.home-book-hint {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--lavender);
+  font-family: var(--sans);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.home-book:hover .home-book-hint {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .home-empty {
@@ -498,12 +574,34 @@ body {
   padding: 10px 14px;
   border-radius: 10px;
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
 }
 
 .home-recent-item:hover {
   border-color: var(--lavender);
   background: var(--lavender-soft);
+  transform: translateX(2px);
+}
+
+/* 最近提问：书名 · 页码小徽标 */
+.home-recent-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--lavender);
+  background: var(--lavender-soft);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.home-recent-q {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---- 老师：右下角悬浮卡片 ---- */
