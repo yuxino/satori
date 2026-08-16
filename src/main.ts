@@ -532,14 +532,21 @@ function showLoading(message: string) {
   hideLoading();
   const overlay = document.createElement("div");
   overlay.id = "loading-overlay";
-  overlay.textContent = message;
+  const spinner = document.createElement("span");
+  spinner.className = "spinner";
+  const text = document.createElement("span");
+  text.textContent = message;
+  overlay.append(spinner, text);
   readerSurface.appendChild(overlay);
 }
 
 /// 更新加载提示文字（如进度百分比）。
 function updateLoading(text: string) {
   const overlay = readerSurface.querySelector("#loading-overlay") as HTMLElement | null;
-  if (overlay) overlay.textContent = text;
+  if (!overlay) return;
+  const t = overlay.querySelector("span:last-child") as HTMLElement | null;
+  if (t) t.textContent = text;
+  else overlay.textContent = text;
 }
 
 function hideLoading() {
@@ -1685,7 +1692,7 @@ function renderBottomBar() {
   const chapterLabel = document.createElement("span");
   chapterLabel.className = "chapter-label";
 
-  bottomBar.append(bookBtn, prev, next, reviewBtn, homeBtn, pageNum, chapterLabel, thumbs, zoomGroup, layoutBtn);
+  bottomBar.append(homeBtn, bookBtn, prev, next, reviewBtn, pageNum, chapterLabel, thumbs, zoomGroup, layoutBtn);
   updateBottomBarZoom();
   updateLayoutButton();
 

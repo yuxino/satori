@@ -121,12 +121,29 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 10px;
   z-index: 70;
   background: var(--paper-deep);
   color: var(--ink-soft);
   font-size: 14px;
   font-family: var(--sans);
   letter-spacing: 1px;
+}
+
+/* 加载转圈。 */
+#loading-overlay .spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--lavender-soft);
+  border-top-color: var(--lavender);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* ---- 空书架 ---- */
@@ -931,6 +948,18 @@ body {
   gap: 10px;
   align-items: center;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  animation: cue-in 0.25s ease;
+}
+
+@keyframes cue-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }
 
 #reopen-cue button {
@@ -942,6 +971,11 @@ body {
   border-radius: 999px;
   cursor: pointer;
   font-family: var(--sans);
+  transition: background 0.15s ease;
+}
+
+#reopen-cue button:hover {
+  background: #7d6ba9;
 }
 
 /* ---- 设置面板 ---- */
@@ -1066,10 +1100,10 @@ body {
   border: none;
   background: transparent;
   color: var(--ink-soft);
-  font-size: 14px;
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
+  font-size: 16px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
   cursor: pointer;
   font-family: var(--sans);
   display: flex;
@@ -1107,6 +1141,11 @@ body {
   align-items: center;
   justify-content: center;
   padding: 4px 8px;
+  color: var(--ink-soft);
+}
+
+#bottom-bar .home-btn:hover {
+  color: var(--lavender);
 }
 
 #bottom-bar .home-btn svg {
