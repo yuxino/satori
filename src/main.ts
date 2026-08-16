@@ -1006,7 +1006,7 @@ function persistZoom() {
 
 // ---- 底部工具栏（macOS 原生阅读器风格） ----
 
-const THUMB_COUNT = 13; // 当前页前后各渲染多少缩略图
+const THUMB_COUNT = 25; // 当前页前后各渲染多少缩略图（首次覆盖更广）
 const THUMB_WIDTH = 34;
 
 /// 缩略图缓存：page -> 已渲染的 DOM 元素（虚拟滚动，只保留可视区附近）。
@@ -1341,11 +1341,50 @@ function scheduleBottomBarUpdate() {
   scheduleThumbVirtualRender();
 }
 
-/// 打开书时渲染当前页附近的缩略图。
+/// 打开书时渲染当前页附近的缩略图，并在后台预热全书缓存。
 async function renderAllThumbnails() {
   if (!currentDoc || !thumbBarEl) return;
   await ensureThumbnailsAround(currentPage);
   scheduleBottomBarUpdate();
+  // 后台预热：把还没缓存的页慢慢渲染进磁盘缓存（低优先级，不抢主线程）。
+  // 这样读到哪，那块缩略图早就缓存好了，悬停即秒出。
+  void preheatThumbCache();
+}
+
+let preheating = false;
+
+/// 后台预热：把还没缓存的页渲染成小图存盘，但不挂 DOM（避免几千页元素占内存）。
+async function preheatThumbCache() {
+  if (preheating || !currentDoc) return;
+  preheating = true;
+  const bookPath = currentBook?.path ?? "";
+  try {
+    const total = currentDoc.pageCount;
+    for (let p = 1; p <= total; p++) {
+      // 已挂 DOM 的（可视区附近）已处理；只补未缓存的远处页。
+      if (thumbElements.has(p)) continue;
+      if (!bookPath) break;
+      let cached: string | null = null;
+      try {
+        cached = await loadThumb(bookPath, p);
+      } catch {
+        cached = null;
+      }
+      if (cached) continue;
+      try {
+        const size = await currentDoc.pageSize(p);
+        const canvas = await currentDoc.renderPageToCanvas(p, THUMB_WIDTH / size.width);
+        const jpeg = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+        void saveThumb(bookPath, p, jpeg);
+      } catch {
+        // 单页预热失败跳过。
+      }
+      // 每张让出事件循环，避免阻塞阅读交互。
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  } finally {
+    preheating = false;
+  }
 }
 
 let thumbnailBusy = false;
@@ -1395,8 +1434,9 @@ async function ensureThumbnailsAround(page: number, fromScroll = false) {
   }
   thumbnailBusy = true;
   try {
-    // 批量渲染；骨架已同步就位，这里只负责尽快填充图片。
-    const BATCH = 6;
+    // 更激进的并行：PDF.js 支持多页并发渲染（内部 worker 排队）。
+    // 骨架已同步就位，这里只负责尽快填充图片。
+    const BATCH = 12;
     for (let i = 0; i < missing.length; i += BATCH) {
       const batch = missing.slice(i, i + BATCH);
       await Promise.all(batch.map((p) => renderThumb(p)));
