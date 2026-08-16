@@ -49,7 +49,9 @@ export class ScrollReader {
   /// 双页模式（书本展开）：两页并排，缩放按整个展开算。
   private spread = false;
   private layouts: PageLayout[] = [];
-  private mounted = new Map<number, { el: HTMLDivElement; canvas: HTMLCanvasElement | null }>();
+  /// mounted 的页面元素。renderScale 记录画布渲染时的缩放，拖动窗口时
+  /// 只有缩放明显变化才重渲画布（其余情况用 CSS 缩放旧画布，保持流畅）。
+  private mounted = new Map<number, { el: HTMLDivElement; canvas: HTMLCanvasElement | null; renderScale: number }>();
   private rendering = false;
   private renderQueued = false;
   /// layout 代次号：并发 layout 保护（旧代次中途放弃）。
@@ -123,9 +125,10 @@ export class ScrollReader {
     // 交错写坏 layouts（页面 top 不一致 → 页码错乱 → 吸附级联翻到最后一页）。
     const gen = ++this.layoutGen;
 
-    // 清空内容层（保留 content 本身，避免重复嵌套）。
-    this.content.innerHTML = "";
-    this.mounted.clear();
+    // 重建内容层：移除旧 spacer，保留已挂载的页面元素与画布
+    // （拖动窗口重排时只改位置尺寸，画布由 renderVisible 决定是否重渲，
+    // 避免每步窗口拖动都重渲扫描页导致卡顿）。
+    this.content.querySelector(".scroll-spacer")?.remove();
     this.layouts = [];
 
     // 批量预热所有页尺寸，避免逐页串行等待。
@@ -170,6 +173,10 @@ export class ScrollReader {
       spacer.className = "scroll-spacer";
       spacer.style.height = `${top}px`;
       this.content.appendChild(spacer);
+      // 尺寸在计算期间变了（拖动窗口）：用最新尺寸重算，确保停在最终尺寸。
+      if (gen === this.layoutGen && (this.surface.clientWidth !== surfaceW || this.surface.clientHeight !== surfaceH)) {
+        return this.layout();
+      }
       return;
     }
 
@@ -226,6 +233,10 @@ export class ScrollReader {
     spacer.className = "scroll-spacer";
     spacer.style.height = `${totalHeight}px`;
     this.content.appendChild(spacer);
+    // 尺寸在计算期间变了（拖动窗口）：用最新尺寸重算，确保停在最终尺寸。
+    if (gen === this.layoutGen && (this.surface.clientWidth !== surfaceW || this.surface.clientHeight !== surfaceH)) {
+      return this.layout();
+    }
   }
 
   /// 缩放手势期间的即时预览：只对内容层做 transform，不重建 DOM。
@@ -281,24 +292,30 @@ export class ScrollReader {
     }
 
     // 按需创建视口附近的页面元素（惰性骨架），再渲染 canvas。
+    // 已挂载的元素只更新位置/尺寸（保留画布）；画布仅在缩放明显变化时重渲。
     const toRender: number[] = [];
     for (let p = start; p <= end; p++) {
+      const layout = this.layouts[p - 1];
+      if (!layout) continue;
       let mount = this.mounted.get(p);
       if (!mount) {
-        const layout = this.layouts[p - 1];
-        if (!layout) continue;
         const el = document.createElement("div");
         el.className = "scroll-page";
         el.dataset.page = String(p);
-        el.style.left = `${layout.left}px`;
-        el.style.width = `${layout.width}px`;
-        el.style.height = `${layout.displayHeight}px`;
-        el.style.top = `${layout.top}px`;
         this.content.appendChild(el);
-        mount = { el, canvas: null };
+        mount = { el, canvas: null, renderScale: 0 };
         this.mounted.set(p, mount);
       }
-      if (!mount.canvas) toRender.push(p);
+      mount.el.style.left = `${layout.left}px`;
+      mount.el.style.width = `${layout.width}px`;
+      mount.el.style.height = `${layout.displayHeight}px`;
+      mount.el.style.top = `${layout.top}px`;
+      // 画布分辨率取决于显示缩放（≈ 宽度/逻辑宽）。缩放变化 >8% 才重渲，
+      // 其余情况（小范围拖动窗口）CSS 缩放旧画布即可，保持流畅。
+      const scale = layout.width / layout.logicalWidth;
+      if (!mount.canvas || Math.abs(scale - mount.renderScale) / Math.max(scale, mount.renderScale, 0.001) > 0.08) {
+        toRender.push(p);
+      }
     }
     if (toRender.length === 0) return;
 
@@ -322,6 +339,8 @@ export class ScrollReader {
         canvas.style.height = "100%";
         mount.el.appendChild(canvas);
         mount.canvas = canvas;
+        const layout = this.layouts[p - 1];
+        mount.renderScale = layout ? layout.width / layout.logicalWidth : 0;
         // 让出事件循环，滚动/交互不被长渲染阻塞。
         await new Promise((r) => setTimeout(r, 0));
       }
