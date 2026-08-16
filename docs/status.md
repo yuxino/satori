@@ -2,7 +2,7 @@
 
 ## Project state
 
-**2026-08-16 起：方向变更，Tauri 重写（Satori 3.0）。** 旧 Swift 实现完整保留在 `legacy-swift/`（git tag `legacy-swift`），不再维护。当前主分支是 Tauri 2 + PDF.js 的全新实现。产品定位：选中 PDF 里看不懂的部分，获得基于当前页的解释；本地优先，不强迫记笔记。
+**2026-08-16 起：方向变更，Tauri 重写（Satori 3.0）。** 旧 Swift 实现已从工作区移除，完整存档在 git tag `legacy-swift`，不再维护。当前主分支是 Tauri 2 + PDF.js 的全新实现。产品定位：选中 PDF 里看不懂的部分，获得基于当前页的解释；本地优先，不强迫记笔记。
 
 ## Confirmed decisions（3.0）
 
@@ -21,7 +21,7 @@
 - **流式回答自动滚动**：首问/框选回答随内容增长自动滚到底（追问原本就有）
 - **清理**：删除未用 import/参数；移除旧全局 `settings.zoom`（缩放已按书记录，没记过的书打开即适合宽度，不再继承旧的 0.5）
 
-- 旧 Swift 代码迁入 `legacy-swift/` 并打 tag，工作区换新结构
+- 旧 Swift 代码迁入 tag `legacy-swift` 存档，工作区移除（2026-08-18 清出，仓库不再跟踪 Swift 源码）
 - Tauri 2 骨架：窗口、图标、capabilities、asset protocol
 - Rust 后端：`keychain.rs`（旧条目迁移 + 新 service 写入，`apple-native` feature）、`store.rs`（书库/位置/Q&A JSON 持久化 + 损坏备份）、`qwen.rs`（百炼视觉客户端：流式问答 + 扫描目录恢复）、`thumbs.rs`（缩略图磁盘缓存）
 - Keychain 迁移已实际完成：旧条目 key 已用 `mimi Local Development` 证书读出并写入新条目 `com.yuxino.satori.qwen.v3`，验证一致（117 字符）。**用户无需再粘贴 API Key。**

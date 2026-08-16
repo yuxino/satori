@@ -18,3 +18,4 @@ node_modules/
 # Rust / Tauri
 src-tauri/target/
 .cargo-home/
+legacy-swift/
