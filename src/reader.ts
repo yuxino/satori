@@ -52,10 +52,6 @@ export class ScrollReader {
   private mounted = new Map<number, { el: HTMLDivElement; canvas: HTMLCanvasElement | null }>();
   private rendering = false;
   private renderQueued = false;
-  /// 翻页吸附的防抖定时器。
-  private snapTimer: number | undefined;
-  /// 上次吸附/翻页到的页码（页内滚动不重复吸附）。
-  private lastSnapPage = 0;
   /// layout 代次号：并发 layout 保护（旧代次中途放弃）。
   private layoutGen = 0;
 
@@ -78,7 +74,6 @@ export class ScrollReader {
     await this.layout();
     // 直接渲染目标页附近（跳到上次读的页，不等 scroll 事件异步触发）。
     await this.renderVisible(targetPage);
-    this.lastSnapPage = targetPage;
     this.scrollToPage(targetPage, true);
     this.emitPage();
   }
@@ -266,7 +261,6 @@ export class ScrollReader {
     if (newLayout) {
       this.surface.scrollTop = newLayout.top + newLayout.displayHeight * ratioInPage - this.surface.clientHeight / 2;
     }
-    this.lastSnapPage = anchorPage;
     await this.renderVisible(anchorPage);
     this.emitPage();
   }
@@ -401,8 +395,15 @@ export class ScrollReader {
     const step = this.spread ? 2 : 1;
     const from = this.currentPage();
     const target = Math.max(1, Math.min(this.doc.pageCount, from + step * delta));
-    this.lastSnapPage = target; // 平滑动画期间不吸附
     this.scrollToPage(target, false);
+  }
+
+  /// 当前页是否整页放得进视口（放得进 → 滚轮/触控板翻页；
+  /// 放不进（放大后页面超高）→ 允许在页内滚动）。
+  pageFitsViewport(): boolean {
+    const layout = this.layouts[this.currentPage() - 1];
+    if (!layout) return true;
+    return layout.displayHeight <= this.surface.clientHeight;
   }
 
   scrollToPage(page: number, instant = false): void {
@@ -419,36 +420,11 @@ export class ScrollReader {
     this.surface.scrollTo({ top: target, behavior: instant ? "auto" : "smooth" });
   }
 
-  /// 滚动事件处理：更新页码、惰性渲染；翻页模式等滚动停稳后吸附回整页。
+  /// 滚动事件处理：更新页码、惰性渲染。
+  /// 翻页模式下滚轮/触控板由 main.ts 拦截为翻页（无自由滚动，也就没有吸附环节）。
   async onScroll(): Promise<void> {
     this.emitPage();
     await this.renderVisible();
-    if (this.flip) this.scheduleSnap();
-  }
-
-  /// 翻页模式的吸附：滚动停稳（连续两次采样位置相同）后回到最近的整页（居中）。
-  private lastScrollTop = -1;
-  private scheduleSnap(): void {
-    window.clearTimeout(this.snapTimer);
-    this.snapTimer = window.setTimeout(() => {
-      const top = this.surface.scrollTop;
-      if (top !== this.lastScrollTop) {
-        // 还在滚动（平滑动画或用户拖动中）：记录位置，再等一拍。
-        this.lastScrollTop = top;
-        this.scheduleSnap();
-        return;
-      }
-      this.snapToPage();
-    }, 120);
-  }
-
-  /// 吸附到当前页（居中/顶部对齐）；只在跨页时触发，页内滚动不打扰。
-  snapToPage(): void {
-    if (!this.flip) return;
-    const page = this.currentPage();
-    if (page === this.lastSnapPage) return;
-    this.lastSnapPage = page;
-    this.scrollToPage(page, true);
   }
 
   private emitPage() {

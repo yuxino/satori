@@ -126,7 +126,7 @@ async function boot() {
   // 阅读面本身，比 window resize 更可靠——初次加载时窗口事件可能丢失，
   // 而 ResizeObserver 在 WebView 真正完成布局后必然触发一次。
   const resizeObserver = new ResizeObserver(() => {
-    if (!reader || !currentDoc) return;
+    if (!reader || !currentDoc || openingBook) return; // 打开书进行中：跳过，避免读到半成品布局
     window.clearTimeout(observerTimer);
     observerTimer = window.setTimeout(() => void relayoutOnResize(), 120);
   });
@@ -134,9 +134,11 @@ async function boot() {
 }
 
 let observerTimer: number | undefined;
+/// 打开书进行中（openBook 的异步加载/布局期间）。
+let openingBook = false;
 
 async function relayoutOnResize() {
-  if (!reader || !currentDoc) return;
+  if (!reader || !currentDoc || openingBook) return;
   const anchor = reader.currentPage();
   await reader.setZoom(zoomFactor);
   reader.scrollToPage(anchor, true);
@@ -445,6 +447,7 @@ async function openBook(book: BookRecord) {
   }
   showLoading("正在打开书…");
   hideHome();
+  openingBook = true;
   try {
     const resolved = await resolveBookPath(book);
     currentBook = resolved;
@@ -519,6 +522,8 @@ async function openBook(book: BookRecord) {
         <button class="open-book">换一本</button>
       </div>`;
     readerSurface.querySelector(".open-book")!.addEventListener("click", () => void pickAndOpenBook());
+  } finally {
+    openingBook = false;
   }
 }
 
@@ -1192,6 +1197,23 @@ function setupReaderSurface() {
   regionOverlay.id = "region-overlay";
   document.getElementById("app")!.appendChild(regionOverlay);
 
+  // 翻页模式：滚轮/触控板 = 翻页（页面放得下时）；放大后页面超高则页内滚动。
+  // 由阅读器翻页，不做自由滚动（也就没有吸附/错位问题）。
+  let lastWheelFlip = 0;
+  readerSurface.addEventListener(
+    "wheel",
+    (e) => {
+      if (!reader || !reader.pageFitsViewport()) return; // 高页：允许原生滚动
+      e.preventDefault();
+      if (Math.abs(e.deltaY) < 15) return;
+      const now = performance.now();
+      if (now - lastWheelFlip < 280) return; // 防抖：一次滚动只翻一页
+      lastWheelFlip = now;
+      reader.flipPage(e.deltaY > 0 ? 1 : -1);
+    },
+    { passive: false },
+  );
+
   /// 拖拽超过该像素才算框选（单击不触发提问）。
   const DRAG_THRESHOLD = 6;
 
@@ -1441,10 +1463,11 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (typing) return; // 输入中：不响应全局翻页/缩放
-  if (!e.metaKey && (e.key === "ArrowRight" || e.key === "PageDown")) {
+  if (homeView.classList.contains("open")) return; // 首页打开时不翻隐藏的阅读器
+  if (!e.metaKey && (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === "PageDown")) {
     reader?.flipPage(1);
   }
-  if (!e.metaKey && (e.key === "ArrowLeft" || e.key === "PageUp")) {
+  if (!e.metaKey && (e.key === "ArrowLeft" || e.key === "ArrowUp" || e.key === "PageUp")) {
     reader?.flipPage(-1);
   }
 });
