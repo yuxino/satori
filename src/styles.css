@@ -686,6 +686,17 @@ body {
   color: var(--lavender);
 }
 
+/* 当前章节提示（大书翻页时知道自己在哪一章）。 */
+#bottom-bar .chapter-label {
+  font-size: 11px;
+  color: var(--ink-faint);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--sans);
+}
+
 #bottom-bar .page-jump-input {
   width: 50px;
   border: 1px solid var(--lavender);

@@ -272,6 +272,10 @@ function showReopenCue(book: BookRecord) {
 }
 
 // ---- 目录 ----
+/// 当前书的有效目录（内置大纲清洗后 / 扫描恢复的持久化目录），
+/// 供底部栏「当前章节」指示使用。
+let effectiveOutline: OutlineEntry[] = [];
+
 function buildTOC() {
   tocDrawer.innerHTML = "";
 
@@ -311,18 +315,21 @@ function buildTOC() {
       if (native.length > 0) {
         // PDF 自带大纲优先。同样清洗前置内容（封面/前言/考试大纲/参考答案…），
         // 与扫描目录识别保持一致。
-        renderOutline(
-          cleanOutline(native.map((n) => ({ title: n.title, page: n.page, depth: n.depth }))),
-          "",
-        );
+        const cleaned = cleanOutline(native.map((n) => ({ title: n.title, page: n.page, depth: n.depth })));
+        effectiveOutline = cleaned;
+        renderOutline(cleaned, "");
+        scheduleBottomBarUpdate();
         return;
       }
       // 无内置大纲：用持久化的扫描恢复目录（若有）。
       const errHint = currentBook ? sessionStorage.getItem(`outline-err-${currentBook.id}`) : null;
       const fallback = errHint ? `目录识别失败：${errHint}` : "这本书没有目录（打开时会尝试自动识别）。";
+      effectiveOutline = currentBook?.outline ?? [];
       renderOutline(currentBook?.outline ?? [], fallback);
+      scheduleBottomBarUpdate();
     });
   } else {
+    effectiveOutline = [];
     renderOutline(currentBook?.outline ?? [], "打开一本书后这里会显示目录。");
   }
 }
@@ -1345,12 +1352,26 @@ function renderBottomBar() {
     void applyLayout(currentBook?.spread !== true);
   });
 
-  bottomBar.append(bookBtn, prev, next, reviewBtn, pageNum, thumbs, zoomGroup, layoutBtn);
+  const chapterLabel = document.createElement("span");
+  chapterLabel.className = "chapter-label";
+
+  bottomBar.append(bookBtn, prev, next, reviewBtn, pageNum, chapterLabel, thumbs, zoomGroup, layoutBtn);
   updateBottomBarZoom();
   updateLayoutButton();
 
   // 打开书时一次性渲染全部缩略图（缓存），滚动时只更新高亮。
   void renderAllThumbnails();
+}
+
+/// 当前页所在的章级标题（目录里 depth=0 的最后一条 ≤ 当前页的条目），
+/// 没有目录时返回空。
+function currentChapterLabel(): string {
+  let chapter = "";
+  for (const item of effectiveOutline) {
+    if (item.page > currentPage) break;
+    if (item.depth === 0) chapter = item.title;
+  }
+  return chapter;
 }
 
 function updateBottomBarZoom() {
@@ -1501,11 +1522,15 @@ async function removeBook(book: BookRecord) {
   }
 }
 
-/// 滚动/翻页后：更新页码、把高亮框移到当前页缩略图、滚动缩略图条让当前页可见。
+/// 滚动/翻页后：更新页码、当前章节、把高亮框移到当前页缩略图、滚动缩略图条让当前页可见。
 function scheduleBottomBarUpdate() {
   if (!currentDoc || !thumbBarEl) return;
   const pageNum = bottomBar.querySelector(".page-num") as HTMLElement | null;
   if (pageNum) pageNum.textContent = `${currentPage} / ${currentDoc.pageCount}`;
+
+  // 当前章节提示（大书翻页时知道自己在哪一章）。
+  const chapterEl = bottomBar.querySelector(".chapter-label") as HTMLElement | null;
+  if (chapterEl) chapterEl.textContent = currentChapterLabel();
 
   // 缩略图条收起时（height 0）不做定位，展开时由 hover 触发一次校正。
   const barRect = thumbBarEl.getBoundingClientRect();
