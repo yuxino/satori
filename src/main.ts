@@ -1540,6 +1540,13 @@ function renderBottomBar() {
     tocDrawer.classList.toggle("open");
   });
 
+  // 首页/总览：一键回到学习总览（当前阅读位置保留，随时返回）。
+  const homeBtn = document.createElement("button");
+  homeBtn.className = "action-btn home-btn";
+  homeBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v9.5h13V10"/></svg>`;
+  homeBtn.title = "回到首页（学习总览）";
+  homeBtn.addEventListener("click", () => showHome());
+
   // 页码：点击变成输入框，输入页码回车跳转。
   const pageNum = document.createElement("span");
   pageNum.className = "page-num";
@@ -1678,7 +1685,7 @@ function renderBottomBar() {
   const chapterLabel = document.createElement("span");
   chapterLabel.className = "chapter-label";
 
-  bottomBar.append(bookBtn, prev, next, reviewBtn, pageNum, chapterLabel, thumbs, zoomGroup, layoutBtn);
+  bottomBar.append(bookBtn, prev, next, reviewBtn, homeBtn, pageNum, chapterLabel, thumbs, zoomGroup, layoutBtn);
   updateBottomBarZoom();
   updateLayoutButton();
 

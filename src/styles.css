@@ -1101,6 +1101,18 @@ body {
   color: var(--lavender);
 }
 
+/* 首页按钮：房子图标，垂直居中。 */
+#bottom-bar .home-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+}
+
+#bottom-bar .home-btn svg {
+  display: block;
+}
+
 #bottom-bar .book-btn {
   max-width: 140px;
   overflow: hidden;
