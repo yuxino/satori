@@ -105,6 +105,8 @@ pub fn run() {
             thumbs::load_thumb,
             thumbs::save_thumb,
             qwen::ask_visual,
+            qwen::extract_outline,
+            qwen::find_page_by_title,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

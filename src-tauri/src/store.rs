@@ -14,6 +14,26 @@ pub struct BookRecord {
     pub path: String,
     pub last_page: usize,
     pub added_at: u64,
+    /// 目录（含扫描书恢复的），空 = 尚无。持久化，打开秒显示。
+    pub outline: Vec<OutlineEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OutlineEntry {
+    pub title: String,
+    pub page: usize,
+    pub depth: usize,
+}
+
+impl Default for OutlineEntry {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            page: 1,
+            depth: 0,
+        }
+    }
 }
 
 impl Default for BookRecord {
@@ -24,6 +44,7 @@ impl Default for BookRecord {
             path: String::new(),
             last_page: 1,
             added_at: 0,
+            outline: Vec::new(),
         }
     }
 }

@@ -8,6 +8,13 @@ export interface BookRecord {
   path: string;
   last_page: number;
   added_at: number;
+  outline: OutlineEntry[];
+}
+
+export interface OutlineEntry {
+  title: string;
+  page: number;
+  depth: number;
 }
 
 export interface QAEntry {
@@ -114,4 +121,24 @@ export async function askVisual(apiKey: string, request: AskRequest, onChunk: (t
     unlisten();
   }
   return fullText;
+}
+
+// ---- 扫描书目录恢复 ----
+
+export interface OutlineExtractRequest {
+  model: string;
+  pages: EvidencePage[];
+}
+
+export function extractOutline(apiKey: string, request: OutlineExtractRequest): Promise<OutlineEntry[]> {
+  return invoke<OutlineEntry[]>("extract_outline", { apiKey, request });
+}
+
+export function findPageByTitle(
+  apiKey: string,
+  model: string,
+  title: string,
+  pages: EvidencePage[],
+): Promise<number> {
+  return invoke<number>("find_page_by_title", { apiKey, request: { model, title, pages } });
 }

@@ -32,6 +32,8 @@ function showFatalError(message: string) {
 import {
   askVisual,
   emptyStore,
+  extractOutline,
+  findPageByTitle,
   listModelOptions,
   loadStore,
   readApiKey,
@@ -44,6 +46,7 @@ import {
   type BookRecord,
   type HistoryTurn,
   type ModelOption,
+  type OutlineEntry,
   type QAEntry,
   type Store,
 } from "./api";
@@ -137,6 +140,7 @@ async function pickAndOpenBook() {
     path: selected,
     last_page: 1,
     added_at: Date.now(),
+    outline: [],
   };
   store.books = [book, ...store.books.filter((b) => b.id !== book.id)];
   await persist();
@@ -186,6 +190,8 @@ async function openBook(book: BookRecord) {
     renderBottomBar();
     showReopenCue(resolved);
     buildTOC();
+    // 扫描书无内置目录时自动识别（异步，不阻塞阅读）。
+    void maybeExtractScannedOutline();
     // 更新书籍列表（路径可能被修正）。
     store.books = store.books.map((b) => (b.id === resolved.id ? resolved : b));
     await persist();
@@ -254,37 +260,46 @@ function buildTOC() {
   tocTitle.textContent = "目录";
   tocDrawer.appendChild(tocTitle);
 
+  const renderOutline = (outline: OutlineEntry[], sourceNote: string) => {
+    if (!tocDrawer.isConnected) return;
+    if (outline.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "toc-item depth-2";
+      empty.textContent = sourceNote || "这本书还没有目录。";
+      tocDrawer.appendChild(empty);
+      return;
+    }
+    for (const item of outline) {
+      const el = document.createElement("div");
+      el.className = `toc-item depth-${Math.min(item.depth + 1, 3)}`;
+      el.textContent = item.title;
+      el.title = `跳到第 ${item.page} 页`;
+      el.addEventListener("click", () => {
+        tocDrawer.classList.remove("open");
+        if (reader) {
+          reader.scrollToPage(item.page);
+          void reader.onScroll();
+        }
+      });
+      tocDrawer.appendChild(el);
+    }
+  };
+
   if (currentDoc) {
-    void currentDoc.getOutline().then((outline) => {
-      // 异步返回时抽屉可能已重建，安全判断。
-      if (!tocDrawer.isConnected) return;
-      if (outline.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "toc-item depth-2";
-        empty.textContent = "这本书没有内置目录（扫描书常见）。";
-        tocDrawer.appendChild(empty);
+    void currentDoc.getOutline().then((native) => {
+      if (native.length > 0) {
+        // PDF 自带大纲优先。
+        renderOutline(
+          native.map((n) => ({ title: n.title, page: n.page, depth: n.depth })),
+          "",
+        );
         return;
       }
-      for (const item of outline) {
-        const el = document.createElement("div");
-        el.className = `toc-item depth-${Math.min(item.depth + 1, 3)}`;
-        el.textContent = item.title;
-        el.title = `跳到第 ${item.page} 页`;
-        el.addEventListener("click", () => {
-          tocDrawer.classList.remove("open");
-          if (reader) {
-            reader.scrollToPage(item.page);
-            void reader.onScroll();
-          }
-        });
-        tocDrawer.appendChild(el);
-      }
+      // 无内置大纲：用持久化的扫描恢复目录（若有）。
+      renderOutline(currentBook?.outline ?? [], "这本书没有目录（打开时会尝试自动识别）。");
     });
   } else {
-    const empty = document.createElement("div");
-    empty.className = "toc-item depth-2";
-    empty.textContent = "打开一本书后这里会显示目录。";
-    tocDrawer.appendChild(empty);
+    renderOutline(currentBook?.outline ?? [], "打开一本书后这里会显示目录。");
   }
 
   // 第二区：回看 · 问过的。
@@ -316,6 +331,65 @@ function buildTOC() {
       void reopenQA(entry);
     });
     tocDrawer.appendChild(item);
+  }
+}
+
+// ---- 扫描书目录恢复（自动） ----
+/// 打开书时调用：PDF 无内置大纲且没有持久化目录时，
+/// 用 Qwen 读目录页提取章节，再定位第一章算出偏移，映射成 PDF 页码。
+async function maybeExtractScannedOutline() {
+  if (!currentDoc || !apiKey) return;
+  if (!currentBook) return;
+  // 已有目录（内置或之前恢复过）就不再处理。
+  if (currentBook.outline.length > 0) return;
+  const native = await currentDoc.getOutline();
+  if (native.length > 0) return;
+
+  const pageCount = currentDoc.pageCount;
+  // 目录通常在前 10 页附近；只读前 9 页（跳过封面）。
+  const frontFrom = 3;
+  const frontTo = Math.min(pageCount, 11);
+  if (frontTo <= frontFrom) return;
+
+  try {
+    // 1) 渲染目录候选页 → Qwen 提取目录（印刷页码）。
+    const pages = await exportEvidence([...Array(frontTo - frontFrom + 1)].map((_, i) => frontFrom + i));
+    const entries = await extractOutline(apiKey, {
+      model: store.settings.model_id,
+      pages,
+    });
+    if (entries.length === 0) return;
+
+    // 2) 找第一章在正文里的实际 PDF 页码 → 算出偏移。
+    const firstChapter = entries.reduce((a, b) => (b.depth === 0 && b.page < a.page ? b : a), entries[0]);
+    // 候选正文页：猜测前置页约 5–15 页，扫这一带。
+    const probeFrom = Math.max(1, firstChapter.page);
+    const probeTo = Math.min(pageCount, probeFrom + 12);
+    const probePages = await exportEvidence([...Array(probeTo - probeFrom + 1)].map((_, i) => probeFrom + i));
+    const foundPdfPage = await findPageByTitle(
+      apiKey,
+      store.settings.model_id,
+      firstChapter.title,
+      probePages,
+    );
+    if (foundPdfPage === 0) return; // 定位失败，放弃（保留无目录状态）。
+
+    // 偏移 = 第一章实际 PDF 页 - 第一章印刷页。
+    const offset = foundPdfPage as number - firstChapter.page;
+
+    // 3) 映射所有条目为 PDF 页码并持久化。
+    const mapped: OutlineEntry[] = entries
+      .map((e) => ({ title: e.title, depth: e.depth, page: e.page + offset }))
+      .filter((e) => e.page >= 1 && e.page <= pageCount);
+    if (mapped.length === 0) return;
+
+    currentBook.outline = mapped;
+    store.books = store.books.map((b) => (b.id === currentBook!.id ? currentBook! : b));
+    await persist();
+    // 目录抽屉开着的话刷新。
+    if (tocDrawer.classList.contains("open")) buildTOC();
+  } catch {
+    // 恢复失败静默：保持无目录状态，不打扰阅读。
   }
 }
 

@@ -223,3 +223,245 @@ pub async fn ask_visual(
     let _ = app.emit("qwen://done", &full_text);
     Ok(full_text)
 }
+
+// ---- 扫描书目录恢复：让 Qwen 读目录页，返回结构化 JSON ----
+
+/// 扫描书目录提取入参：目录页图片（前若干页）。
+#[derive(Debug, Deserialize)]
+pub struct ExtractOutlineRequest {
+    pub model: String,
+    /// 目录页图片（JPEG base64），带 PDF 页码。
+    pub pages: Vec<EvidencePage>,
+}
+
+/// 返回的目录条目（Qwen 解析后）。
+#[derive(Debug, Serialize)]
+pub struct OutlineResult {
+    pub title: String,
+    /// 书内印刷页码（目录里写的那种页码，如 第1章…第 3 页）。
+    pub printed_page: usize,
+    pub depth: usize,
+}
+
+/// 系统提示：让模型输出纯 JSON 目录数组。
+const OUTLINE_SYSTEM: &str = "你正在读取一本中文教材的目录页图片。\
+请把目录整理成 JSON 数组输出，数组元素格式：\
+{\"title\": \"章节标题\", \"printed_page\": 目录中标注的印刷页码数字, \"depth\": 0 或 1}。\
+规则：\
+1. depth=0 表示章（如 第一章），depth=1 表示章下的小节；三级及以下归为 1。\
+2. printed_page 必须是目录里印刷的页码数字，不要换算、不要猜测缺失的数字。\
+3. 只输出 JSON 数组本身，不要 Markdown 代码块、不要任何解释文字。\
+4. 看不清的条目跳过，宁缺毋滥。";
+
+#[tauri::command]
+pub async fn extract_outline(
+    state: State<'_, AppState>,
+    api_key: String,
+    request: ExtractOutlineRequest,
+) -> Result<Vec<OutlineResult>, String> {
+    let mut user_parts = Vec::new();
+    // 目录页可能跨多页，按顺序给模型，并标注每张图的 PDF 页码。
+    let mut pages = request.pages.clone();
+    pages.sort_by_key(|p| p.page);
+    for p in &pages {
+        user_parts.push(ChatMessageContentPart {
+            kind: "image_url".to_string(),
+            text: None,
+            image_url: Some(ImageURL {
+                url: format!("data:image/jpeg;base64,{}", p.jpeg),
+            }),
+        });
+        user_parts.push(ChatMessageContentPart {
+            kind: "text".to_string(),
+            text: Some(format!("（这是 PDF 第 {} 页）", p.page)),
+            image_url: None,
+        });
+    }
+    user_parts.push(ChatMessageContentPart {
+        kind: "text".to_string(),
+        text: Some("请读取这些目录页并输出 JSON 数组目录。".to_string()),
+        image_url: None,
+    });
+
+    let body = ChatRequest {
+        model: request.model,
+        messages: vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: vec![ChatMessageContentPart {
+                    kind: "text".to_string(),
+                    text: Some(OUTLINE_SYSTEM.to_string()),
+                    image_url: None,
+                }],
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: user_parts,
+            },
+        ],
+        stream: false,
+        store: false,
+        max_tokens: 2000,
+    };
+
+    let url = format!("{API_BASE}{CHAT_PATH}");
+    let response = state
+        .client
+        .post(&url)
+        .header("Authorization", format!("Bearer {api_key}"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("连接百炼失败：{e}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let status_text = status.as_u16();
+        let body = response.text().await.unwrap_or_default();
+        let detail = serde_json::from_str::<ChatErrorBody>(&body)
+            .ok()
+            .and_then(|b| b.error)
+            .and_then(|e| e.message)
+            .unwrap_or_default();
+        return Err(format!("百炼返回 {status_text}：{detail}"));
+    }
+
+    // 非流式：直接解析返回的完整 JSON。
+    let body = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| format!("解析响应失败：{e}"))?;
+    let content = body
+        .pointer("/choices/0/message/content")
+        .and_then(|c| c.as_str())
+        .unwrap_or_default();
+
+    // 模型可能包了 ```json 代码块，剥掉。
+    let cleaned = content
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(cleaned).map_err(|_| format!("模型未返回有效 JSON：{content}"))?;
+    let array = parsed.as_array().ok_or("目录不是 JSON 数组")?;
+
+    let mut out = Vec::new();
+    for item in array {
+        let title = item.get("title").and_then(|t| t.as_str()).unwrap_or("").trim().to_string();
+        let printed = item.get("printed_page").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
+        let depth = item.get("depth").and_then(|d| d.as_u64()).unwrap_or(0) as usize;
+        if !title.is_empty() && printed > 0 {
+            out.push(OutlineResult { title, printed_page: printed, depth: depth.min(1) });
+        }
+    }
+    Ok(out)
+}
+
+/// 在候选正文页里定位某个章节标题，返回它首次出现的 PDF 页码。
+/// 用于把目录里的印刷页码换算成 PDF 页码（校正前置页偏移）。
+#[derive(Debug, Deserialize)]
+pub struct FindPageRequest {
+    pub model: String,
+    /// 章节标题（如「第一章 软件工程概述」）。
+    pub title: String,
+    /// 候选正文页图片（JPEG base64，带 PDF 页码）。
+    pub pages: Vec<EvidencePage>,
+}
+
+const FIND_PAGE_SYSTEM: &str = "你在翻阅一本书的正文页面图片。\
+给你一个章节标题，以及若干候选页（每张图标注了它是 PDF 第几页）。\
+请判断该章节标题（可能是「第一章」「第1章」或带标题）在哪个 PDF 页码**首次**出现。\
+只输出一个数字（PDF 页码），不要任何其他文字。\
+如果这些页里都没有出现该章节标题，输出 0。";
+
+#[tauri::command]
+pub async fn find_page_by_title(
+    state: State<'_, AppState>,
+    api_key: String,
+    request: FindPageRequest,
+) -> Result<usize, String> {
+    let mut user_parts = Vec::new();
+    let mut pages = request.pages.clone();
+    pages.sort_by_key(|p| p.page);
+    for p in &pages {
+        user_parts.push(ChatMessageContentPart {
+            kind: "image_url".to_string(),
+            text: None,
+            image_url: Some(ImageURL {
+                url: format!("data:image/jpeg;base64,{}", p.jpeg),
+            }),
+        });
+        user_parts.push(ChatMessageContentPart {
+            kind: "text".to_string(),
+            text: Some(format!("（这是 PDF 第 {} 页）", p.page)),
+            image_url: None,
+        });
+    }
+    user_parts.push(ChatMessageContentPart {
+        kind: "text".to_string(),
+        text: Some(format!("章节标题：{}。它首次出现在哪个 PDF 页码？只输出数字。", request.title)),
+        image_url: None,
+    });
+
+    let body = ChatRequest {
+        model: request.model,
+        messages: vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: vec![ChatMessageContentPart {
+                    kind: "text".to_string(),
+                    text: Some(FIND_PAGE_SYSTEM.to_string()),
+                    image_url: None,
+                }],
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: user_parts,
+            },
+        ],
+        stream: false,
+        store: false,
+        max_tokens: 200,
+    };
+
+    let url = format!("{API_BASE}{CHAT_PATH}");
+    let response = state
+        .client
+        .post(&url)
+        .header("Authorization", format!("Bearer {api_key}"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("连接百炼失败：{e}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        let status_text = status.as_u16();
+        let body = response.text().await.unwrap_or_default();
+        let detail = serde_json::from_str::<ChatErrorBody>(&body)
+            .ok()
+            .and_then(|b| b.error)
+            .and_then(|e| e.message)
+            .unwrap_or_default();
+        return Err(format!("百炼返回 {status_text}：{detail}"));
+    }
+
+    let body = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| format!("解析响应失败：{e}"))?;
+    let content = body
+        .pointer("/choices/0/message/content")
+        .and_then(|c| c.as_str())
+        .unwrap_or_default();
+    let num: usize = content
+        .trim()
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .unwrap_or(0);
+    Ok(num)
+}
