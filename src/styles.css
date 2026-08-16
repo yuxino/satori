@@ -833,6 +833,30 @@ body {
   flex-shrink: 0;
 }
 
+/* 删除书按钮：默认透明，悬停菜单项时出现。 */
+#book-menu .book-menu-del {
+  border: none;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--sans);
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+#book-menu .book-menu-item:hover .book-menu-del {
+  opacity: 1;
+}
+
+#book-menu .book-menu-del:hover {
+  background: #f4d6d6;
+  color: #b3382c;
+}
+
 #book-menu .book-menu-open {
   margin-top: 4px;
   border: 1px dashed var(--line);

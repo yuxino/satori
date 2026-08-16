@@ -1247,7 +1247,18 @@ function toggleBookMenu() {
       const info = document.createElement("span");
       info.className = "book-menu-info";
       info.textContent = book.id === currentBook?.id ? "正在读" : `读到第 ${book.last_page} 页`;
-      item.append(name, info);
+
+      // 删除按钮（悬停时出现）。
+      const del = document.createElement("button");
+      del.className = "book-menu-del";
+      del.textContent = "删除";
+      del.title = "从书架移除（不删除原文件）";
+      del.addEventListener("click", (e) => {
+        e.stopPropagation();
+        void removeBook(book);
+      });
+
+      item.append(name, info, del);
       if (book.id === currentBook?.id) item.classList.add("current");
       item.addEventListener("click", () => {
         menu.remove();
@@ -1276,6 +1287,37 @@ function toggleBookMenu() {
       bookMenuEl = null;
     }
   }, { once: true });
+}
+
+/// 从书架删除一本书（不删除电脑上的原 PDF 文件），连带清掉它的问答记录。
+async function removeBook(book: BookRecord) {
+  bookMenuEl?.remove();
+  bookMenuEl = null;
+
+  // 从书库移除 + 清掉该书问答。
+  store.books = store.books.filter((b) => b.id !== book.id);
+  store.qa = store.qa.filter((q) => q.book_id !== book.id);
+  await persist();
+
+  // 删除的是当前书：切换到剩余第一本，或回到空书架。
+  if (currentBook?.id === book.id) {
+    currentDoc?.destroy();
+    currentDoc = null;
+    reader?.clear();
+    reader = null;
+    currentBook = null;
+    history = [];
+    teacherSheet.classList.remove("open");
+    tocDrawer.classList.remove("open");
+    if (store.books.length > 0) {
+      await openBook(store.books[0]);
+    } else {
+      showEmptyState();
+    }
+  } else {
+    // 非当前书：重建书菜单反映变化（若开着）。
+    if (bookMenuEl) toggleBookMenu();
+  }
 }
 
 /// 滚动/翻页后：更新页码、把高亮框移到当前页缩略图、滚动缩略图条让当前页可见。
