@@ -194,8 +194,9 @@ async function openBook(book: BookRecord) {
         void askRegionQuestion(region);
       },
     });
-    // 打开时直接应用这本书的缩放，避免先按 100% 渲染再跳变。
-    await reader.open(currentPage, zoomFactor);
+    // 打开时直接应用这本书的缩放与布局（单页/双页），
+    // 避免先按 100% 渲染再跳变。
+    await reader.open(currentPage, zoomFactor, resolved.spread === true);
     ensureScrollListener();
     hideLoading();
     renderBottomBar();
@@ -1336,8 +1337,16 @@ function renderBottomBar() {
   });
   zoomGroup.append(zoomOut, zoomPct, zoomIn);
 
-  bottomBar.append(bookBtn, prev, next, reviewBtn, pageNum, thumbs, zoomGroup);
+  // 布局切换：单页连续滚动 ⇄ 双页（书本展开）。每本书记住自己的偏好。
+  const layoutBtn = document.createElement("button");
+  layoutBtn.className = "action-btn layout-btn";
+  layoutBtn.addEventListener("click", () => {
+    void applyLayout(currentBook?.spread !== true);
+  });
+
+  bottomBar.append(bookBtn, prev, next, reviewBtn, pageNum, thumbs, zoomGroup, layoutBtn);
   updateBottomBarZoom();
+  updateLayoutButton();
 
   // 打开书时一次性渲染全部缩略图（缓存），滚动时只更新高亮。
   void renderAllThumbnails();
@@ -1346,6 +1355,32 @@ function renderBottomBar() {
 function updateBottomBarZoom() {
   const pct = bottomBar.querySelector(".zoom-pct") as HTMLElement | null;
   if (pct) pct.textContent = `${Math.round(zoomFactor * 100)}%`;
+}
+
+/// 底部栏「双页/单页」按钮文案：显示点击后的效果。
+function updateLayoutButton() {
+  const btn = bottomBar.querySelector(".layout-btn") as HTMLElement | null;
+  if (!btn) return;
+  const spread = currentBook?.spread === true;
+  btn.textContent = spread ? "单页" : "双页";
+  btn.title = spread ? "切换为单页连续滚动" : "切换为双页（书本展开，两页并排）";
+}
+
+/// 切换单页/双页布局，并把偏好记到当前书。
+/// 换布局后回到「适合宽度」（单页 = 页宽铺满，双页 = 展开宽度铺满）。
+async function applyLayout(spread: boolean) {
+  if (!reader) return;
+  zoomFactor = 1;
+  await reader.setZoom(1);
+  await reader.setSpread(spread);
+  if (currentBook) {
+    currentBook.spread = spread;
+    currentBook.zoom = zoomFactor; // 布局切换后回到适合宽度，一并记住
+    store.books = store.books.map((b) => (b.id === currentBook!.id ? currentBook! : b));
+    await persist();
+  }
+  updateLayoutButton();
+  updateBottomBarZoom();
 }
 
 /// 重建底部栏页码标签（页码输入框失焦/提交后调用）。

@@ -11,6 +11,8 @@ export interface BookRecord {
   outline: OutlineEntry[];
   /** 这本书自己的缩放倍数（1 = 适合宽度）；缺省用全局默认。 */
   zoom?: number;
+  /** 双页（书本展开）布局；缺省单页。 */
+  spread?: boolean;
 }
 
 export interface OutlineEntry {

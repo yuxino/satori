@@ -24,6 +24,10 @@ interface PageLayout {
   displayHeight: number;
   /// 顶部偏移（px，文档坐标）。
   top: number;
+  /// 左偏移（px，文档坐标）。单页模式全部一样；双页模式左右页各半。
+  left: number;
+  /// 显示宽度（px）。单页 = 页宽；双页 = 展开宽度的一半。
+  width: number;
   /// PDF 逻辑尺寸（scale=1 的 PDF 点）。
   logicalWidth: number;
   logicalHeight: number;
@@ -39,6 +43,8 @@ export class ScrollReader {
 
   /// 当前缩放：1 = 页面宽度正好铺满可用宽度。
   private zoom = 1;
+  /// 双页模式（书本展开）：两页并排，1 = 展开宽度铺满可用宽度。
+  private spread = false;
   /// 页面显示宽度（px）= 可用宽度 × zoom。
   private pageWidth = 800;
   private layouts: PageLayout[] = [];
@@ -61,16 +67,25 @@ export class ScrollReader {
 
   /// 打开：建立页面骨架，滚动到指定页。
   /// initialZoom 是打开时就要用的缩放（1 = 适合宽度），
-  /// 直接建布局，避免先按 100% 渲染再跳变。
-  async open(targetPage: number, initialZoom = 1): Promise<void> {
+  /// spread 为 true 时按双页（书本展开）布局。
+  async open(targetPage: number, initialZoom = 1, spread = false): Promise<void> {
     await this.waitForWidth();
     this.zoom = initialZoom;
+    this.spread = spread;
     this.pageWidth = this.availableWidth * this.zoom;
     await this.layout();
     // 直接渲染目标页附近（跳到上次读的页，不等 scroll 事件异步触发）。
     await this.renderVisible(targetPage);
     this.scrollToPage(targetPage, true);
     this.emitPage();
+  }
+
+  /// 切换单页/双页布局，保持视口中心对应的文档位置不动。
+  /// 双页：1 = 展开宽度铺满；单页：1 = 单页宽度铺满。
+  async setSpread(enabled: boolean): Promise<void> {
+    if (this.spread === enabled) return;
+    this.spread = enabled;
+    await this.commitZoom(this.zoom);
   }
 
   /// 等待滚动容器获得真实宽度（WebView 初次布局可能晚于脚本执行）。
@@ -114,20 +129,71 @@ export class ScrollReader {
 
     // 只计算尺寸/位置数据（供页码映射、滚动定位），不建 DOM——
     // 几百页的书逐页建元素会卡，元素由 renderVisible 按需创建。
-    let top = 0;
+    const sizes: { width: number; height: number }[] = [];
     for (let p = 1; p <= this.doc.pageCount; p++) {
-      const { width, height } = await this.doc.pageSize(p);
-      const displayHeight = (height / width) * this.pageWidth;
-      this.layouts.push({ displayHeight, top, logicalWidth: width, logicalHeight: height });
-      top += displayHeight + PAGE_GAP;
+      sizes.push(await this.doc.pageSize(p));
     }
+
+    if (!this.spread) {
+      // ---- 单页：从上到下排列 ----
+      let top = 0;
+      for (let p = 1; p <= this.doc.pageCount; p++) {
+        const { width, height } = sizes[p - 1];
+        const displayHeight = (height / width) * this.pageWidth;
+        this.layouts.push({
+          displayHeight,
+          top,
+          left,
+          width: this.pageWidth,
+          logicalWidth: width,
+          logicalHeight: height,
+        });
+        top += displayHeight + PAGE_GAP;
+      }
+      return;
+    }
+
+    // ---- 双页（书本展开）：两页并排成一行 ----
+    // 第 1 页（封面）单独在右；之后 (2,3)、(4,5)… 偶数页在左、奇数页在右，
+    // 像翻开的书。行高取该行两页的较大者，两页顶端对齐。
+    const pageW = Math.max((this.pageWidth - PAGE_GAP) / 2, 40);
+    const leftX = left;
+    const rightX = left + this.pageWidth / 2 + PAGE_GAP / 2;
+    // 行号：p=1 → 0；(p>=2) → floor((p-2)/2)+1
+    const rowOf = (p: number) => (p <= 1 ? 0 : Math.floor((p - 2) / 2) + 1);
+
+    let rowTop = 0;
+    let curRow = -1;
+    let rowMaxH = 0;
+    for (let p = 1; p <= this.doc.pageCount; p++) {
+      const row = rowOf(p);
+      if (row !== curRow) {
+        // 新行开始：把上一行的高度加进 top。
+        if (curRow >= 0) rowTop += rowMaxH + PAGE_GAP;
+        curRow = row;
+        rowMaxH = 0;
+      }
+      const { width, height } = sizes[p - 1];
+      const displayHeight = (height / width) * pageW;
+      const isRight = p % 2 === 1; // 奇数页在右（含第 1 页封面）
+      rowMaxH = Math.max(rowMaxH, displayHeight);
+      this.layouts.push({
+        displayHeight,
+        top: rowTop,
+        left: isRight ? rightX : leftX,
+        width: pageW,
+        logicalWidth: width,
+        logicalHeight: height,
+      });
+    }
+    const totalHeight = rowTop + rowMaxH;
 
     // 关键：绝对定位的页面不撑起滚动容器的内容高度。
     // 必须用一个普通流式占位元素撑高容器，滚动条才会出现，
     // 否则容器自身高度会覆盖窗口高度，页面既看不见也滚不动。
     const spacer = document.createElement("div");
     spacer.className = "scroll-spacer";
-    spacer.style.height = `${top}px`;
+    spacer.style.height = `${totalHeight}px`;
     this.content.appendChild(spacer);
   }
 
@@ -186,8 +252,6 @@ export class ScrollReader {
 
     // 按需创建视口附近的页面元素（惰性骨架），再渲染 canvas。
     const toRender: number[] = [];
-    const surfaceW = this.surface.clientWidth;
-    const left = Math.max(0, (surfaceW - this.pageWidth) / 2);
     for (let p = start; p <= end; p++) {
       let mount = this.mounted.get(p);
       if (!mount) {
@@ -196,8 +260,8 @@ export class ScrollReader {
         const el = document.createElement("div");
         el.className = "scroll-page";
         el.dataset.page = String(p);
-        el.style.left = `${left}px`;
-        el.style.width = `${this.pageWidth}px`;
+        el.style.left = `${layout.left}px`;
+        el.style.width = `${layout.width}px`;
         el.style.height = `${layout.displayHeight}px`;
         el.style.top = `${layout.top}px`;
         this.content.appendChild(el);
@@ -243,11 +307,11 @@ export class ScrollReader {
 
   /// 每页的渲染分辨率：显示宽度 × 2（视网膜清晰度）。
   /// 用该页逻辑宽度换算 PDF.js 的 scale，避免硬编码导致超大 canvas
-  /// 触发浏览器限制而模糊。
+  /// 触发浏览器限制而模糊。双页模式下每页只有展开宽度的一半。
   private canvasScale(page: number): number {
     const layout = this.layouts[page - 1];
     if (!layout) return 2;
-    return (this.pageWidth * 2) / layout.logicalWidth;
+    return (layout.width * 2) / layout.logicalWidth;
   }
 
   /// 当前视口中心的页码。

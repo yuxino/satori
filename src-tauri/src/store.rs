@@ -18,6 +18,8 @@ pub struct BookRecord {
     pub outline: Vec<OutlineEntry>,
     /// 这本书自己的缩放倍数（1 = 适合宽度）。None = 用全局默认。
     pub zoom: Option<f64>,
+    /// 双页（书本展开）布局。false = 单页连续滚动。
+    pub spread: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +50,7 @@ impl Default for BookRecord {
             added_at: 0,
             outline: Vec::new(),
             zoom: None,
+            spread: false,
         }
     }
 }
