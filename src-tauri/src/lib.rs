@@ -5,6 +5,21 @@ mod thumbs;
 
 use tauri::{Emitter, Manager};
 
+/// 临时调试日志：追加到 App 数据目录的 debug.log（release 下 stdout 不可见）。
+pub fn debug_log(msg: &str) {
+    use std::io::Write;
+    if let Ok(dir) = std::env::var("HOME") {
+        let path = format!("{dir}/Library/Application Support/com.yuxino.satori/debug.log");
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let _ = writeln!(f, "[{ts}] {msg}");
+        }
+    }
+}
+
 /// 可配置的百炼视觉模型清单。默认使用理解能力最强的档位；
 /// 用户可以在设置里换成更均衡或更节省的档位。
 #[derive(Clone, serde::Serialize)]
@@ -47,7 +62,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .build()
+                .expect("failed to build http client"),
         })
         .setup(|app| {
             use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};

@@ -238,7 +238,9 @@ pub struct ExtractOutlineRequest {
 #[derive(Debug, Serialize)]
 pub struct OutlineResult {
     pub title: String,
-    /// 书内印刷页码（目录里写的那种页码，如 第1章…第 3 页）。
+    /// 书内印刷页码（目录里写的那种页码）。序列化为 `page`，
+    /// 与前端 OutlineEntry 字段对齐（否则前端读到 undefined → NaN）。
+    #[serde(rename = "page", alias = "printed_page")]
     pub printed_page: usize,
     pub depth: usize,
 }
@@ -301,7 +303,7 @@ pub async fn extract_outline(
         ],
         stream: false,
         store: false,
-        max_tokens: 2000,
+        max_tokens: 3000,
     };
 
     let url = format!("{API_BASE}{CHAT_PATH}");
@@ -312,12 +314,16 @@ pub async fn extract_outline(
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("连接百炼失败：{e}"))?;
+        .map_err(|e| {
+            crate::debug_log(&format!("extract_outline send failed: {e}"));
+            format!("连接百炼失败：{e}")
+        })?;
 
     let status = response.status();
     if !status.is_success() {
         let status_text = status.as_u16();
         let body = response.text().await.unwrap_or_default();
+        crate::debug_log(&format!("extract_outline HTTP {status_text}: {}", &body[..body.len().min(200)]));
         let detail = serde_json::from_str::<ChatErrorBody>(&body)
             .ok()
             .and_then(|b| b.error)
@@ -330,7 +336,10 @@ pub async fn extract_outline(
     let body = response
         .json::<serde_json::Value>()
         .await
-        .map_err(|e| format!("解析响应失败：{e}"))?;
+        .map_err(|e| {
+            crate::debug_log(&format!("extract_outline json parse failed: {e}"));
+            format!("解析响应失败：{e}")
+        })?;
     let content = body
         .pointer("/choices/0/message/content")
         .and_then(|c| c.as_str())
@@ -344,8 +353,13 @@ pub async fn extract_outline(
         .trim_end_matches("```")
         .trim();
 
-    let parsed: serde_json::Value =
-        serde_json::from_str(cleaned).map_err(|_| format!("模型未返回有效 JSON：{content}"))?;
+    let parsed: serde_json::Value = serde_json::from_str(cleaned).map_err(|e| {
+        crate::debug_log(&format!(
+            "extract_outline JSON parse failed: {e}; cleaned head: {}",
+            &cleaned[..cleaned.len().min(500)]
+        ));
+        format!("模型未返回有效 JSON：{content}")
+    })?;
     let array = parsed.as_array().ok_or("目录不是 JSON 数组")?;
 
     let mut out = Vec::new();

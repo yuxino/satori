@@ -170,6 +170,7 @@ async function openBook(book: BookRecord) {
     thumbnailBusy = false;
     thumbnailQueued = false;
     preheating = false;
+    preheatPaused = false;
     window.clearTimeout(thumbVirtualTimer);
     hideLoading();
 
@@ -199,7 +200,9 @@ async function openBook(book: BookRecord) {
     buildTOC();
     // 扫描书无内置目录时自动识别。延迟到开书高峰（首屏渲染 + 缩略图预热）之后，
     // 避免 3x 高清目录页渲染与首屏抢资源导致卡顿。
-    window.setTimeout(() => void maybeExtractScannedOutline(), 1500);
+    window.setTimeout(() => {
+      void maybeExtractScannedOutline();
+    }, 1500);
     // 更新书籍列表（路径可能被修正）。
     store.books = store.books.map((b) => (b.id === resolved.id ? resolved : b));
     await persist();
@@ -310,7 +313,9 @@ function buildTOC() {
         return;
       }
       // 无内置大纲：用持久化的扫描恢复目录（若有）。
-      renderOutline(currentBook?.outline ?? [], "这本书没有目录（打开时会尝试自动识别）。");
+      const errHint = currentBook ? sessionStorage.getItem(`outline-err-${currentBook.id}`) : null;
+      const fallback = errHint ? `目录识别失败：${errHint}` : "这本书没有目录（打开时会尝试自动识别）。";
+      renderOutline(currentBook?.outline ?? [], fallback);
     });
   } else {
     renderOutline(currentBook?.outline ?? [], "打开一本书后这里会显示目录。");
@@ -372,14 +377,18 @@ async function maybeExtractScannedOutline() {
   if (currentDoc !== doc || currentBook?.id !== bookId) return;
 
   const pageCount = doc.pageCount;
-  // 目录通常在书前部；从第 2 页起取约 10 页（跳过封面/书名页）。
-  const frontFrom = 2;
-  const frontTo = Math.min(pageCount, 11);
+  // 目录通常在书前部；取第 3-6 页（跳过封面/书名页/前 1-2 页）。
+  // 4 页 + 1.3x 是请求大小与覆盖面的折中：太多/太大导致百炼视觉处理超时。
+  const frontFrom = 3;
+  const frontTo = Math.min(pageCount, 6);
   if (frontTo <= frontFrom) return;
 
+  // 目录识别的渲染阶段需要独占 PDF.js worker；暂停缩略图预热，
+  // 否则整书预热排队挤占渲染，识别会慢几十秒甚至超时。
+  preheatPaused = true;
   try {
     // 1) 渲染目录候选页 → Qwen 提取目录（印刷页码）。
-    const pages = await exportEvidence([...Array(frontTo - frontFrom + 1)].map((_, i) => frontFrom + i), 3);
+    const pages = await exportEvidence([...Array(frontTo - frontFrom + 1)].map((_, i) => frontFrom + i), 1.3);
     if (currentDoc !== doc || currentBook?.id !== bookId) return;
     const entries = await extractOutline(apiKey, {
       model: store.settings.model_id,
@@ -388,22 +397,34 @@ async function maybeExtractScannedOutline() {
     if (entries.length === 0) return;
     if (currentDoc !== doc || currentBook?.id !== bookId) return;
 
-    // 过滤非正文条目（编者的话/前言/目录/附录/参考文献/后记 等），
-    // 避免把前置/后置内容当成章节。
-    const frontMatterRe = /^(编者的话|前言|序|目录|绪论|附录|参考文献|后记|致谢|出版说明|内容简介|学习目标|使用说明)/;
-    const bodyEntries = entries.filter((e) => !frontMatterRe.test(e.title.trim()));
+    // 过滤非正文条目（编者的话/前言/序/目录/考试大纲/考核目标/题型举例/参考答案 等），
+    // 避免把前置/后置内容当成章节。标题常带前缀：罗马数字（I II III…）或书名前缀，
+    // 单靠 ^ 锚定的开头词会漏掉，所以再加「包含词」和「前缀」两条规则。
+    const frontMatterRe =
+      /^(编者的话|前言|序|目录|绪论|大纲|课程性质|考核目标|课程内容|考核要求|题型举例|参考答案|附录|参考文献|后记|致谢|出版说明|内容简介|学习目标|使用说明|自学考试|组编)/;
+    const frontMatterContains = /(考试大纲|自学考试|考核目标|考核要求|题型举例|参考答案|课程性质|课程内容|课程目标|出版说明)/;
+    const frontMatterPrefix = /^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩIVX]+[、.\s:：]|^第[一二三四五六七八九十百]+部分/;
+    const bodyEntries = entries.filter((e) => {
+      const t = e.title.trim();
+      return !frontMatterRe.test(t) && !frontMatterContains.test(t) && !frontMatterPrefix.test(t);
+    });
     if (bodyEntries.length === 0) return;
 
-    // 2) 找第一章在正文里的实际 PDF 页码 → 算出偏移。
-    const chapters = bodyEntries.filter((e) => e.depth === 0);
-    const firstChapter =
-      chapters.length > 0
-        ? chapters.reduce((a, b) => (b.page < a.page ? b : a))
-        : bodyEntries.reduce((a, b) => (b.page < a.page ? b : a));
-    // 候选正文页：目录页（PDF 11 页后）到书前 1/4，扫这一段找第一章。
-    const probeFrom = Math.min(Math.max(frontTo + 1, 11), pageCount);
-    const probeTo = Math.min(pageCount, probeFrom + 15);
-    const probePages = await exportEvidence([...Array(probeTo - probeFrom + 1)].map((_, i) => probeFrom + i), 3);
+    // 2) 找第一章：优先选标题带「第X章」的 depth=0 条目（取最小印刷页），
+    // 避免把未过滤的前置项（如「软件工程自学考试大纲」）当第一章。
+    const chapters = bodyEntries.filter((e) => e.depth === 0 && /第[一二三四五六七八九十\d]+[章篇]/.test(e.title));
+    const fallbackChapters = bodyEntries.filter((e) => e.depth === 0);
+    const firstChapter = (chapters.length > 0 ? chapters : fallbackChapters).reduce((a, b) =>
+      b.page < a.page ? b : a,
+    );
+    // 候选正文页：第一章印刷 21 + 前置约 5-15 = PDF 约 26-36。
+    // 扫 PDF 20 到 min(45, 书页数)，每 2 页取样控制请求大小。
+    const probeFrom = Math.min(Math.max(20, 1), pageCount);
+    const probeTo = Math.min(pageCount, Math.max(probeFrom + 1, 45));
+    const probePages = await exportEvidence(
+      [...Array(Math.max(1, Math.ceil((probeTo - probeFrom + 1) / 2)))].map((_, i) => probeFrom + i * 2),
+      1.3,
+    );
     if (currentDoc !== doc || currentBook?.id !== bookId) return;
     const foundPdfPage = await findPageByTitle(
       apiKey,
@@ -428,8 +449,16 @@ async function maybeExtractScannedOutline() {
     await persist();
     // 目录抽屉开着的话刷新。
     if (tocDrawer.classList.contains("open")) buildTOC();
-  } catch {
-    // 恢复失败静默：保持无目录状态，不打扰阅读。
+  } catch (err) {
+    // 恢复失败：记录原因（目录抽屉可显示），保持无目录状态不打扰阅读。
+    try {
+      sessionStorage.setItem(`outline-err-${bookId}`, String(err));
+    } catch {
+      /* ignore */
+    }
+  } finally {
+    // 识别结束（成功/失败/放弃）都恢复缩略图预热。
+    preheatPaused = false;
   }
 }
 
@@ -1399,6 +1428,8 @@ async function renderAllThumbnails() {
 }
 
 let preheating = false;
+/// 目录识别期间置 true：预热循环暂停，把 PDF.js worker 让给目录页渲染。
+let preheatPaused = false;
 
 /// 后台预热：把还没缓存的页渲染成小图存盘，但不挂 DOM（避免几千页元素占内存）。
 async function preheatThumbCache() {
@@ -1413,6 +1444,11 @@ async function preheatThumbCache() {
     for (let p = 1; p <= total; p++) {
       // 切书了：立即停止，让新书的预热接管。
       if (currentDoc !== doc || currentBook?.path !== bookPath) return;
+      // 目录识别进行中：原地等待，识别结束自动继续（不丢失预热进度）。
+      while (preheatPaused) {
+        await new Promise((r) => setTimeout(r, 300));
+        if (currentDoc !== doc || currentBook?.path !== bookPath) return;
+      }
       // 已挂 DOM 的（可视区附近）已处理；只补未缓存的远处页。
       if (thumbElements.has(p)) continue;
       if (!bookPath) return;
