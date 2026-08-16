@@ -189,6 +189,7 @@ function renderHome() {
   const pages = Object.values(store.activity).reduce((s, a) => s + a.pages, 0);
   const qs = store.qa.length;
   stats.append(
+    statChip(`${computeStreak()}`, "连续学习（天）"),
     statChip(`${days}`, "学习天数"),
     statChip(`${pages}`, "阅读页数"),
     statChip(`${qs}`, "提问次数"),
@@ -323,6 +324,18 @@ function buildActivityGrid(): HTMLDivElement {
     grid.appendChild(col);
   }
   return grid;
+}
+
+/// 连续学习天数：从今天（今天没学则从昨天）往前数连续有活动的天数。
+function computeStreak(): number {
+  let streak = 0;
+  const cursor = new Date();
+  if (!store.activity[dateKey(cursor)]) cursor.setDate(cursor.getDate() - 1);
+  while (store.activity[dateKey(cursor)]) {
+    streak++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
 }
 
 /// 活动量 → 格子颜色档位（0-4）。
