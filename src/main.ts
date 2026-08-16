@@ -497,7 +497,7 @@ async function askRegionQuestion(region: RegionSelection) {
   openTeacherSheet(question);
   const answerNode = teacherSheet.querySelector(".turn.answer") as HTMLDivElement;
   answerNode.classList.add("streaming");
-  answerNode.textContent = "";
+  showTyping(answerNode);
   streaming = true;
   let fullText = "";
 
@@ -584,7 +584,7 @@ async function askQuestion(question: string) {
   openTeacherSheet(question);
   const answerNode = teacherSheet.querySelector(".turn.answer") as HTMLDivElement;
   answerNode.classList.add("streaming");
-  answerNode.textContent = "";
+  showTyping(answerNode);
   streaming = true;
   let fullText = "";
 
@@ -626,6 +626,11 @@ let sheetHistoryMode = false;
 function setAnswerContent(el: HTMLElement, text: string) {
   el.innerHTML = "";
   el.appendChild(renderMarkdown(text));
+}
+
+/// 流式回答开始前的「正在讲…」动画占位；首个内容块到达时被替换。
+function showTyping(el: HTMLElement) {
+  el.innerHTML = '<span class="typing">正在讲…<i></i><i></i><i></i></span>';
 }
 
 function closeTeacherSheet() {
@@ -820,7 +825,7 @@ async function followUp(text: string) {
   scroll.appendChild(q);
   const a = document.createElement("div");
   a.className = "turn answer streaming";
-  a.textContent = "";
+  showTyping(a);
   scroll.appendChild(a);
   scroll.scrollTop = scroll.scrollHeight;
   streaming = true;
