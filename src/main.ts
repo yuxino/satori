@@ -162,7 +162,8 @@ async function openBook(book: BookRecord) {
     currentDoc = null;
     reader = null;
     history = [];
-    teacherSheet.classList.remove("open");
+    sheetQA = null;
+    closeTeacherSheet();
     tocDrawer.classList.remove("open");
     bookMenuEl?.remove();
     bookMenuEl = null;
@@ -269,11 +270,11 @@ function showReopenCue(book: BookRecord) {
   window.setTimeout(() => cue.remove(), 6000);
 }
 
-// ---- 目录与回看 ----
+// ---- 目录 ----
 function buildTOC() {
   tocDrawer.innerHTML = "";
 
-  // 第一区：PDF 目录（章节快速跳转）。
+  // PDF 目录（章节快速跳转）。
   const tocTitle = document.createElement("div");
   tocTitle.className = "toc-section-title";
   tocTitle.textContent = "目录";
@@ -322,37 +323,6 @@ function buildTOC() {
     });
   } else {
     renderOutline(currentBook?.outline ?? [], "打开一本书后这里会显示目录。");
-  }
-
-  // 第二区：回看 · 问过的。
-  const reviewTitle = document.createElement("div");
-  reviewTitle.className = "toc-section-title";
-  reviewTitle.textContent = "回看 · 问过的";
-  tocDrawer.appendChild(reviewTitle);
-
-  if (!currentBook) return;
-  const mine = store.qa
-    .filter((q) => q.book_id === currentBook!.id)
-    .sort((a, b) => b.ts - a.ts);
-
-  if (mine.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "toc-item depth-2";
-    empty.textContent = "还没有问过问题。框选一段，或点「问这一页」。";
-    tocDrawer.appendChild(empty);
-    return;
-  }
-
-  for (const entry of mine.slice(0, 50)) {
-    const item = document.createElement("div");
-    item.className = "toc-item depth-1";
-    const question = entry.question.length > 28 ? `${entry.question.slice(0, 28)}…` : entry.question;
-    item.textContent = `第 ${entry.page} 页 · ${question}`;
-    item.addEventListener("click", () => {
-      tocDrawer.classList.remove("open");
-      void reopenQA(entry);
-    });
-    tocDrawer.appendChild(item);
   }
 }
 
@@ -488,21 +458,10 @@ async function reopenQA(entry: QAEntry) {
     reader.scrollToPage(currentPage);
     void reader.onScroll();
   }
-  // 在老师面板里展示这条历史问答（与普通问答一致的头部，可拖动/收起）。
-  teacherSheet.innerHTML = "";
-  teacherSheet.appendChild(buildSheetHeader());
-  const scroll = document.createElement("div");
-  scroll.className = "qa-scroll";
-  const q = document.createElement("div");
-  q.className = "turn question";
-  q.textContent = entry.question;
-  scroll.appendChild(q);
-  const a = document.createElement("div");
-  a.className = "turn answer";
-  setAnswerContent(a, entry.answer);
-  scroll.appendChild(a);
-  teacherSheet.append(scroll);
-  teacherSheet.classList.add("open");
+  // 在老师面板里展示这条历史问答（记录为当前问答，可从「问过的」返回）。
+  sheetQA = { question: entry.question, answer: entry.answer };
+  sheetHistoryMode = false;
+  renderQAIntoSheet(entry.question, entry.answer);
 }
 
 // ---- 提问：整页 ----
@@ -553,6 +512,7 @@ async function askRegionQuestion(region: RegionSelection) {
     history.push({ role: "assistant", content: fullText });
     answerNode.classList.remove("streaming");
     appendActions(answerNode, question);
+    if (sheetQA) sheetQA.answer = fullText;
     await saveQA(`${question}（框选区域）`, fullText);
   } catch (err) {
     setAnswerContent(answerNode, `出错了：${String(err)}`);
@@ -636,6 +596,7 @@ async function askQuestion(question: string) {
     history.push({ role: "assistant", content: fullText });
     answerNode.classList.remove("streaming");
     appendActions(answerNode, question);
+    if (sheetQA) sheetQA.answer = fullText;
     await saveQA(question, fullText);
   } catch (err) {
     setAnswerContent(answerNode, `出错了：${String(err)}`);
@@ -647,29 +608,115 @@ async function askQuestion(question: string) {
 
 // ---- 老师面板 ----
 
+/// 面板当前展示的问答（从「问过的」列表返回时恢复用）。
+let sheetQA: { question: string; answer: string } | null = null;
+/// 面板是否正显示「问过的」历史列表（而不是一轮问答）。
+let sheetHistoryMode = false;
+
 /// 把回答内容渲染进元素（Markdown → DOM）。
 function setAnswerContent(el: HTMLElement, text: string) {
   el.innerHTML = "";
   el.appendChild(renderMarkdown(text));
 }
 
-/// 老师卡片头部：拖拽条 + 收起按钮。新问答与回看历史共用。
+function closeTeacherSheet() {
+  teacherSheet.classList.remove("open");
+  sheetHistoryMode = false;
+}
+
+/// 把一轮问答渲染进面板（新问答/回看历史/从历史列表返回共用）。
+function renderQAIntoSheet(question: string, answerMarkdown: string) {
+  teacherSheet.innerHTML = "";
+  teacherSheet.appendChild(buildSheetHeader());
+  const scroll = document.createElement("div");
+  scroll.className = "qa-scroll";
+  const q = document.createElement("div");
+  q.className = "turn question";
+  q.textContent = question;
+  scroll.appendChild(q);
+  const a = document.createElement("div");
+  a.className = "turn answer";
+  setAnswerContent(a, answerMarkdown);
+  scroll.appendChild(a);
+  teacherSheet.append(scroll);
+  teacherSheet.classList.add("open");
+}
+
+/// 老师卡片头部：拖拽条 + 「问过的」切换 + 收起按钮。三种视图共用。
 function buildSheetHeader(): HTMLDivElement {
   const header = document.createElement("div");
   header.className = "sheet-header";
   const grip = document.createElement("div");
   grip.className = "grip";
   grip.title = "收起";
-  grip.addEventListener("click", () => teacherSheet.classList.remove("open"));
+  grip.addEventListener("click", closeTeacherSheet);
+  // 「问过的」：在面板里切换「当前问答 ⇄ 这本书问过的问题列表」。
+  const historyBtn = document.createElement("button");
+  historyBtn.className = "sheet-history";
+  historyBtn.textContent = sheetHistoryMode ? "返回问答" : "问过的";
+  historyBtn.title = sheetHistoryMode ? "返回刚才的问答" : "查看这本书问过的问题";
+  historyBtn.addEventListener("click", () => {
+    if (sheetHistoryMode) {
+      // 从列表回到刚才看的问答（没有就收起）。
+      sheetHistoryMode = false;
+      if (sheetQA) {
+        renderQAIntoSheet(sheetQA.question, sheetQA.answer);
+      } else {
+        closeTeacherSheet();
+      }
+    } else {
+      showHistoryList();
+    }
+  });
   const close = document.createElement("button");
   close.className = "sheet-close";
   close.textContent = "收起";
-  close.addEventListener("click", () => teacherSheet.classList.remove("open"));
-  header.append(grip, close);
+  close.addEventListener("click", closeTeacherSheet);
+  header.append(grip, historyBtn, close);
   return header;
 }
 
+/// 在面板里展示这本书问过的问题列表（「问过的」视图）。
+function showHistoryList() {
+  sheetHistoryMode = true;
+  teacherSheet.innerHTML = "";
+  teacherSheet.appendChild(buildSheetHeader());
+  const scroll = document.createElement("div");
+  scroll.className = "qa-scroll";
+  if (!currentBook) {
+    const empty = document.createElement("div");
+    empty.className = "qa-history-empty";
+    empty.textContent = "打开一本书后，这里会显示问过的问题。";
+    scroll.appendChild(empty);
+  } else {
+    const mine = store.qa
+      .filter((q) => q.book_id === currentBook!.id)
+      .sort((a, b) => b.ts - a.ts);
+    if (mine.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "qa-history-empty";
+      empty.textContent = "还没有问过问题。框选一段，或点「问这一页」。";
+      scroll.appendChild(empty);
+    } else {
+      for (const entry of mine.slice(0, 50)) {
+        const item = document.createElement("div");
+        item.className = "qa-history-item";
+        const question = entry.question.length > 28 ? `${entry.question.slice(0, 28)}…` : entry.question;
+        item.textContent = `第 ${entry.page} 页 · ${question}`;
+        item.title = "回到这页并重看这段问答";
+        item.addEventListener("click", () => void reopenQA(entry));
+        scroll.appendChild(item);
+      }
+    }
+  }
+  teacherSheet.append(scroll);
+  teacherSheet.classList.add("open");
+}
+
 function openTeacherSheet(question: string) {
+  // 记录当前问答，供「问过的」列表返回时恢复。
+  sheetQA = { question, answer: "" };
+  sheetHistoryMode = false;
   teacherSheet.innerHTML = "";
 
   // 如果卡片之前被拖出可视区（比如窗口缩小了），回到默认位置。
@@ -788,6 +835,7 @@ async function followUp(text: string) {
     history.push({ role: "assistant", content: fullText });
     a.classList.remove("streaming");
     appendActions(a, text);
+    sheetQA = { question: text, answer: fullText };
     await saveQA(text, fullText);
   } catch (err) {
     setAnswerContent(a, `出错了：${String(err)}`);
@@ -967,7 +1015,7 @@ function setupAskFab() {
   const fab = document.getElementById("ask-fab") as HTMLButtonElement;
   fab.addEventListener("click", () => {
     if (teacherSheet.classList.contains("open")) {
-      teacherSheet.classList.remove("open");
+      closeTeacherSheet();
       return;
     }
     void askPageQuestion();
@@ -1028,7 +1076,7 @@ function setupOutsideClickClose() {
       ) {
         return;
       }
-      teacherSheet.classList.remove("open");
+      closeTeacherSheet();
     },
     true,
   );
@@ -1039,7 +1087,7 @@ document.addEventListener("keydown", (e) => {
   // 焦点在输入框/文本域时，方向键等不触发全局翻页/缩放，避免干扰输入。
   const typing = document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA";
   if (e.key === "Escape") {
-    teacherSheet.classList.remove("open");
+    closeTeacherSheet();
     tocDrawer.classList.remove("open");
   }
   if (e.metaKey && e.key === "t") {
@@ -1154,7 +1202,7 @@ function renderBottomBar() {
   const reviewBtn = document.createElement("button");
   reviewBtn.className = "action-btn";
   reviewBtn.textContent = "目录";
-  reviewBtn.title = "章节跳转与问答回看";
+  reviewBtn.title = "章节跳转";
   reviewBtn.addEventListener("click", () => {
     buildTOC();
     tocDrawer.classList.toggle("open");
@@ -1403,7 +1451,8 @@ async function removeBook(book: BookRecord) {
     reader = null;
     currentBook = null;
     history = [];
-    teacherSheet.classList.remove("open");
+    sheetQA = null;
+    closeTeacherSheet();
     tocDrawer.classList.remove("open");
     if (store.books.length > 0) {
       await openBook(store.books[0]);

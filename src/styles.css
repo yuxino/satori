@@ -225,6 +225,42 @@ body {
   color: var(--lavender);
 }
 
+/* 「问过的」切换按钮：头部左侧，与右侧的「收起」对称。 */
+#teacher-sheet .sheet-history {
+  position: absolute;
+  left: 10px;
+  top: 8px;
+  border: none;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+#teacher-sheet .sheet-history:hover {
+  color: var(--lavender);
+}
+
+/* 「问过的」历史列表 */
+#teacher-sheet .qa-history-item {
+  padding: 10px 12px;
+  margin: 2px -12px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink);
+  cursor: pointer;
+  border-radius: 8px;
+}
+#teacher-sheet .qa-history-item:hover {
+  background: var(--lavender-soft);
+}
+#teacher-sheet .qa-history-empty {
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink-faint);
+}
+
 #teacher-sheet .qa-scroll {
   overflow-y: auto;
   padding: 6px 20px 12px;
