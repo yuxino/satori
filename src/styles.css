@@ -171,14 +171,21 @@ body {
 #home-view {
   position: absolute;
   inset: 0;
-  z-index: 20;
+  z-index: 45; /* 盖住阅读面与底部栏，但低于抽屉/老师面板 */
   overflow-y: auto;
   background: var(--paper-deep);
-  display: none;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(12px);
+  transition: opacity 0.24s ease, transform 0.24s ease, visibility 0.24s;
 }
 
 #home-view.open {
-  display: block;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 /* 首页打开时悬浮球淡出（不干扰总览）。 */
@@ -193,6 +200,10 @@ body {
   padding: 48px 28px 72px;
 }
 
+.home-header {
+  position: relative;
+}
+
 .home-header h1 {
   font-family: var(--serif);
   font-size: 34px;
@@ -205,6 +216,28 @@ body {
   font-size: 14px;
   color: var(--ink-soft);
   font-family: var(--sans);
+}
+
+/* 返回阅读按钮：首页右上角。 */
+.home-close {
+  position: absolute;
+  top: 6px;
+  right: 0;
+  border: 1px solid var(--line);
+  background: var(--sheet);
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-family: var(--sans);
+  padding: 7px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.home-close:hover {
+  border-color: var(--lavender);
+  color: var(--lavender);
+  background: var(--lavender-soft);
 }
 
 .home-section {

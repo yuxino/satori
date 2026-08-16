@@ -145,18 +145,17 @@ async function relayoutOnResize() {
 
 // ---- 首页 / 总览 ----
 
-/// 显示首页（总览）：学习活动热力格子图 + 我的书 + 最近提问。
+/// 显示首页（总览）：覆盖在阅读面上滑入，当前阅读状态保留在下面，
+/// 关闭后立即回到原位（不重载）。
 function showHome() {
-  homeView.classList.add("open");
-  bottomBar.style.display = "none";
   teacherSheet.classList.remove("open");
   tocDrawer.classList.remove("open");
   renderHome();
+  homeView.classList.add("open");
 }
 
 function hideHome() {
   homeView.classList.remove("open");
-  bottomBar.style.display = "flex";
 }
 
 function renderHome() {
@@ -165,7 +164,7 @@ function renderHome() {
   const wrap = document.createElement("div");
   wrap.className = "home-wrap";
 
-  // 标题
+  // 标题 + （正在读书时）返回按钮
   const header = document.createElement("div");
   header.className = "home-header";
   const title = document.createElement("h1");
@@ -173,6 +172,14 @@ function renderHome() {
   const sub = document.createElement("p");
   sub.textContent = "读懂你手上的 PDF";
   header.append(title, sub);
+  if (currentDoc) {
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "home-close";
+    closeBtn.textContent = "× 返回阅读";
+    closeBtn.title = "回到刚才读的位置";
+    closeBtn.addEventListener("click", hideHome);
+    header.appendChild(closeBtn);
+  }
   wrap.appendChild(header);
 
   // 学习活动热力格子图
@@ -420,6 +427,11 @@ async function pickAndOpenBook() {
 
 // ---- 打开书 ----
 async function openBook(book: BookRecord) {
+  // 点的就是当前这本书：只关掉首页回到原位，不重载。
+  if (book.id === currentBook?.id && currentDoc) {
+    hideHome();
+    return;
+  }
   showLoading("正在打开书…");
   hideHome();
   try {
@@ -1384,6 +1396,11 @@ document.addEventListener("keydown", (e) => {
   // 焦点在输入框/文本域时，方向键等不触发全局翻页/缩放，避免干扰输入。
   const typing = document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA";
   if (e.key === "Escape") {
+    if (homeView.classList.contains("open") && currentDoc) {
+      // 首页盖在正在读的书上：Esc 回到阅读。
+      hideHome();
+      return;
+    }
     closeTeacherSheet();
     tocDrawer.classList.remove("open");
   }
