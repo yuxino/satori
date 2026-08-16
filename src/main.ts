@@ -166,6 +166,11 @@ async function openBook(book: BookRecord) {
     tocDrawer.classList.remove("open");
     bookMenuEl?.remove();
     bookMenuEl = null;
+    // 重置缩略图渲染状态，避免旧书的 busy/预热标志卡住新书。
+    thumbnailBusy = false;
+    thumbnailQueued = false;
+    preheating = false;
+    window.clearTimeout(thumbVirtualTimer);
     hideLoading();
 
     currentDoc = await PDFDocument.load(url, (loaded, total) => {
@@ -436,8 +441,9 @@ async function reopenQA(entry: QAEntry) {
     reader.scrollToPage(currentPage);
     void reader.onScroll();
   }
-  // 在老师面板里展示这条历史问答。
+  // 在老师面板里展示这条历史问答（与普通问答一致的头部，可拖动/收起）。
   teacherSheet.innerHTML = "";
+  teacherSheet.appendChild(buildSheetHeader());
   const scroll = document.createElement("div");
   scroll.className = "qa-scroll";
   const q = document.createElement("div");
@@ -600,6 +606,22 @@ function setAnswerContent(el: HTMLElement, text: string) {
   el.appendChild(renderMarkdown(text));
 }
 
+/// 老师卡片头部：拖拽条 + 收起按钮。新问答与回看历史共用。
+function buildSheetHeader(): HTMLDivElement {
+  const header = document.createElement("div");
+  header.className = "sheet-header";
+  const grip = document.createElement("div");
+  grip.className = "grip";
+  grip.title = "收起";
+  grip.addEventListener("click", () => teacherSheet.classList.remove("open"));
+  const close = document.createElement("button");
+  close.className = "sheet-close";
+  close.textContent = "收起";
+  close.addEventListener("click", () => teacherSheet.classList.remove("open"));
+  header.append(grip, close);
+  return header;
+}
+
 function openTeacherSheet(question: string) {
   teacherSheet.innerHTML = "";
 
@@ -616,18 +638,7 @@ function openTeacherSheet(question: string) {
   }
 
   // 头部：拖拽条 + 关闭按钮。
-  const header = document.createElement("div");
-  header.className = "sheet-header";
-  const grip = document.createElement("div");
-  grip.className = "grip";
-  grip.title = "收起";
-  grip.addEventListener("click", () => teacherSheet.classList.remove("open"));
-  const close = document.createElement("button");
-  close.className = "sheet-close";
-  close.textContent = "收起";
-  close.addEventListener("click", () => teacherSheet.classList.remove("open"));
-  header.append(grip, close);
-  teacherSheet.appendChild(header);
+  teacherSheet.appendChild(buildSheetHeader());
 
   const scroll = document.createElement("div");
   scroll.className = "qa-scroll";
