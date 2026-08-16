@@ -282,28 +282,20 @@ body {
   font-family: var(--sans);
 }
 
-/* GitHub 风格热力格子图：铺满容器（列等分，格子占满列宽）。 */
+/* GitHub 风格热力格子图：CSS Grid，52 等分列铺满容器，格子正方形。 */
 .activity-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 15px repeat(52, 1fr);
+  grid-template-rows: auto repeat(7, auto);
   gap: 3px;
-  padding: 12px;
+  padding: 14px;
   background: var(--sheet);
   border: 1px solid var(--line);
   border-radius: 12px;
   width: 100%;
 }
 
-/* 月份标签行占满第一行，内部 26 列与下方格子列对齐。 */
-.grid-header {
-  flex: 0 0 100%;
-  display: flex;
-  gap: 3px;
-  margin-bottom: 3px;
-}
-
-.grid-header-col {
-  flex: 1;
+.grid-month-label {
   font-size: 10px;
   color: var(--ink-faint);
   font-family: var(--sans);
@@ -312,17 +304,18 @@ body {
   overflow: hidden;
 }
 
-.grid-col {
-  flex: 1 1 0;
-  min-width: 0; /* 避免内容撑开，保证列均分容器宽度 */
+.grid-weekday {
+  font-size: 9px;
+  color: var(--ink-faint);
+  font-family: var(--sans);
+  line-height: 1;
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  justify-content: center;
 }
 
 .grid-cell {
-  width: 100%;
-  height: 20px;
+  aspect-ratio: 1;
   border-radius: 2px;
   background: var(--paper);
 }
@@ -349,16 +342,16 @@ body {
 }
 
 .grid-cell.level-1 {
-  background: #e2d8f2;
+  background: #e0d6f2;
 }
 .grid-cell.level-2 {
-  background: #c4b2e4;
+  background: #bea9e4;
 }
 .grid-cell.level-3 {
-  background: #a08fd0;
+  background: #9a84cd;
 }
 .grid-cell.level-4 {
-  background: #7c6aa8;
+  background: #715ca2;
 }
 
 /* 我的书 */

@@ -286,9 +286,9 @@ function statChip(value: string, label: string): HTMLDivElement {
   return chip;
 }
 
-/// 最近 26 周的 GitHub 风格热力格子图（列 = 周，行 = 周一..周日，铺满容器）。
+/// 最近一年的 GitHub 风格热力格子图（52 列 × 7 行，铺满容器，格子正方形）。
 function buildActivityGrid(): HTMLDivElement {
-  const weeks = 26;
+  const weeks = 52;
   const today = new Date();
   const monday = new Date(today);
   monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
@@ -296,26 +296,36 @@ function buildActivityGrid(): HTMLDivElement {
   const grid = document.createElement("div");
   grid.className = "activity-grid";
 
-  // 月份标签行：列首次进入新月份时标一个「X月」。
-  const header = document.createElement("div");
-  header.className = "grid-header";
+  // 月份标签：第 1 行，放在月份变更的那一列。
   let prevMonth = -1;
   for (let w = weeks - 1; w >= 0; w--) {
     const date = new Date(monday);
     date.setDate(monday.getDate() - w * 7);
-    const hc = document.createElement("div");
-    hc.className = "grid-header-col";
     if (date.getMonth() !== prevMonth) {
-      hc.textContent = `${date.getMonth() + 1}月`;
+      const label = document.createElement("div");
+      label.className = "grid-month-label";
+      label.textContent = `${date.getMonth() + 1}月`;
+      label.style.gridColumn = String(weeks - w + 1);
+      label.style.gridRow = "1";
+      grid.appendChild(label);
       prevMonth = date.getMonth();
     }
-    header.appendChild(hc);
   }
-  grid.appendChild(header);
 
+  // 星期提示（第 1 列，行 2-8：一 / 三 / 五）。
+  const weekdayNames = ["一", "", "三", "", "五", "", ""];
+  for (let dow = 0; dow < 7; dow++) {
+    if (!weekdayNames[dow]) continue;
+    const l = document.createElement("div");
+    l.className = "grid-weekday";
+    l.textContent = weekdayNames[dow];
+    l.style.gridColumn = "1";
+    l.style.gridRow = String(dow + 2);
+    grid.appendChild(l);
+  }
+
+  // 52 × 7 个格子。
   for (let w = weeks - 1; w >= 0; w--) {
-    const col = document.createElement("div");
-    col.className = "grid-col";
     for (let dow = 0; dow < 7; dow++) {
       const date = new Date(monday);
       date.setDate(monday.getDate() - w * 7 + dow);
@@ -326,9 +336,10 @@ function buildActivityGrid(): HTMLDivElement {
       cell.className = `grid-cell level-${activityLevel(score)}`;
       cell.title = `${key}　阅读 ${act?.pages ?? 0} 页 · 提问 ${act?.questions ?? 0}`;
       if (date.getTime() > today.getTime()) cell.classList.add("future");
-      col.appendChild(cell);
+      cell.style.gridColumn = String(weeks - w + 1);
+      cell.style.gridRow = String(dow + 2);
+      grid.appendChild(cell);
     }
-    grid.appendChild(col);
   }
   return grid;
 }
