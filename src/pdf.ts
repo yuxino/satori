@@ -4,14 +4,15 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 
 // 现代 pdfjs-dist 的 worker 通过同源 URL 加载；在 Vite 下直接 import。
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-// 扫描件常用 JBIG2/JPEG2000 压缩，需要 wasm 解码器；指向 wasm 目录。
-import jbig2WasmUrl from "pdfjs-dist/wasm/jbig2.wasm?url";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
-/// 从单个 wasm 文件 URL 推导 wasm 目录（PDF.js 按目录加载各解码器，
-/// 要求目录 URL 以斜杠结尾）。
-const wasmBase = jbig2WasmUrl.substring(0, jbig2WasmUrl.lastIndexOf("/") + 1);
+// 扫描件常用 JBIG2/JPEG2000/ICC 压缩，需要 wasm 解码器。
+// 注意：wasm 不能走 Vite 的 ?url 导入——那会带内容哈希（jbig2-xxx.wasm），
+// 而 pdf.js 按固定文件名 fetch（{wasmUrl}jbig2.wasm），哈希名会 404，
+// 导致 JBIG2 扫描页解码失败、整页渲染空白。所以把解码器放在 public/
+// （Vite 原样拷到 dist 根，文件名固定），wasmUrl 用根路径 "/"。
+const wasmUrl = "/";
 
 /// PDF 大纲目录项（扁平化，含层级深度）。
 export interface OutlineItem {
@@ -33,8 +34,9 @@ export class PDFDocument {
     const loadingTask = pdfjsLib.getDocument({
       url,
       useSystemFonts: true,
-      // 提供 wasm 解码器，否则 JBIG2/CCITT 扫描页无法解码（空白页）。
-      wasmUrl: wasmBase,
+      // 提供 wasm 解码器（public/ 根路径下的固定名文件），
+      // 否则 JBIG2/CCITT/JPEG2000 扫描页无法解码（空白页）。
+      wasmUrl,
     });
     // onProgress 是 DocumentInitParameters 的加载进度回调。
     loadingTask.onProgress = (p: { loaded: number; total: number }) => {

@@ -35,7 +35,7 @@
 - **初次布局**：WebView 未完成布局时 clientWidth 为 0；需等一帧再量宽度 + ResizeObserver 兜底
 - **渲染模糊**：canvas scale 按每页逻辑宽度算（显示宽度×2），硬编码 /72 会超 canvas 上限被降级
 - **PDF.js worker 争用**：整书缩略图预热（每页 `setTimeout(0)`）会排队挤占渲染；目录识别等关键渲染前必须暂停预热
-- **扫描件解码**：JBIG2/CCITT 页需要 wasm 解码器，`wasmUrl` 必须指向以 `/` 结尾的目录；`lastIndexOf("/")` 取目录
+- **扫描件解码**：JBIG2/JPEG2000/ICC 页需要 wasm 解码器。**wasm 不能走 Vite 的 `?url` 导入**——`?url` 会加内容哈希（`jbig2-xxx.wasm`），而 pdf.js 按固定名请求 `{wasmUrl}jbig2.wasm`，哈希名 404 → JBIG2 解码静默失败 → 整页渲染空白（system.pdf 292/294 页全白，模型答「这页是空白的」）。已把解码器放 `public/`（原样拷到 dist 根、固定文件名），`wasmUrl = "/"`。JBig2Error 修复后 software.pdf 正常是因为它全是 DCTDecode（JPEG），浏览器原生解码、不依赖 wasm
 - **serde 字段名**：`OutlineResult.printed_page` 用 `#[serde(rename="page", alias="printed_page")]`，前端按 `page` 读，否则全是 NaN
 - **Tauri 命令宏名冲突**：`outline_trace` 之类命令定义在 lib.rs 顶层会与同名宏冲突，需放模块里（qwen.rs）再 `qwen::xxx` 注册
 - 旧钥匙串条目 ACL 只信任旧签名；新 App 用同证书同 bundle id 签名即可读
