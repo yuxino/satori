@@ -160,6 +160,233 @@ body {
   background: #7d6ba9;
 }
 
+/* ---- 首页 / 总览 ---- */
+
+#home-view {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  overflow-y: auto;
+  background: var(--paper-deep);
+  display: none;
+}
+
+#home-view.open {
+  display: block;
+}
+
+/* 首页打开时悬浮球淡出（不干扰总览）。 */
+#home-view.open ~ #ask-fab {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.home-wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 48px 28px 72px;
+}
+
+.home-header h1 {
+  font-family: var(--serif);
+  font-size: 34px;
+  letter-spacing: 3px;
+  color: var(--ink);
+}
+
+.home-header p {
+  margin-top: 6px;
+  font-size: 14px;
+  color: var(--ink-soft);
+  font-family: var(--sans);
+}
+
+.home-section {
+  margin-top: 34px;
+}
+
+.home-section h2 {
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  margin-bottom: 14px;
+}
+
+/* 统计卡片 */
+.home-stats {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.home-stat {
+  flex: 1;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.home-stat b {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.home-stat span {
+  font-size: 12px;
+  color: var(--ink-faint);
+  font-family: var(--sans);
+}
+
+/* GitHub 风格热力格子图 */
+.activity-grid {
+  display: flex;
+  gap: 3px;
+  padding: 10px 12px;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  width: fit-content;
+}
+
+.grid-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.grid-cell {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: var(--paper);
+}
+
+.grid-cell.future {
+  opacity: 0.3;
+}
+
+.grid-cell.level-1 {
+  background: #e2d8f2;
+}
+.grid-cell.level-2 {
+  background: #c4b2e4;
+}
+.grid-cell.level-3 {
+  background: #a08fd0;
+}
+.grid-cell.level-4 {
+  background: #7c6aa8;
+}
+
+/* 我的书 */
+.home-books {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.home-book {
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.home-book:hover {
+  transform: translateY(-1px);
+  border-color: var(--lavender);
+  box-shadow: var(--shadow-card);
+}
+
+.home-book-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-book-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--ink-faint);
+  font-family: var(--sans);
+}
+
+.home-progress {
+  margin-top: 10px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--paper);
+  overflow: hidden;
+}
+
+.home-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #a796d4, #8d7bb8);
+}
+
+.home-empty {
+  padding: 24px 4px;
+  font-size: 14px;
+  color: var(--ink-faint);
+  font-family: var(--sans);
+}
+
+.home-open {
+  margin-top: 16px;
+  border: none;
+  background: var(--lavender);
+  color: white;
+  font-size: 14px;
+  padding: 10px 22px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: var(--sans);
+  box-shadow: 0 4px 14px rgba(141, 123, 184, 0.35);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.home-open:hover {
+  background: #7d6ba9;
+  transform: translateY(-1px);
+}
+
+/* 最近提问 */
+.home-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.home-recent-item {
+  text-align: left;
+  border: 1px solid var(--line);
+  background: var(--sheet);
+  color: var(--ink);
+  font-size: 13px;
+  font-family: var(--sans);
+  padding: 10px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.home-recent-item:hover {
+  border-color: var(--lavender);
+  background: var(--lavender-soft);
+}
+
 /* ---- 老师：右下角悬浮卡片 ---- */
 
 #teacher-sheet {

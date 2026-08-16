@@ -59,6 +59,7 @@ const readerSurface = document.getElementById("reader-surface") as HTMLDivElemen
 const teacherSheet = document.getElementById("teacher-sheet") as HTMLDivElement;
 const tocDrawer = document.getElementById("toc-drawer") as HTMLDivElement;
 const bottomBar = document.getElementById("bottom-bar") as HTMLDivElement;
+const homeView = document.getElementById("home-view") as HTMLDivElement;
 
 // ---- 状态 ----
 let store: Store = emptyStore();
@@ -77,6 +78,35 @@ let regionOverlay: HTMLDivElement | null = null;
 let regionStart: { x: number; y: number } | null = null;
 let regionActive = false;
 
+// ---- 学习活动统计（总览热力格子图的数据） ----
+
+/// 本地时区的 "YYYY-MM-DD"。
+function dateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function todayKey(): string {
+  return dateKey(new Date());
+}
+
+/// 给当天的活动量 +n（pages 或 questions），不落盘（随下次 persist 一起写）。
+function bumpActivity(kind: "pages" | "questions", n: number) {
+  if (n <= 0) return;
+  const key = todayKey();
+  const day = store.activity[key] ?? { pages: 0, questions: 0 };
+  day[kind] += n;
+  store.activity[key] = day;
+}
+
+/// 翻页时累计当天阅读页数（由 persistReadingPosition 防抖落盘）。
+let todayPagesPending = 0;
+function markPageViewed() {
+  todayPagesPending++;
+}
+
 // ---- 启动 ----
 async function boot() {
   store = await loadStore().catch(() => emptyStore());
@@ -85,12 +115,8 @@ async function boot() {
   if (store.books.length > 0 && !apiKey) {
     // 有书但没有 Key：先问 Key（老师需要能说话）。
     openSettings();
-  } else if (store.books.length === 0) {
-    showEmptyState();
-  } else {
-    const book = store.books[0];
-    await openBook(book);
   }
+  showHome();
   setupReaderSurface();
   setupAskFab();
   setupSheetDrag();
@@ -117,15 +143,197 @@ async function relayoutOnResize() {
   void reader.onScroll();
 }
 
-// ---- 空书架 ----
-function showEmptyState() {
+// ---- 首页 / 总览 ----
+
+/// 显示首页（总览）：学习活动热力格子图 + 我的书 + 最近提问。
+function showHome() {
+  homeView.classList.add("open");
   bottomBar.style.display = "none";
-  readerSurface.innerHTML = `
-    <div id="empty-state">
-      <div class="hint">打开就开始理解</div>
-      <button class="open-book">打开一本书</button>
-    </div>`;
-  readerSurface.querySelector(".open-book")!.addEventListener("click", () => void pickAndOpenBook());
+  teacherSheet.classList.remove("open");
+  tocDrawer.classList.remove("open");
+  renderHome();
+}
+
+function hideHome() {
+  homeView.classList.remove("open");
+  bottomBar.style.display = "flex";
+}
+
+function renderHome() {
+  homeView.innerHTML = "";
+
+  const wrap = document.createElement("div");
+  wrap.className = "home-wrap";
+
+  // 标题
+  const header = document.createElement("div");
+  header.className = "home-header";
+  const title = document.createElement("h1");
+  title.textContent = "satori";
+  const sub = document.createElement("p");
+  sub.textContent = "读懂你手上的 PDF";
+  header.append(title, sub);
+  wrap.appendChild(header);
+
+  // 学习活动热力格子图
+  const activitySection = document.createElement("section");
+  activitySection.className = "home-section";
+  const activityTitle = document.createElement("h2");
+  activityTitle.textContent = "学习活动";
+  activitySection.appendChild(activityTitle);
+
+  // 统计行
+  const stats = document.createElement("div");
+  stats.className = "home-stats";
+  const days = Object.keys(store.activity).length;
+  const pages = Object.values(store.activity).reduce((s, a) => s + a.pages, 0);
+  const qs = store.qa.length;
+  stats.append(
+    statChip(`${days}`, "学习天数"),
+    statChip(`${pages}`, "阅读页数"),
+    statChip(`${qs}`, "提问次数"),
+  );
+  activitySection.appendChild(stats);
+
+  activitySection.appendChild(buildActivityGrid());
+  wrap.appendChild(activitySection);
+
+  // 我的书
+  const booksSection = document.createElement("section");
+  booksSection.className = "home-section";
+  const booksTitle = document.createElement("h2");
+  booksTitle.textContent = "我的书";
+  booksSection.appendChild(booksTitle);
+
+  if (store.books.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "home-empty";
+    empty.textContent = "还没有书。打开一本 PDF，开始读懂它。";
+    booksSection.appendChild(empty);
+  } else {
+    const list = document.createElement("div");
+    list.className = "home-books";
+    for (const book of store.books) list.appendChild(buildBookCard(book));
+    booksSection.appendChild(list);
+  }
+  const openBtn = document.createElement("button");
+  openBtn.className = "open-book home-open";
+  openBtn.textContent = store.books.length === 0 ? "打开一本书" : "添加一本书";
+  openBtn.addEventListener("click", () => void pickAndOpenBook());
+  booksSection.appendChild(openBtn);
+  wrap.appendChild(booksSection);
+
+  // 最近提问
+  const recent = store.qa
+    .slice()
+    .sort((a, b) => b.ts - a.ts)
+    .slice(0, 5);
+  if (recent.length > 0) {
+    const qaSection = document.createElement("section");
+    qaSection.className = "home-section";
+    const qaTitle = document.createElement("h2");
+    qaTitle.textContent = "最近提问";
+    qaSection.appendChild(qaTitle);
+    const qaList = document.createElement("div");
+    qaList.className = "home-recent";
+    for (const entry of recent) {
+      const book = store.books.find((b) => b.id === entry.book_id);
+      const item = document.createElement("button");
+      item.className = "home-recent-item";
+      const q = entry.question.length > 40 ? `${entry.question.slice(0, 40)}…` : entry.question;
+      item.textContent = `${book?.name ?? "书"} · 第 ${entry.page} 页 · ${q}`;
+      item.addEventListener("click", () => {
+        const target = store.books.find((b) => b.id === entry.book_id);
+        if (target) void openBook(target);
+      });
+      qaList.appendChild(item);
+    }
+    qaSection.appendChild(qaList);
+    wrap.appendChild(qaSection);
+  }
+
+  homeView.appendChild(wrap);
+}
+
+function statChip(value: string, label: string): HTMLDivElement {
+  const chip = document.createElement("div");
+  chip.className = "home-stat";
+  const v = document.createElement("b");
+  v.textContent = value;
+  const l = document.createElement("span");
+  l.textContent = label;
+  chip.append(v, l);
+  return chip;
+}
+
+/// 最近 26 周的 GitHub 风格热力格子图（列 = 周，行 = 周一..周日）。
+function buildActivityGrid(): HTMLDivElement {
+  const weeks = 26;
+  const today = new Date();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+
+  const grid = document.createElement("div");
+  grid.className = "activity-grid";
+  for (let w = weeks - 1; w >= 0; w--) {
+    const col = document.createElement("div");
+    col.className = "grid-col";
+    for (let dow = 0; dow < 7; dow++) {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() - w * 7 + dow);
+      const key = dateKey(date);
+      const act = store.activity[key];
+      const score = act ? act.pages + act.questions * 5 : 0;
+      const cell = document.createElement("div");
+      cell.className = `grid-cell level-${activityLevel(score)}`;
+      cell.title = `${key}　阅读 ${act?.pages ?? 0} 页 · 提问 ${act?.questions ?? 0}`;
+      if (date.getTime() > today.getTime()) cell.classList.add("future");
+      col.appendChild(cell);
+    }
+    grid.appendChild(col);
+  }
+  return grid;
+}
+
+/// 活动量 → 格子颜色档位（0-4）。
+function activityLevel(score: number): number {
+  if (score <= 0) return 0;
+  if (score <= 2) return 1;
+  if (score <= 5) return 2;
+  if (score <= 10) return 3;
+  return 4;
+}
+
+function buildBookCard(book: BookRecord): HTMLDivElement {
+  const card = document.createElement("div");
+  card.className = "home-book";
+
+  const name = document.createElement("div");
+  name.className = "home-book-name";
+  name.textContent = book.name.replace(/\.pdf$/i, "");
+
+  const meta = document.createElement("div");
+  meta.className = "home-book-meta";
+  const qCount = store.qa.filter((q) => q.book_id === book.id).length;
+  const total = book.pageCount;
+  meta.textContent = total
+    ? `第 ${book.last_page} / ${total} 页 · 问过 ${qCount} 次`
+    : `读到了第 ${book.last_page} 页 · 问过 ${qCount} 次`;
+  card.appendChild(name);
+  card.appendChild(meta);
+
+  if (total && total > 0) {
+    const bar = document.createElement("div");
+    bar.className = "home-progress";
+    const fill = document.createElement("div");
+    fill.className = "home-progress-fill";
+    fill.style.width = `${Math.min(100, Math.round((book.last_page / total) * 100))}%`;
+    bar.appendChild(fill);
+    card.appendChild(bar);
+  }
+
+  card.addEventListener("click", () => void openBook(book));
+  return card;
 }
 
 async function pickAndOpenBook() {
@@ -150,6 +358,7 @@ async function pickAndOpenBook() {
 // ---- 打开书 ----
 async function openBook(book: BookRecord) {
   showLoading("正在打开书…");
+  hideHome();
   try {
     const resolved = await resolveBookPath(book);
     currentBook = resolved;
@@ -178,6 +387,11 @@ async function openBook(book: BookRecord) {
     currentDoc = await PDFDocument.load(url, (loaded, total) => {
       if (total > 0) updateLoading(`正在打开书… ${Math.round((loaded / total) * 100)}%`);
     });
+    // 记录总页数（首页进度条用）。
+    if (resolved.pageCount !== currentDoc.pageCount) {
+      resolved.pageCount = currentDoc.pageCount;
+      store.books = store.books.map((b) => (b.id === resolved.id ? resolved : b));
+    }
     currentPage = Math.min(Math.max(resolved.last_page, 1), currentDoc.pageCount);
     // 恢复这本书自己的缩放倍数；没记过就是 1（适合宽度）。
     // 每本书记住各自的缩放，切书时不会互相串。
@@ -187,6 +401,7 @@ async function openBook(book: BookRecord) {
     reader = new ScrollReader(readerSurface, currentDoc, {
       onPageChange: (page) => {
         currentPage = page;
+        markPageViewed();
         schedulePersistPosition();
         scheduleBottomBarUpdate();
       },
@@ -879,6 +1094,7 @@ async function saveQA(question: string, answer: string) {
     ts: Date.now(),
   };
   store.qa.push(entry);
+  bumpActivity("questions", 1);
   await persist();
 }
 
@@ -1440,6 +1656,17 @@ function toggleBookMenu() {
   title.textContent = "我的书";
   menu.appendChild(title);
 
+  // 回到首页/总览。
+  const homeItem = document.createElement("div");
+  homeItem.className = "book-menu-item";
+  homeItem.textContent = "总览 · 学习活动";
+  homeItem.addEventListener("click", () => {
+    bookMenuEl?.remove();
+    bookMenuEl = null;
+    showHome();
+  });
+  menu.appendChild(homeItem);
+
   if (store.books.length === 0) {
     const empty = document.createElement("div");
     empty.className = "book-menu-item muted";
@@ -1523,7 +1750,7 @@ async function removeBook(book: BookRecord) {
     if (store.books.length > 0) {
       await openBook(store.books[0]);
     } else {
-      showEmptyState();
+      showHome();
     }
   } else {
     // 非当前书：重建书菜单反映变化（若开着）。
@@ -1737,6 +1964,11 @@ function persistReadingPosition() {
   if (!currentBook) return;
   currentBook.last_page = currentPage;
   store.books = store.books.map((b) => (b.id === currentBook!.id ? currentBook! : b));
+  // 把本轮翻过的页数记进当天的活动量，随这次持久化一起落盘。
+  if (todayPagesPending > 0) {
+    bumpActivity("pages", todayPagesPending);
+    todayPagesPending = 0;
+  }
   void persist();
 }
 

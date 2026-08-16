@@ -20,6 +20,16 @@ pub struct BookRecord {
     pub zoom: Option<f64>,
     /// 双页（书本展开）布局。false = 单页连续滚动。
     pub spread: bool,
+    /// 总页数（打开时记录，供总览页显示进度）。None = 尚未打开过。
+    pub page_count: Option<usize>,
+}
+
+/// 某一天的学习活动量（总览热力格子图用）。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct DayActivity {
+    pub pages: u64,
+    pub questions: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +61,7 @@ impl Default for BookRecord {
             outline: Vec::new(),
             zoom: None,
             spread: false,
+            page_count: None,
         }
     }
 }
@@ -99,6 +110,8 @@ pub struct Store {
     pub books: Vec<BookRecord>,
     pub qa: Vec<QAEntry>,
     pub settings: Settings,
+    /// 学习活动日志：日期 "YYYY-MM-DD" → 当天阅读页数/提问数。
+    pub activity: std::collections::HashMap<String, DayActivity>,
 }
 
 impl Default for Store {
@@ -107,6 +120,7 @@ impl Default for Store {
             books: Vec::new(),
             qa: Vec::new(),
             settings: Settings::default(),
+            activity: std::collections::HashMap::new(),
         }
     }
 }

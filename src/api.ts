@@ -13,6 +13,14 @@ export interface BookRecord {
   zoom?: number;
   /** 双页（书本展开）布局；缺省单页。 */
   spread?: boolean;
+  /** 总页数（打开时记录，供总览页显示进度）。 */
+  pageCount?: number;
+}
+
+/** 某一天的学习活动量（总览热力格子图用）。 */
+export interface DayActivity {
+  pages: number;
+  questions: number;
 }
 
 export interface OutlineEntry {
@@ -38,6 +46,8 @@ export interface Store {
   books: BookRecord[];
   qa: QAEntry[];
   settings: Settings;
+  /** 学习活动日志：日期 "YYYY-MM-DD" → 当天阅读页数/提问数。 */
+  activity: Record<string, DayActivity>;
 }
 
 export interface ModelOption {
@@ -64,7 +74,7 @@ export interface AskRequest {
 }
 
 export function emptyStore(): Store {
-  return { books: [], qa: [], settings: { model_id: "qwen3-vl-plus" } };
+  return { books: [], qa: [], settings: { model_id: "qwen3-vl-plus" }, activity: {} };
 }
 
 // ---- Keychain ----
