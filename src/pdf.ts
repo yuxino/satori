@@ -122,19 +122,58 @@ export class PDFDocument {
     return canvas;
   }
 
+  /// 在 canvas 上按 PDF 坐标（scale=1）画一个选中框，让视觉模型
+  /// 一眼看到用户框选的位置（否则模型可能不知道选的是哪块）。
+  private drawHighlight(
+    ctx: CanvasRenderingContext2D,
+    rect: { x: number; y: number; width: number; height: number },
+    pxPerPoint: number,
+  ) {
+    ctx.strokeStyle = "rgba(230, 60, 60, 0.95)";
+    ctx.lineWidth = Math.max(3, Math.round(8 * pxPerPoint / 1.5));
+    ctx.strokeRect(rect.x * pxPerPoint, rect.y * pxPerPoint, rect.width * pxPerPoint, rect.height * pxPerPoint);
+    // 四角再加小标记，更醒目。
+    ctx.fillStyle = "rgba(230, 60, 60, 0.95)";
+    const l = Math.max(6, Math.round(14 * pxPerPoint / 1.5));
+    const [x, y, w, h] = [
+      rect.x * pxPerPoint,
+      rect.y * pxPerPoint,
+      rect.width * pxPerPoint,
+      rect.height * pxPerPoint,
+    ];
+    ctx.fillRect(x, y, l, Math.max(2, ctx.lineWidth));
+    ctx.fillRect(x, y + h, l, Math.max(2, ctx.lineWidth));
+    ctx.fillRect(x + w - l, y, l, Math.max(2, ctx.lineWidth));
+    ctx.fillRect(x + w - l, y + h, l, Math.max(2, ctx.lineWidth));
+    ctx.fillRect(x, y, Math.max(2, ctx.lineWidth), l);
+    ctx.fillRect(x + w, y, Math.max(2, ctx.lineWidth), l);
+    ctx.fillRect(x, y + h - l, Math.max(2, ctx.lineWidth), l);
+    ctx.fillRect(x + w, y + h - l, Math.max(2, ctx.lineWidth), l);
+  }
+
   /// 导出某页为 JPEG base64（不含 data: 前缀），作为视觉证据。
-  async exportPageAsJPEG(pageNumber: number, scale = 1.5): Promise<string> {
+  /// 可选 highlight：在 PDF 坐标（scale=1）矩形处画红色选中框，
+  /// 供「框选理解」的整页上下文使用。
+  async exportPageAsJPEG(
+    pageNumber: number,
+    scale = 1.5,
+    highlight?: { x: number; y: number; width: number; height: number },
+  ): Promise<string> {
     const canvas = await this.renderPageToCanvas(pageNumber, scale);
     // 长边限制，避免超大图浪费 token。
     const maxSide = 1800;
+    let pxPerPoint = scale;
     if (canvas.width > maxSide || canvas.height > maxSide) {
       const ratio = Math.min(maxSide / canvas.width, maxSide / canvas.height);
+      pxPerPoint *= ratio;
       const resized = document.createElement("canvas");
       resized.width = Math.floor(canvas.width * ratio);
       resized.height = Math.floor(canvas.height * ratio);
       resized.getContext("2d")!.drawImage(canvas, 0, 0, resized.width, resized.height);
+      if (highlight) this.drawHighlight(resized.getContext("2d")!, highlight, pxPerPoint);
       return resized.toDataURL("image/jpeg", 0.82).split(",")[1];
     }
+    if (highlight) this.drawHighlight(canvas.getContext("2d")!, highlight, pxPerPoint);
     return canvas.toDataURL("image/jpeg", 0.82).split(",")[1];
   }
 
@@ -156,6 +195,10 @@ export class PDFDocument {
       viewport,
       transform: [scale, 0, 0, scale, -rect.x * scale, -rect.y * scale],
     }).promise;
+    // 给裁剪图加一圈红边，模型能认出这是被选中的片段。
+    ctx.strokeStyle = "rgba(230, 60, 60, 0.95)";
+    ctx.lineWidth = Math.max(3, Math.round(8 * scale / 3));
+    ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
     return canvas.toDataURL("image/jpeg", 0.82).split(",")[1];
   }
 

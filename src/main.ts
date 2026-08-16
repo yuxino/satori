@@ -479,10 +479,11 @@ async function askRegionQuestion(region: RegionSelection) {
   }
   if (streaming) return;
 
-  // 框选区域截图为最高优先证据，同时带上所在页全文作为上下文。
+  // 框选区域截图为最高优先证据；整页图用红框标出选中位置，
+  // 让模型一眼看到选的是哪块（否则它会说「图片里没有框选区域」）。
   const regionJPEG = await currentDoc.exportRegionAsJPEG(region.page, region.rect);
-  const pageJPEG = await currentDoc.exportPageAsJPEG(region.page);
-  const question = "解释一下我框选的这块内容。如果看不清就直说，不要猜。";
+  const pageJPEG = await currentDoc.exportPageAsJPEG(region.page, 1.5, region.rect);
+  const question = "我在整页图里用红色框标出了选中的区域，解释一下红框里这块内容。如果看不清就直说，不要猜。";
 
   history.push({ role: "user", content: `${question}（框选第 ${region.page} 页区域）` });
 
