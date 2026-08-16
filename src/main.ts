@@ -335,6 +335,9 @@ function buildTOC() {
 }
 
 // ---- 扫描书目录恢复（自动） ----
+/// 本次会话已尝试过目录恢复的书（避免失败后每次打开都重试烧 API）。
+const outlineAttempted = new Set<string>();
+
 /// 打开书时调用：PDF 无内置大纲且没有持久化目录时，
 /// 用 Qwen 读目录页提取章节，再定位第一章算出偏移，映射成 PDF 页码。
 async function maybeExtractScannedOutline() {
@@ -342,12 +345,16 @@ async function maybeExtractScannedOutline() {
   if (!currentBook) return;
   // 已有目录（内置或之前恢复过）就不再处理。
   if (currentBook.outline.length > 0) return;
+  // 本会话已试过且失败，不再重试（避免每次打开都花两次 API）。
+  if (outlineAttempted.has(currentBook.id)) return;
+  outlineAttempted.add(currentBook.id);
+
   const native = await currentDoc.getOutline();
   if (native.length > 0) return;
 
   const pageCount = currentDoc.pageCount;
-  // 目录通常在前 10 页附近；只读前 9 页（跳过封面）。
-  const frontFrom = 3;
+  // 目录通常在书前部；从第 2 页起取约 10 页（跳过封面/书名页）。
+  const frontFrom = 2;
   const frontTo = Math.min(pageCount, 11);
   if (frontTo <= frontFrom) return;
 
@@ -360,11 +367,20 @@ async function maybeExtractScannedOutline() {
     });
     if (entries.length === 0) return;
 
+    // 过滤非正文条目（编者的话/前言/目录/附录/参考文献/后记 等），
+    // 避免把前置/后置内容当成章节。
+    const frontMatterRe = /^(编者的话|前言|序|目录|绪论|附录|参考文献|后记|致谢|出版说明|内容简介|学习目标|使用说明)/;
+    const bodyEntries = entries.filter((e) => !frontMatterRe.test(e.title.trim()));
+
     // 2) 找第一章在正文里的实际 PDF 页码 → 算出偏移。
-    const firstChapter = entries.reduce((a, b) => (b.depth === 0 && b.page < a.page ? b : a), entries[0]);
-    // 候选正文页：猜测前置页约 5–15 页，扫这一带。
-    const probeFrom = Math.max(1, firstChapter.page);
-    const probeTo = Math.min(pageCount, probeFrom + 12);
+    const chapters = bodyEntries.filter((e) => e.depth === 0);
+    const firstChapter =
+      chapters.length > 0
+        ? chapters.reduce((a, b) => (b.page < a.page ? b : a))
+        : bodyEntries.reduce((a, b) => (b.page < a.page ? b : a));
+    // 候选正文页：目录页（PDF 11 页后）到书前 1/4，扫这一段找第一章。
+    const probeFrom = Math.min(Math.max(frontTo + 1, 11), pageCount);
+    const probeTo = Math.min(pageCount, probeFrom + 15);
     const probePages = await exportEvidence([...Array(probeTo - probeFrom + 1)].map((_, i) => probeFrom + i));
     const foundPdfPage = await findPageByTitle(
       apiKey,
@@ -378,7 +394,7 @@ async function maybeExtractScannedOutline() {
     const offset = foundPdfPage as number - firstChapter.page;
 
     // 3) 映射所有条目为 PDF 页码并持久化。
-    const mapped: OutlineEntry[] = entries
+    const mapped: OutlineEntry[] = bodyEntries
       .map((e) => ({ title: e.title, depth: e.depth, page: e.page + offset }))
       .filter((e) => e.page >= 1 && e.page <= pageCount);
     if (mapped.length === 0) return;
@@ -725,10 +741,11 @@ async function saveQA(question: string, answer: string) {
 
 // ---- 框选交互：拖拽画框，松开发问。文字版与扫描版都可用 ----
 function setupReaderSurface() {
-  // 选框浮层。
+  // 选框浮层：挂到 #app（position: fixed），不随 readerSurface 清空，
+  // 否则切换书后 `readerSurface.innerHTML = ""` 会把它删掉。
   regionOverlay = document.createElement("div");
   regionOverlay.id = "region-overlay";
-  readerSurface.appendChild(regionOverlay);
+  document.getElementById("app")!.appendChild(regionOverlay);
 
   /// 拖拽超过该像素才算框选（单击不触发提问）。
   const DRAG_THRESHOLD = 6;
@@ -1357,13 +1374,18 @@ let preheating = false;
 async function preheatThumbCache() {
   if (preheating || !currentDoc) return;
   preheating = true;
+  // 捕获本次预热的书身份：切书后 currentDoc 会变，检测到变化立即停止，
+  // 避免用新书渲染、按旧书路径写缓存（串书错乱）。
+  const doc = currentDoc;
   const bookPath = currentBook?.path ?? "";
   try {
-    const total = currentDoc.pageCount;
+    const total = doc.pageCount;
     for (let p = 1; p <= total; p++) {
+      // 切书了：立即停止，让新书的预热接管。
+      if (currentDoc !== doc || currentBook?.path !== bookPath) return;
       // 已挂 DOM 的（可视区附近）已处理；只补未缓存的远处页。
       if (thumbElements.has(p)) continue;
-      if (!bookPath) break;
+      if (!bookPath) return;
       let cached: string | null = null;
       try {
         cached = await loadThumb(bookPath, p);
@@ -1372,8 +1394,8 @@ async function preheatThumbCache() {
       }
       if (cached) continue;
       try {
-        const size = await currentDoc.pageSize(p);
-        const canvas = await currentDoc.renderPageToCanvas(p, THUMB_WIDTH / size.width);
+        const size = await doc.pageSize(p);
+        const canvas = await doc.renderPageToCanvas(p, THUMB_WIDTH / size.width);
         const jpeg = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
         void saveThumb(bookPath, p, jpeg);
       } catch {
