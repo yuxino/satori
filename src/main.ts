@@ -179,9 +179,9 @@ async function openBook(book: BookRecord) {
       if (total > 0) updateLoading(`正在打开书… ${Math.round((loaded / total) * 100)}%`);
     });
     currentPage = Math.min(Math.max(resolved.last_page, 1), currentDoc.pageCount);
-    // 恢复这本书自己的缩放倍数；没记过就用全局默认（1 = 适合宽度）。
+    // 恢复这本书自己的缩放倍数；没记过就是 1（适合宽度）。
     // 每本书记住各自的缩放，切书时不会互相串。
-    zoomFactor = clampZoom(resolved.zoom ?? store.settings.zoom ?? 1);
+    zoomFactor = clampZoom(resolved.zoom ?? 1);
     readerSurface.innerHTML = "";
     bottomBar.style.display = "flex";
     reader = new ScrollReader(readerSurface, currentDoc, {
@@ -520,7 +520,7 @@ async function askRegionQuestion(region: RegionSelection) {
     );
     history.push({ role: "assistant", content: fullText });
     answerNode.classList.remove("streaming");
-    appendActions(answerNode, question);
+    appendActions(answerNode);
     if (sheetQA) sheetQA.answer = fullText;
     await saveQA(`${question}（框选区域）`, fullText);
   } catch (err) {
@@ -604,7 +604,7 @@ async function askQuestion(question: string) {
     );
     history.push({ role: "assistant", content: fullText });
     answerNode.classList.remove("streaming");
-    appendActions(answerNode, question);
+    appendActions(answerNode);
     if (sheetQA) sheetQA.answer = fullText;
     await saveQA(question, fullText);
   } catch (err) {
@@ -792,7 +792,7 @@ function openTeacherSheet(question: string) {
   void input.focus();
 }
 
-function appendActions(answerNode: HTMLDivElement, lastQuestion: string) {
+function appendActions(answerNode: HTMLDivElement) {
   const actions = document.createElement("div");
   actions.className = "actions";
   const buttons = [
@@ -848,7 +848,7 @@ async function followUp(text: string) {
     );
     history.push({ role: "assistant", content: fullText });
     a.classList.remove("streaming");
-    appendActions(a, text);
+    appendActions(a);
     sheetQA = { question: text, answer: fullText };
     await saveQA(text, fullText);
   } catch (err) {
@@ -1156,7 +1156,7 @@ async function applyZoom() {
 let zoomPersistTimer: number | undefined;
 function persistZoom() {
   if (!store) return;
-  store.settings.zoom = zoomFactor;
+  // 缩放记到当前书（每本书记住各自的），防抖写盘。
   if (currentBook) currentBook.zoom = zoomFactor;
   window.clearTimeout(zoomPersistTimer);
   zoomPersistTimer = window.setTimeout(() => void persist(), 400);

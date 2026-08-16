@@ -83,15 +83,12 @@ impl Default for QAEntry {
 #[serde(default)]
 pub struct Settings {
     pub model_id: String,
-    /// 用户缩放倍数（1 = 适合宽度），跨会话记住。
-    pub zoom: f64,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
             model_id: "qwen3-vl-plus".to_string(),
-            zoom: 1.0,
         }
     }
 }
