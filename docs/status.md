@@ -19,7 +19,7 @@ Satori is a local-first macOS PDF learning workspace. Reading stays central: the
 
 ## Version and installation
 
-- Current release: `v3.3.0`, containing the refined monochrome home, revised Satori mascot border, and repository cleanup.
+- Current release: `v3.3.1`, a maintenance release that removes completed plans and superseded Swift-era decisions, keeping current constraints in ADRs 0010–0014.
 - The signed release bundle is built for Apple silicon and published through GitHub Releases; the same build is installed locally at `/Applications/Satori.app`.
 - The previous local application bundle is kept as a timestamped backup in `/Applications`.
 
@@ -31,9 +31,10 @@ Satori is a local-first macOS PDF learning workspace. Reading stays central: the
 
 ## Repository hygiene
 
-- `docs/plans/` keeps only the active product, Dock-icon, and reading-pass designs; implemented or superseded task plans were removed and remain recoverable from Git history.
+- `docs/plans/` is reserved for unfinished work and is currently empty. Implemented plans were removed and remain recoverable from Git history.
+- `docs/decisions/` contains only accepted constraints that still govern the Tauri application. Superseded Swift-era records were deleted and remain recoverable from Git history.
+- Operational details for the stable development shell now live in ADR 0014 instead of an implemented task plan.
 - Legacy Swift `Info.plist` / `.icns`, the copied public asset README, and the unused browser-preview script were removed. The current Tauri icon source and required macOS bundle sizes remain tracked.
-- Swift-era ADRs are retained as history only when their status explicitly names the current superseding decision.
 
 ## Durable constraints and pitfalls
 

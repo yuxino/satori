@@ -1,7 +1,7 @@
 [package]
 name = "satori"
-version = "3.3.0"
-description = "Satori — a book with a teacher beside it"
+version = "3.3.1"
+description = "Satori — a local-first PDF learning workspace"
 edition = "2021"
 
 [features]
