@@ -16,14 +16,14 @@ Satori is a local-first macOS learning workspace. Its primary job is to help a l
 - Build for macOS only unless the user explicitly expands scope.
 - Keep study files, reading position, project structure, and learning history local by default.
 - Do not add source PDFs to Git. Store file bookmarks or local references instead.
-- Treat Alibaba Cloud Model Studio Qwen as an on-demand reasoning/search service, not as file hosting.
-- Use Model Studio's built-in China (Beijing) OpenAI-compatible endpoint and store only the user-supplied API key in macOS Keychain. Never write a key into the repository, logs, screenshots, environment variables, or a user-facing Host field.
-- Keep the active Qwen model configurable and persisted locally; use the strongest model that still supports text, scanned-page images, and web search as the default.
+- Treat configured AI services as on-demand page-understanding providers, not as file hosting.
+- Support multiple local provider profiles. Keep non-secret endpoints and model IDs in local JSON, but store every user-supplied API key only in macOS Keychain. Never write a key into the repository, local JSON, logs, screenshots, environment variables, or WebView state.
+- Keep the active profile and model configurable and persisted locally. A configured model must support scanned-page image input; never silently fall back to another provider.
 - Treat user-selected question images as ephemeral request context: resize locally, send only on submission, and do not persist them without an explicit product decision.
 - Keep per-document learning sessions in local Application Support storage; send only bounded recent text turns for follow-ups and keep provider response storage disabled.
 
 ## Engineering rules
 
-- Follow the established `mimi`/`kiri` pattern: native Swift Package Manager app, SwiftUI, PDFKit, and local JSON persistence before introducing third-party dependencies or an Xcode project.
+- Follow the Satori 3.0 stack: Tauri 2, TypeScript/Vite, PDF.js, Rust, and local JSON persistence. Keep dependencies small and justify new ones.
 - Add tests for new persistence and parsing behavior; visually check material UI changes.
 - Make small, focused commits. Do not stage unrelated files.

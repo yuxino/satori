@@ -36,15 +36,15 @@ Satori 从“一个百炼 Key + 一个 Qwen 模型”升级为“多个 AI 连�
 
 旧 `settings.model_id` 自动写入默认百炼档案，默认档案 ID 固定为 `model-studio-default`。已有 `com.yuxino.satori.qwen.v3 / qwen-api-key` 在首次读取该档案凭据时复制到新的 profile Keychain 条目；旧条目不主动删除，避免不可恢复的凭据损失。
 
-API Key 不进入 JSON、日志、截图、环境变量或前端长期状态。Rust 根据 profile ID 从 macOS Keychain 读取，前端只拿到“是否已保存”的布尔状态。旧明文 `dev-api-key` 入口与读取兜底移除。
+API Key 不进入 JSON、日志、截图、环境变量或前端长期状态。AI 命令只接收 profile ID，Rust 从 Store 读取档案，并用 provider、规范化最终地址和鉴权模式生成 credential scope；Keychain envelope 只有 scope 匹配才返回 secret。前端只拿到“是否已保存”的布尔状态。旧明文 `dev-api-key` 只作为官方百炼的一次性迁移输入。
 
 ## 4. 请求层
 
 Rust 统一验证配置、拼接 `/chat/completions`、注入可选 Bearer 鉴权、发送页面图片并解析 SSE。所有远程请求带 `store: false`；不出机的 localhost/loopback 自定义服务可以省略该扩展字段。OpenAI 使用 `max_completion_tokens`，百炼和自定义兼容服务使用兼容面更广的 `max_tokens`。
 
-三条现有能力——页面讲解、扫描目录提取、章节页定位——都接收同一 `AIProfile`，不再传明文 Key 或单独模型参数。错误信息使用连接名称，不再硬编码“百炼”。流式事件改为 `ai://chunk`。
+三条现有能力——页面讲解、扫描目录提取、章节页定位——都只接收同一个当前 profile ID，由 Rust 解析 `AIProfile`，不再传明文 Key、地址或单独模型参数。错误信息使用连接名称，不再硬编码“百炼”。流式事件改为 `ai://chunk`。
 
-“测试连接”发送一个极小文本请求，不上传书页，用于验证地址、鉴权和模型 ID。真正的图片能力仍在首次读页时由服务端确认；设置页明确提示所选模型必须支持图片输入。
+“测试连接”发送内置的 1×1 测试图，不上传书页或学习历史，用于验证地址、鉴权、模型 ID 和图片输入能力。
 
 ## 5. 设置页 UX
 

@@ -11,10 +11,15 @@
 - 核心范式：**页面即证据**——视觉模型直接读页面图像，不建 OCR 管线
 - 工具链：Tauri 2 + Vite + TS + PDF.js（决策见 `docs/decisions/0010-tauri-rewrite.md`）
 - 存储：本地 JSON（Application Support）；API Key 只进 macOS Keychain
-- 模型：百炼 `qwen3-vl-plus` 默认（可切 `qwen3-vl-flash` / `qwen-vl-max`），北京共享地址，`store: false`
+- AI 服务：多个命名 profile；内置百炼与 OpenAI，也可配置 OpenAI-compatible 云端/本地服务。百炼 `qwen3-vl-plus` 仍是旧用户默认；远程请求 `store: false`
 - 版本：Git tag `v3.0.0`（Tauri 重写主线，main 分支）；旧 Swift 版 tag `legacy-swift`
 
 ## Completed so far
+
+- **多 AI 服务配置（2026-08-22）**：设置页从“单个百炼 Key + 模型”升级为 master-detail 多连接管理。可同时保存多份百炼、OpenAI 或自定义 OpenAI-compatible 连接；配置名称、服务地址、模型、鉴权开关分别持久化，并明确“保存”和“设为当前”是两个动作。内置服务固定官方地址，自定义远端必须 HTTPS，本机 loopback 可用 HTTP；支持无需鉴权的本地/远程兼容服务
+- **设置 UI 重做**：780×560 macOS 偏好设置式界面，左侧连接列表、右侧编辑器、固定底部操作栏；支持添加/删除、Key 替换/移除、图片能力连接测试、字段错误、加载/成功/失败状态、未保存更改确认。已实机检查主窗口尺寸、内容滚动、底栏可见性、键盘焦点、Esc 和确认卡片；背景 inert、焦点环、深色变量、窄窗与减少动态样式齐全
+- **多 provider 安全边界**：AI 命令只接收 profile ID，Rust 从 Store 读取唯一档案；Keychain secret 绑定 provider + 规范化 endpoint + auth scope，关闭鉴权时完全不读取 Key；禁止重定向、限制响应大小并脱敏服务端错误。删除默认 Key 会清理旧 Qwen 条目并写 Keychain tombstone；损坏/未来版本 Store 不再静默回退百炼
+- **旧配置无感迁移**：旧 `settings.model_id` 迁入确定性百炼 profile；旧 v3/v2 Keychain 或开发 Key 只允许绑定官方百炼 scope。Store 写入串行且原子化，保存前固定快照，profile ID/active ID/版本均验证。Rust 现有 22 项迁移、URL、请求体、SSE、错误与安全单测全部通过
 
 - **首页 / 总览**：启动落在首页（不再直接跳进上次的书）。GitHub 风格学习活动热力格子图（最近 26 周，薰衣草色阶按当天阅读页数+提问量分级）+ 统计卡片（学习天数/阅读页数/提问次数）+ 我的书卡片（进度条，`BookRecord.pageCount` 打开时记录）+ 最近提问列表；书菜单里「总览 · 学习活动」可随时返回。活动日志 `Store.activity`（日期 → pages/questions），翻页计数由阅读位置持久化防抖落盘、提问计数随保存问答落盘
 - **AI 交互打磨**：悬浮球重设计（渐变圆 + 白色四角星图标 + 悬停上浮 + 悬停浮现「问这一页」标签）、讲解卡片顶部渐变 accent 条、流式回答前「正在讲…」三点动画、发送按钮悬停反馈、框选选区圆角柔边
@@ -23,7 +28,7 @@
 
 - 旧 Swift 代码迁入 tag `legacy-swift` 存档，工作区移除（2026-08-18 清出，仓库不再跟踪 Swift 源码）
 - Tauri 2 骨架：窗口、图标、capabilities、asset protocol
-- Rust 后端：`keychain.rs`（旧条目迁移 + 新 service 写入，`apple-native` feature）、`store.rs`（书库/位置/Q&A JSON 持久化 + 损坏备份）、`qwen.rs`（百炼视觉客户端：流式问答 + 扫描目录恢复）、`thumbs.rs`（缩略图磁盘缓存）
+- Rust 后端：`keychain.rs`（按 profile 隔离凭据 + 旧条目迁移）、`provider.rs`（服务地址、scope 与请求策略）、`store.rs`（书库/位置/Q&A/profile JSON 持久化 + 损坏备份）、`qwen.rs`（OpenAI-compatible 视觉客户端：流式问答 + 扫描目录恢复）、`thumbs.rs`（缩略图磁盘缓存）
 - Keychain 迁移已实际完成：旧条目 key 已用 `mimi Local Development` 证书读出并写入新条目 `com.yuxino.satori.qwen.v3`，验证一致（117 字符）。**用户无需再粘贴 API Key。**
 - 前端阅读器（连续滚动式）：PDF.js 渲染、懒渲染视口附近页面、捏合/⌘+/- 缩放、框选理解（扫描版可用）、跨页证据、Preview 风格底部工具栏（缩略图条 + 翻页 + 缩放）、中性工作台主题、错误捕获白屏提示
 - **目录清洗统一**：内置大纲与扫描恢复的目录都走同一套 `cleanOutline`——丢掉第一个「第X章」之前的条目（封面/前言/目录/考试大纲/考核目标/题型举例/参考答案/后记 等）+ 关键字过滤，过滤后为空则原样保留。system.pdf 93 条原生大纲 → 78 条干净目录
@@ -42,6 +47,9 @@
 ## Known facts / pitfalls（避免重踩）
 
 - **Tauri dev 模式 Dock 图标是方形**：必须走 release + `custom-protocol`（详见 `docs/plans/2026-08-16-tauri-dock-icon-design.md`）
+- **设置确认不要用 `window.confirm`**：当前 Tauri capability 不允许 `plugin:dialog|confirm`，会触发致命错误；设置页使用自己的可访问确认卡片
+- **AI 命令不能信任 WebView 传来的完整 profile**：命令只收 ID，Rust 从 Store 解析；否则已保存 Key 可能被借给另一个自定义地址
+- **前端构建与 Rust 测试不要并行**：Vite 会清理并重建 `dist/`，同时运行会让 Tauri `generate_context!` 短暂找不到嵌入资源；先 `npm run build`，再跑 Cargo
 - **白屏**：`custom-protocol` 决定前端资源是否嵌入二进制；dev-app.sh 用 `--features` 传可能不生效，已直接写进 Cargo.toml
 - **滚动容器**：绝对定位页面不撑起滚动高度，必须加普通流式 spacer 撑高
 - **初次布局**：WebView 未完成布局时 clientWidth 为 0；需等一帧再量宽度 + ResizeObserver 兜底
@@ -56,5 +64,6 @@
 ## Next milestone
 
 1. 用真实教材（`software.pdf` 扫描版 + `system.pdf` 文字版）按验收标准跑一遍：打开书 → 翻到不懂页 → 框选/问整页 → 得到解释 → 关掉重开回原页 → 回看找到问答。
-2. 观察流式首 token 延迟，必要时调 max_tokens / 图像压缩参数。
-3. UI 细节继续打磨（底部工具栏、目录抽屉、老师面板的观感已多轮迭代）。
+2. 分别用真实百炼、OpenAI 和一个本地 OpenAI-compatible 视觉模型跑连接测试与一轮书页提问；当前实现没有在验收时主动调用用户服务。
+3. 观察流式首 token 延迟，必要时调 token 上限 / 图像压缩参数。
+4. UI 细节继续打磨（底部工具栏、目录抽屉、老师面板的观感已多轮迭代）。

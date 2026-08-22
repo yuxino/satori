@@ -4,7 +4,7 @@
 
 **Goal:** Add multiple secure AI provider profiles and replace the Alibaba-only settings modal with a polished, accessible macOS-style connection manager.
 
-**Architecture:** Persist only non-secret `AIProfile` records in the local store, keep one active profile ID, and store each profile secret under its stable ID in macOS Keychain. Route all current visual workflows through one OpenAI-compatible Rust client with provider-specific request options and a profile-based frontend API.
+**Architecture:** Persist only non-secret `AIProfile` records in the local store, keep one active profile ID, and store each profile secret under its stable ID in macOS Keychain with a Rust-derived provider/endpoint/auth scope. AI IPC accepts only the profile ID; Rust loads the trusted profile and routes all visual workflows through one OpenAI-compatible client with provider-specific request options.
 
 **Tech Stack:** Tauri 2, Rust, reqwest, keyring, TypeScript, Vite, CSS, PDF.js.
 
@@ -50,7 +50,7 @@
 **Steps:**
 
 1. Add failing unit tests for URL normalization, HTTP(S) validation, provider-specific token/store fields, SSE parsing, error-body parsing, and non-stream text extraction.
-2. Replace fixed base URL/model/key parameters with a validated `AIProfile` and a Rust-side Keychain lookup.
+2. Replace fixed base URL/model/key parameters with a profile ID; load and validate the unique `AIProfile` in Rust before the scoped Keychain lookup.
 3. Keep Chat Completions image parts, use `store: false` for every remote connection, and select the token-limit field by provider kind.
 4. Rename stream events to `ai://chunk` and make errors provider-neutral.
 5. Add a minimal `test_ai_profile` command that sends no book image.
