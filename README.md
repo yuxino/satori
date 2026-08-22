@@ -16,7 +16,7 @@ A macOS app for reading PDF textbooks. The page stays at the center; when a para
 
 - **Ask around the page** — select a paragraph, figure, or code block, or type your own question; works with both text-native and scanned PDFs.
 - **Reading first** — single-page and two-page layouts, outline navigation, and zoom all stay out of the page's way; each book reopens where you left it.
-- **A monochrome reading room** — crisp typographic covers replace blurry PDF thumbnails; the home keeps your current book, yearly reading grid, library, and recent understandings together.
+- **A monochrome reading pass** — the home is laid out like a restrained paper ticket, keeping your current book, yearly reading grid, library, and recent understandings together; crisp typographic covers replace blurry PDF thumbnails.
 - **Choose your AI service** — keep multiple Alibaba Cloud Model Studio, OpenAI, or OpenAI-compatible cloud and local connections, then switch the active connection and model at any time.
 - **Stored locally** — your library, reading position, and past Q&A stay on your Mac; API keys are stored only in macOS Keychain.
 

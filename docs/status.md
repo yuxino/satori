@@ -19,8 +19,8 @@ Satori is a local-first macOS PDF learning workspace. Reading stays central: the
 
 ## Version and installation
 
-- Latest published release: `v3.2.0` on `main`.
-- The current refinement branch adds the reading-pass home and revised Satori mascot border; it has been built and installed locally at `/Applications/Satori.app` but is not a new public release yet.
+- Current release: `v3.3.0`, containing the reading-pass home, revised Satori mascot border, and repository cleanup.
+- The signed release bundle is built for Apple silicon and published through GitHub Releases; the same build is installed locally at `/Applications/Satori.app`.
 - The previous local application bundle is kept as a timestamped backup in `/Applications`.
 
 ## Verification baseline
@@ -49,4 +49,4 @@ Satori is a local-first macOS PDF learning workspace. Reading stays central: the
 
 1. Validate one real page question with Model Studio, OpenAI, and a local OpenAI-compatible visual service.
 2. Install an Apple Development identity with a Team ID to eliminate the remaining native-rebuild authorization limitation.
-3. Publish the current icon and reading-pass refinements as the next patch release after visual approval.
+3. Continue refining the reading and explanation flow from real study sessions; keep the home visually quiet.
