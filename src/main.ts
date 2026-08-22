@@ -194,7 +194,7 @@ function renderHome() {
   const wrap = document.createElement("div");
   wrap.className = "home-wrap";
 
-  // 书房题头：只保留字标，不借用单字印章或“禅意”符号装饰品牌。
+  // 阅读凭证题头：品牌与票号承担识别，设置使用明确的齿轮图标。
   const header = document.createElement("header");
   header.className = "home-masthead";
   const brand = document.createElement("div");
@@ -202,16 +202,26 @@ function renderHome() {
   const title = document.createElement("h1");
   title.textContent = "satori";
   const sub = document.createElement("p");
-  sub.textContent = "PDF 学习书房";
+  sub.textContent = "READING PASS · PRIVATE EDITION";
   brand.append(title, sub);
 
   const headerActions = document.createElement("div");
   headerActions.className = "home-header-actions";
+  const passMeta = document.createElement("div");
+  passMeta.className = "home-pass-meta";
+  const localLabel = document.createElement("span");
+  localLabel.textContent = "LOCAL FIRST";
+  const passNumber = document.createElement("strong");
+  passNumber.textContent = `NO. ${homePassNumber()}`;
+  passMeta.append(localLabel, passNumber);
   const settingsBtn = document.createElement("button");
-  settingsBtn.className = "home-quiet-action";
-  settingsBtn.textContent = "AI 服务";
+  settingsBtn.className = "home-settings-action";
+  settingsBtn.type = "button";
+  settingsBtn.setAttribute("aria-label", "设置 AI 服务");
+  settingsBtn.title = "设置 AI 服务";
+  settingsBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V20.3h-3v-.08a1.7 1.7 0 0 0-1.04-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-2.12-2.12.06-.06A1.7 1.7 0 0 0 7 15a1.7 1.7 0 0 0-1.56-1.04H5.3v-3h.14A1.7 1.7 0 0 0 7 9.92a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.12-2.12.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 11.7 4.7V4.6h3v.1a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.12 2.12-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.04h.14v3h-.14A1.7 1.7 0 0 0 19.4 15Z"/></svg>`;
   settingsBtn.addEventListener("click", () => openSettings());
-  headerActions.appendChild(settingsBtn);
+  headerActions.append(passMeta, settingsBtn);
   if (currentDoc) {
     const closeBtn = document.createElement("button");
     closeBtn.className = "home-close";
@@ -335,6 +345,16 @@ function bookProgress(book: BookRecord): { percent: number; detail: string } {
   };
 }
 
+function homePassNumber(): string {
+  const seed = `${store.books.map((book) => book.id).join(":")}:${store.qa.length}`;
+  let hash = 2166136261;
+  for (const character of seed) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `SR-${String(Math.abs(hash) % 1000000).padStart(6, "0")}`;
+}
+
 function featuredBook(): BookRecord | null {
   if (currentBook) return currentBook;
   const latestQA = store.qa.slice().sort((a, b) => b.ts - a.ts)[0];
@@ -359,6 +379,14 @@ function studySummaryText(): string {
 function buildContinueStage(book: BookRecord): HTMLElement {
   const stage = document.createElement("section");
   stage.className = "home-continue";
+
+  const ticketMark = document.createElement("div");
+  ticketMark.className = "home-ticket-mark";
+  const ticketType = document.createElement("span");
+  ticketType.textContent = "CURRENT READING · ADMIT ONE";
+  const ticketNumber = document.createElement("strong");
+  ticketNumber.textContent = `PASS ${homePassNumber()}`;
+  ticketMark.append(ticketType, ticketNumber);
 
   const cover = document.createElement("div");
   cover.className = "home-featured-cover";
@@ -399,7 +427,7 @@ function buildContinueStage(book: BookRecord): HTMLElement {
   footer.append(button, progressLabel);
 
   copy.append(note, bar, footer);
-  stage.append(cover, copy);
+  stage.append(ticketMark, cover, copy);
 
   const latestUnderstanding = store.qa
     .filter((entry) => entry.book_id === book.id)
