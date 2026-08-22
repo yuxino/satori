@@ -31,28 +31,27 @@ function showFatalError(message: string) {
 
 import {
   askVisual,
+  credentialStatus,
   emptyStore,
   extractOutline,
   findPageByTitle,
-  listModelOptions,
   loadStore,
-  readApiKey,
   resolveBookPath,
-  saveApiKey,
-  saveDevKey,
   saveStore,
   loadThumb,
   saveThumb,
+  type AIProfile,
   type BookRecord,
   type HistoryTurn,
-  type ModelOption,
   type OutlineEntry,
   type QAEntry,
+  type Settings,
   type Store,
 } from "./api";
 import { PDFDocument } from "./pdf";
 import { ScrollReader, type RegionSelection } from "./reader";
 import { renderMarkdown } from "./markdown";
+import { openAISettings } from "./settings";
 
 // ---- DOM ----
 const readerSurface = document.getElementById("reader-surface") as HTMLDivElement;
@@ -63,7 +62,8 @@ const homeView = document.getElementById("home-view") as HTMLDivElement;
 
 // ---- 状态 ----
 let store: Store = emptyStore();
-let apiKey: string | null = null;
+let activeCredentialSaved = false;
+let credentialRefreshGeneration = 0;
 let currentBook: BookRecord | null = null;
 let currentDoc: PDFDocument | null = null;
 let reader: ScrollReader | null = null;
@@ -107,14 +107,44 @@ function markPageViewed() {
   todayPagesPending++;
 }
 
+function activeProfile(): AIProfile | null {
+  const id = store.settings.active_profile_id;
+  return store.settings.profiles.find((profile) => profile.id === id) ?? null;
+}
+
+async function refreshActiveCredentialStatus(): Promise<void> {
+  const generation = ++credentialRefreshGeneration;
+  activeCredentialSaved = false;
+  const profile = activeProfile();
+  if (!profile || !profile.api_key_required) {
+    if (generation === credentialRefreshGeneration) activeCredentialSaved = Boolean(profile);
+    return;
+  }
+  const saved = await credentialStatus(profile.id)
+    .then((status) => status.saved)
+    .catch(() => false);
+  if (generation === credentialRefreshGeneration && activeProfile()?.id === profile.id) {
+    activeCredentialSaved = saved;
+  }
+}
+
+/** 当前连接是否足以发起请求；不会静默回退到别的服务。 */
+function usableActiveProfile(): AIProfile | null {
+  const profile = activeProfile();
+  if (!profile || !profile.name.trim() || !profile.model_id.trim() || !profile.base_url.trim()) return null;
+  if (profile.api_key_required && !activeCredentialSaved) return null;
+  return profile;
+}
+
 // ---- 启动 ----
 async function boot() {
-  store = await loadStore().catch(() => emptyStore());
-  apiKey = await readApiKey().catch(() => null);
+  // 数据损坏或格式较新时必须明确失败，不能构造默认 provider 后继续写入。
+  store = await loadStore();
+  await refreshActiveCredentialStatus();
 
-  if (store.books.length > 0 && !apiKey) {
-    // 有书但没有 Key：先问 Key（老师需要能说话）。
-    openSettings();
+  if (store.books.length > 0 && !usableActiveProfile()) {
+    // 有书但没有可用连接：先请用户完成 AI 服务配置。
+    openSettings("先完成一个 AI 服务连接，老师才能读取书页。");
   }
   showHome();
   setupReaderSurface();
@@ -702,7 +732,8 @@ function cleanOutline(entries: OutlineEntry[]): OutlineEntry[] {
 /// 打开书时调用：PDF 无内置大纲且没有持久化目录时，
 /// 用 Qwen 读目录页提取章节，再定位第一章算出偏移，映射成 PDF 页码。
 async function maybeExtractScannedOutline() {
-  if (!currentDoc || !apiKey) return;
+  const profile = usableActiveProfile();
+  if (!currentDoc || !profile) return;
   if (!currentBook) return;
   // 捕获本次处理的书身份：延迟调用期间可能已切书，检测到变化立即放弃。
   const bookId = currentBook.id;
@@ -732,10 +763,7 @@ async function maybeExtractScannedOutline() {
     // 1) 渲染目录候选页 → Qwen 提取目录（印刷页码）。
     const pages = await exportEvidence([...Array(frontTo - frontFrom + 1)].map((_, i) => frontFrom + i), 1.3);
     if (currentDoc !== doc || currentBook?.id !== bookId) return;
-    const entries = await extractOutline(apiKey, {
-      model: store.settings.model_id,
-      pages,
-    });
+    const entries = await extractOutline(profile.id, { pages });
     if (entries.length === 0) return;
     if (currentDoc !== doc || currentBook?.id !== bookId) return;
 
@@ -760,12 +788,7 @@ async function maybeExtractScannedOutline() {
       1.3,
     );
     if (currentDoc !== doc || currentBook?.id !== bookId) return;
-    const foundPdfPage = await findPageByTitle(
-      apiKey,
-      store.settings.model_id,
-      firstChapter.title,
-      probePages,
-    );
+    const foundPdfPage = await findPageByTitle(profile.id, firstChapter.title, probePages);
     if (foundPdfPage === 0) return; // 定位失败，放弃（保留无目录状态）。
     if (currentDoc !== doc || currentBook?.id !== bookId) return;
 
@@ -818,8 +841,9 @@ async function askPageQuestion() {
 
 // ---- 提问：框选区域（扫描版也能用） ----
 async function askRegionQuestion(region: RegionSelection) {
-  if (!currentDoc || !apiKey) {
-    openSettings();
+  const profile = usableActiveProfile();
+  if (!currentDoc || !profile) {
+    openSettings("请先选择一个已配置的 AI 服务，再解释这处内容。");
     return;
   }
   if (streaming) return;
@@ -841,9 +865,8 @@ async function askRegionQuestion(region: RegionSelection) {
 
   try {
     fullText = await askVisual(
-      apiKey,
+      profile.id,
       {
-        model: store.settings.model_id,
         question,
         evidence: [
           { page: region.page, jpeg: regionJPEG },
@@ -910,8 +933,9 @@ async function exportEvidence(pages: number[], scale = 1.5): Promise<{ page: num
 
 // ---- 核心提问闭环 ----
 async function askQuestion(question: string) {
-  if (!currentDoc || !apiKey) {
-    openSettings();
+  const profile = usableActiveProfile();
+  if (!currentDoc || !profile) {
+    openSettings("请先选择一个已配置的 AI 服务，再向老师提问。");
     return;
   }
   if (streaming) return;
@@ -930,9 +954,8 @@ async function askQuestion(question: string) {
 
   try {
     fullText = await askVisual(
-      apiKey,
+      profile.id,
       {
-        model: store.settings.model_id,
         question,
         evidence,
         history: history.slice(-6, -1),
@@ -1154,7 +1177,11 @@ function appendActions(answerNode: HTMLDivElement) {
 }
 
 async function followUp(text: string) {
-  if (!currentDoc || !apiKey || streaming) return;
+  const profile = usableActiveProfile();
+  if (!currentDoc || !profile || streaming) {
+    if (!profile) openSettings("当前 AI 服务尚未配置完成。");
+    return;
+  }
   const pages = evidencePages(text);
   const evidence = await exportEvidence(pages);
   history.push({ role: "user", content: text });
@@ -1175,9 +1202,8 @@ async function followUp(text: string) {
   let fullText = "";
   try {
     fullText = await askVisual(
-      apiKey,
+      profile.id,
       {
-        model: store.settings.model_id,
         question: text,
         evidence,
         history: history.slice(-6, -1),
@@ -1202,8 +1228,20 @@ async function followUp(text: string) {
 }
 
 // ---- 持久化 ----
+let persistQueue: Promise<void> = Promise.resolve();
+
+/** 串行保存完整 Store，避免较早的快照晚到后覆盖刚改好的 AI 连接。 */
+function persistOrThrow(): Promise<void> {
+  const snapshot = structuredClone(store);
+  const next = persistQueue
+    .catch(() => undefined)
+    .then(() => saveStore(snapshot));
+  persistQueue = next;
+  return next;
+}
+
 async function persist() {
-  await saveStore(store).catch(() => undefined);
+  await persistOrThrow().catch(() => undefined);
 }
 
 async function saveQA(question: string, answer: string) {
@@ -1459,7 +1497,16 @@ function setupOutsideClickClose() {
 // ---- 键盘 ----
 document.addEventListener("keydown", (e) => {
   // 焦点在输入框/文本域时，方向键等不触发全局翻页/缩放，避免干扰输入。
-  const typing = document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA";
+  const activeTag = document.activeElement?.tagName;
+  const typing =
+    activeTag === "INPUT" ||
+    activeTag === "TEXTAREA" ||
+    activeTag === "SELECT" ||
+    Boolean((document.activeElement as HTMLElement | null)?.isContentEditable);
+  if (document.getElementById("settings-modal")) {
+    if (e.metaKey && e.key === ",") e.preventDefault();
+    return;
+  }
   if (e.key === "Escape") {
     if (homeView.classList.contains("open") && currentDoc) {
       // 首页盖在正在读的书上：Esc 回到阅读。
@@ -2117,76 +2164,27 @@ function schedulePersistPosition() {
 }
 
 // ---- 设置 ----
-function openSettings() {
-  const modal = document.createElement("div");
-  modal.id = "settings-modal";
-  modal.className = "open";
-  modal.innerHTML = `
-    <div class="card">
-      <h2>连接老师</h2>
-      <label>百炼 API Key（优先存钥匙串；测试可用下方「开发模式」存本地文件）</label>
-      <input type="password" placeholder="sk-…" value="${apiKey ?? ""}" />
-      <label>模型</label>
-      <select></select>
-      <div class="status"></div>
-      <div class="row">
-        <button class="cancel">关闭</button>
-        <button class="dev">存为开发 Key</button>
-        <button class="primary save">保存到钥匙串</button>
-      </div>
-    </div>`;
-
-  const select = modal.querySelector("select")!;
-  void listModelOptions().then((options: ModelOption[]) => {
-    for (const opt of options) {
-      const el = document.createElement("option");
-      el.value = opt.id;
-      el.textContent = opt.title;
-      if (opt.id === store.settings.model_id) el.selected = true;
-      select.appendChild(el);
-    }
+function openSettings(message?: string) {
+  openAISettings({
+    settings: structuredClone(store.settings),
+    message,
+    persistSettings: async (next: Settings) => {
+      const previous = store.settings;
+      store.settings = structuredClone(next);
+      try {
+        await persistOrThrow();
+        await refreshActiveCredentialStatus();
+      } catch (error) {
+        store.settings = previous;
+        await refreshActiveCredentialStatus();
+        throw error;
+      }
+    },
+    onChange: (next: Settings) => {
+      store.settings = structuredClone(next);
+      void refreshActiveCredentialStatus();
+    },
   });
-
-  const statusEl = modal.querySelector(".status")!;
-  if (apiKey) {
-    statusEl.textContent = "已连接百炼（Key 可用）。";
-  } else {
-    statusEl.textContent = "还没有 Key——填上它，老师才能开口。";
-  }
-
-  modal.querySelector(".cancel")!.addEventListener("click", () => modal.remove());
-
-  async function applyKey(key: string, save: () => Promise<void>, done: string) {
-    if (!key) {
-      statusEl.textContent = "Key 不能为空。";
-      return;
-    }
-    try {
-      await save();
-      apiKey = key;
-      store.settings.model_id = select.value;
-      await persist();
-      statusEl.textContent = done;
-      window.setTimeout(() => modal.remove(), 700);
-    } catch (err) {
-      statusEl.textContent = `保存失败：${String(err)}`;
-    }
-  }
-
-  modal.querySelector(".save")!.addEventListener("click", async () => {
-    const keyInput = modal.querySelector('input[type="password"]') as HTMLInputElement;
-    await applyKey(keyInput.value.trim(), () => saveApiKey(keyInput.value.trim()), "已保存到钥匙串。");
-  });
-
-  modal.querySelector(".dev")!.addEventListener("click", async () => {
-    const keyInput = modal.querySelector('input[type="password"]') as HTMLInputElement;
-    await applyKey(keyInput.value.trim(), () => saveDevKey(keyInput.value.trim()), "已存为开发 Key（本地文件，仅测试用）。");
-  });
-
-  modal.addEventListener("click", (e) => {
-    if (e.target === modal) modal.remove();
-  });
-  document.body.appendChild(modal);
 }
 
 // ---- 启动 ----
