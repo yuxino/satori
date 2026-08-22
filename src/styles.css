@@ -1,16 +1,21 @@
 /* Satori 3.0 — 一本书，旁边坐着一个老师。 */
 
 :root {
-  /* 编辑部书房：暖纸、石墨字、低饱和书签色。 */
-  --paper: #f4f2ed;
-  --paper-deep: #e9e6e0;
-  --ink: #292727;
-  --ink-soft: #6f6b68;
-  --ink-faint: #96908a;
-  --lavender: #706287;
-  --lavender-soft: #ebe7f0;
-  --line: #d5d0c8;
-  --sheet: #fbfaf7;
+  /* 冷中性工作台：不做 AI 常见的米灰＋淡紫。 */
+  --paper: #f5f6f8;
+  --paper-deep: #e9ebef;
+  --ink: #23252a;
+  --ink-soft: #686d76;
+  --ink-faint: #9298a2;
+  --lavender: #596783;
+  --lavender-soft: #e7eaf0;
+  --line: #d8dbe1;
+  --sheet: #ffffff;
+  --activity-0: #edf0f3;
+  --activity-1: #d8dde8;
+  --activity-2: #b8c2d8;
+  --activity-3: #8797b7;
+  --activity-4: #566786;
   /* 统一的浮层设计语言。 */
   --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.14);
   --shadow-pop: 0 14px 48px rgba(0, 0, 0, 0.2);
@@ -22,15 +27,20 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #292826;
-    --paper-deep: #1f1e1c;
-    --ink: #f2eee8;
-    --ink-soft: #b0aaa3;
-    --ink-faint: #817b75;
-    --lavender: #b3a5c8;
-    --lavender-soft: #393442;
-    --line: #44403b;
-    --sheet: #252422;
+    --paper: #282b30;
+    --paper-deep: #1f2125;
+    --ink: #f1f3f6;
+    --ink-soft: #b0b5be;
+    --ink-faint: #7f8691;
+    --lavender: #a8b4c9;
+    --lavender-soft: #363c47;
+    --line: #41454c;
+    --sheet: #26282d;
+    --activity-0: #34383f;
+    --activity-1: #48505d;
+    --activity-2: #626f83;
+    --activity-3: #8291aa;
+    --activity-4: #a7b4c8;
     --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.5);
     --shadow-pop: 0 14px 48px rgba(0, 0, 0, 0.6);
   }
@@ -190,9 +200,7 @@ body {
   inset: 0;
   z-index: 45;
   overflow-y: auto;
-  background:
-    radial-gradient(circle at 78% 8%, color-mix(in srgb, var(--lavender-soft) 52%, transparent) 0, transparent 31%),
-    var(--paper-deep);
+  background: var(--paper-deep);
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
@@ -291,7 +299,7 @@ body {
 }
 
 .home-continue {
-  min-height: 286px;
+  min-height: 266px;
   margin-top: 34px;
   padding: 28px 30px;
   display: grid;
@@ -300,31 +308,66 @@ body {
   gap: 30px;
   border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
   border-radius: 18px;
-  background: color-mix(in srgb, var(--sheet) 94%, transparent);
-  box-shadow: 0 16px 55px rgba(45, 39, 55, 0.07);
+  background: var(--sheet);
+  box-shadow: 0 16px 48px rgba(34, 39, 49, 0.07);
   overflow: hidden;
 }
 
 .home-featured-cover {
+  --book-cover: #30475d;
+  position: relative;
   width: 126px;
   height: 174px;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 17px 14px 14px 18px;
   overflow: hidden;
   border-radius: 4px 10px 10px 4px;
   color: white;
-  background: linear-gradient(145deg, #a49ab8, #655878);
+  background: var(--book-cover);
   box-shadow: -5px 8px 22px rgba(32, 27, 40, 0.2), inset 5px 0 rgba(255, 255, 255, 0.14);
-  font: 38px/1 var(--serif);
   transform: rotate(-1.4deg);
 }
 
-.home-featured-cover img,
-.home-book-cover img {
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: cover;
+.book-cover-type::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 7px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.22);
+  box-shadow: 2px 0 rgba(0, 0, 0, 0.13);
+}
+
+.book-cover-kicker {
+  color: rgba(255, 255, 255, 0.62);
+  font: 600 6.5px/1.2 var(--sans);
+  letter-spacing: 0.12em;
+}
+
+.book-cover-title {
+  display: -webkit-box;
+  margin-top: 25px;
+  overflow: hidden;
+  color: white;
+  font: 600 18px/1.24 var(--serif);
+  letter-spacing: 0.03em;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.book-cover-title.long {
+  font-size: 14px;
+  line-height: 1.32;
+}
+
+.book-cover-meta {
+  margin-top: auto;
+  color: rgba(255, 255, 255, 0.66);
+  font: 600 7px/1 var(--sans);
+  letter-spacing: 0.1em;
 }
 
 .home-eyebrow {
@@ -367,19 +410,19 @@ body {
   min-height: 38px;
   margin-top: 22px;
   padding: 9px 18px;
-  border: 1px solid #4d4559;
+  border: 1px solid #38485b;
   border-radius: 9px;
-  background: #4d4559;
+  background: #38485b;
   color: #fff;
   font: 13px/1 var(--sans);
   cursor: pointer;
-  box-shadow: 0 6px 18px rgba(50, 43, 60, 0.18);
+  box-shadow: 0 6px 18px rgba(39, 55, 72, 0.2);
   transition: transform 0.16s ease, background 0.16s ease;
 }
 
 .home-primary-action:hover {
   transform: translateY(-1px);
-  background: #61576f;
+  background: #46596e;
 }
 
 .home-rhythm {
@@ -398,23 +441,6 @@ body {
   font: 14px/1.75 var(--serif);
 }
 
-.home-activity-strip {
-  display: grid;
-  grid-template-columns: repeat(14, 1fr);
-  gap: 4px;
-}
-
-.home-activity-strip span {
-  height: 5px;
-  border-radius: 1px;
-  background: var(--paper-deep);
-}
-
-.home-activity-strip .level-1 { background: color-mix(in srgb, var(--lavender) 30%, var(--paper)); }
-.home-activity-strip .level-2 { background: color-mix(in srgb, var(--lavender) 50%, var(--paper)); }
-.home-activity-strip .level-3 { background: color-mix(in srgb, var(--lavender) 72%, var(--paper)); }
-.home-activity-strip .level-4 { background: var(--lavender); }
-
 .home-first-book {
   display: flex;
   flex-direction: column;
@@ -431,6 +457,89 @@ body {
   grid-template-columns: minmax(0, 1.04fr) minmax(300px, 0.96fr);
   gap: 46px;
   margin-top: 38px;
+}
+
+.home-activity {
+  margin-top: 30px;
+}
+
+.home-activity .home-section-heading {
+  margin-bottom: 10px;
+}
+
+.home-activity h2 {
+  color: var(--ink);
+  font: 600 17px/1.2 var(--serif);
+  letter-spacing: 0.04em;
+}
+
+.home-activity .home-section-heading > span {
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+
+.home-activity-frame {
+  overflow-x: auto;
+  padding: 14px 16px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--sheet);
+  scrollbar-width: none;
+}
+
+.home-activity-frame::-webkit-scrollbar { display: none; }
+
+.activity-grid {
+  min-width: 640px;
+  display: grid;
+  grid-template-columns: 14px repeat(52, minmax(7px, 1fr));
+  grid-template-rows: 12px repeat(7, minmax(7px, 1fr));
+  gap: 3px;
+}
+
+.grid-month-label,
+.grid-weekday {
+  color: var(--ink-faint);
+  font: 9px/1 var(--sans);
+}
+
+.grid-month-label {
+  align-self: start;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.grid-weekday {
+  display: grid;
+  place-items: center;
+}
+
+.grid-cell {
+  aspect-ratio: 1;
+  border-radius: 2px;
+  background: var(--activity-0);
+}
+
+.grid-cell.future { opacity: 0.35; }
+.grid-cell.level-1 { background: var(--activity-1); }
+.grid-cell.level-2 { background: var(--activity-2); }
+.grid-cell.level-3 { background: var(--activity-3); }
+.grid-cell.level-4 { background: var(--activity-4); }
+
+.home-activity-legend {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  color: var(--ink-faint);
+  font-size: 10px;
+}
+
+.home-activity-legend .grid-cell {
+  width: 9px;
+  height: 9px;
+  flex: none;
 }
 
 .home-section h2 {
@@ -477,16 +586,25 @@ body {
 }
 
 .home-book-cover {
+  --book-cover: #30475d;
+  position: relative;
   width: 34px;
   height: 44px;
   display: grid;
   place-items: center;
   overflow: hidden;
   border-radius: 2px 5px 5px 2px;
-  background: linear-gradient(145deg, #aba2bd, #746784);
+  background: var(--book-cover);
   color: white;
   font: 15px/1 var(--serif);
   box-shadow: 0 3px 8px rgba(35, 31, 42, 0.14);
+}
+
+.book-cover-monogram {
+  position: relative;
+  z-index: 1;
+  color: rgba(255, 255, 255, 0.9);
+  font: 600 14px/1 var(--serif);
 }
 
 .home-book-body {

@@ -237,6 +237,20 @@ function renderHome() {
     wrap.appendChild(buildEmptyDesk());
   }
 
+  // 保留完整年度格子：这是用户喜欢的学习反馈，而不是任务或排名。
+  const activitySection = document.createElement("section");
+  activitySection.className = "home-activity";
+  const activityHeading = document.createElement("div");
+  activityHeading.className = "home-section-heading";
+  const activityTitle = document.createElement("h2");
+  activityTitle.textContent = "学习足迹";
+  const activityMeta = document.createElement("span");
+  const activeDays = Object.keys(store.activity).length;
+  activityMeta.textContent = activeDays > 0 ? `${activeDays} 天有读过 · ${store.qa.length} 段理解` : "从第一天开始";
+  activityHeading.append(activityTitle, activityMeta);
+  activitySection.append(activityHeading, buildActivityGrid());
+  wrap.appendChild(activitySection);
+
   const homeGrid = document.createElement("div");
   homeGrid.className = "home-grid";
 
@@ -388,7 +402,7 @@ function buildContinueStage(book: BookRecord): HTMLElement {
   rhythmLabel.textContent = "最近的节奏";
   const summary = document.createElement("p");
   summary.textContent = studySummaryText();
-  aside.append(rhythmLabel, summary, buildActivityStrip());
+  aside.append(rhythmLabel, summary);
 
   stage.append(cover, copy, aside);
   return stage;
@@ -412,25 +426,79 @@ function buildEmptyDesk(): HTMLElement {
   return empty;
 }
 
-/// 最近四周的节奏提示。它是背景反馈，不是连续打卡目标。
-function buildActivityStrip(): HTMLDivElement {
+/// 最近一年的学习格子。完整保留用户熟悉的 52 周节奏，但不附带排名或任务。
+function buildActivityGrid(): HTMLDivElement {
+  const weeks = 52;
   const today = new Date();
-  const strip = document.createElement("div");
-  strip.className = "home-activity-strip";
-  strip.setAttribute("role", "img");
-  strip.setAttribute("aria-label", "最近四周的阅读与提问节奏");
-  for (let offset = 27; offset >= 0; offset--) {
-    const date = new Date(today);
-    date.setDate(today.getDate() - offset);
-    const key = dateKey(date);
-    const act = store.activity[key];
-    const score = act ? act.pages + act.questions * 5 : 0;
-    const mark = document.createElement("span");
-    mark.className = `level-${activityLevel(score)}`;
-    mark.title = `${key} · 阅读 ${act?.pages ?? 0} 页 · 提问 ${act?.questions ?? 0}`;
-    strip.appendChild(mark);
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+
+  const frame = document.createElement("div");
+  frame.className = "home-activity-frame";
+  const grid = document.createElement("div");
+  grid.className = "activity-grid";
+  grid.setAttribute("role", "img");
+  grid.setAttribute("aria-label", "最近一年的阅读与提问活动");
+
+  let previousMonth = -1;
+  const monthLabels: Array<{ column: number; month: number }> = [];
+  for (let week = weeks - 1; week >= 0; week--) {
+    const date = new Date(monday);
+    date.setDate(monday.getDate() - week * 7);
+    if (date.getMonth() === previousMonth) continue;
+    monthLabels.push({ column: weeks - week + 2, month: date.getMonth() + 1 });
+    previousMonth = date.getMonth();
   }
-  return strip;
+  for (let index = 0; index < monthLabels.length; index++) {
+    const current = monthLabels[index];
+    const next = monthLabels[index + 1];
+    // 最左侧常是上个月最后一周；离下个月太近时省略，避免两个标签挤在一起。
+    if (index === 0 && next && next.column - current.column < 4) continue;
+    const label = document.createElement("span");
+    label.className = "grid-month-label";
+    label.textContent = `${current.month}月`;
+    label.style.gridColumn = String(current.column);
+    label.style.gridRow = "1";
+    grid.appendChild(label);
+  }
+
+  for (const [day, label] of [[0, "一"], [2, "三"], [4, "五"]] as const) {
+    const weekday = document.createElement("span");
+    weekday.className = "grid-weekday";
+    weekday.textContent = label;
+    weekday.style.gridColumn = "1";
+    weekday.style.gridRow = String(day + 2);
+    grid.appendChild(weekday);
+  }
+
+  for (let week = weeks - 1; week >= 0; week--) {
+    for (let day = 0; day < 7; day++) {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() - week * 7 + day);
+      const key = dateKey(date);
+      const activity = store.activity[key];
+      const score = activity ? activity.pages + activity.questions * 5 : 0;
+      const cell = document.createElement("span");
+      cell.className = `grid-cell level-${activityLevel(score)}`;
+      if (date.getTime() > today.getTime()) cell.classList.add("future");
+      cell.style.gridColumn = String(weeks - week + 2);
+      cell.style.gridRow = String(day + 2);
+      cell.title = `${key} · 阅读 ${activity?.pages ?? 0} 页 · 提问 ${activity?.questions ?? 0}`;
+      grid.appendChild(cell);
+    }
+  }
+
+  const legend = document.createElement("div");
+  legend.className = "home-activity-legend";
+  legend.append(document.createTextNode("少"));
+  for (let level = 0; level <= 4; level++) {
+    const swatch = document.createElement("span");
+    swatch.className = `grid-cell level-${level}`;
+    legend.appendChild(swatch);
+  }
+  legend.append(document.createTextNode("多"));
+  frame.append(grid, legend);
+  return frame;
 }
 
 /// 连续学习天数：从今天（今天没学则从昨天）往前数连续有活动的天数。
@@ -487,18 +555,32 @@ function buildBookCard(book: BookRecord): HTMLButtonElement {
 }
 
 function hydrateBookCover(cover: HTMLElement, book: BookRecord) {
-  const initial = (bookName(book.name) || "书").slice(0, 1);
-  cover.textContent = initial;
-  void loadThumb(book.path, 1)
-    .then((b64) => {
-      if (!b64 || !cover.isConnected) return;
-      const img = document.createElement("img");
-      img.src = `data:image/jpeg;base64,${b64}`;
-      img.alt = "";
-      cover.textContent = "";
-      cover.appendChild(img);
-    })
-    .catch(() => undefined);
+  const title = bookName(book.name) || "未命名";
+  const palette = ["#30475d", "#594148", "#3f554c", "#4b4a62", "#6a4b36", "#354e57"];
+  let hash = 0;
+  for (const character of `${book.id}:${title}`) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+
+  cover.style.setProperty("--book-cover", palette[hash % palette.length]);
+  cover.classList.add("book-cover-type");
+  cover.setAttribute("aria-hidden", "true");
+  if (cover.classList.contains("home-featured-cover")) {
+    const kicker = document.createElement("span");
+    kicker.className = "book-cover-kicker";
+    kicker.textContent = "SATORI · READING";
+    const coverTitle = document.createElement("strong");
+    coverTitle.className = "book-cover-title";
+    coverTitle.textContent = title;
+    if (title.length > 18) coverTitle.classList.add("long");
+    const meta = document.createElement("span");
+    meta.className = "book-cover-meta";
+    meta.textContent = book.pageCount ? `${book.pageCount} PAGES` : "PDF EDITION";
+    cover.append(kicker, coverTitle, meta);
+  } else {
+    const monogram = document.createElement("span");
+    monogram.className = "book-cover-monogram";
+    monogram.textContent = title.slice(0, 1).toUpperCase();
+    cover.appendChild(monogram);
+  }
 }
 
 function plainTextExcerpt(markdown: string, maxLength: number): string {
