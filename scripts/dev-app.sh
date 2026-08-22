@@ -8,7 +8,7 @@ set -euo pipefail
 # rounded mask, identical to the release app. Like mimi-r's dev-app.sh, this
 # builds a RELEASE binary (the Tauri dev-mode runtime icon override, which
 # replaces the Dock icon with an unmasked square in debug builds, does not
-# run in release). See docs/plans/2026-08-16-tauri-dock-icon-design.md.
+# run in release). See docs/decisions/0014-development-app-shell.md.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"

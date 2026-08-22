@@ -11,7 +11,7 @@ description: 启动 satori Tauri 应用进行开发/查看时使用。当用户�
 
 ## 为什么
 
-- `npm run tauri dev`（debug 构建，`!custom-protocol`）会触发 Tauri 运行时 Dock 图标覆盖，把 Dock 图标替换成**未蒙版的方形图标**（macOS 不套圆角蒙版）。这是已知坑，详见 `docs/plans/2026-08-16-tauri-dock-icon-design.md`。
+- `npm run tauri dev`（debug 构建，`!custom-protocol`）会触发 Tauri 运行时 Dock 图标覆盖，把 Dock 图标替换成**未蒙版的方形图标**（macOS 不套圆角蒙版）。长期约束见 `docs/decisions/0014-development-app-shell.md`。
 - `./scripts/dev-app.sh` 使用 release + `custom-protocol` 的稳定签名壳，Dock 图标走 bundle icns + 系统蒙版，圆角正确；开发专用协议从仓库 `dist/` 读取最新前端，发布包仍使用内嵌资源。脚本自动选择唯一的 `Apple Development` 身份并在签名后校验 bundle ID。发布用的 `Developer ID Application` 只允许通过环境变量显式选择。
 - 普通 `tauri dev` 运行的是随重编译变化的 ad-hoc debug 二进制，会放大 macOS Keychain 授权问题。专用入口的启动与设置状态检查不解密 Key；真正测试或提问时才允许授权。
 

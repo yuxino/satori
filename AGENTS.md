@@ -9,6 +9,7 @@ Satori is a local-first macOS learning workspace. Its primary job is to help a l
 - Read `docs/brief.md`, `docs/status.md`, and relevant files in `docs/decisions/` before significant work.
 - Update `docs/status.md` at the end of each meaningful implementation session.
 - Record durable architectural choices in a numbered file under `docs/decisions/`.
+- Keep `docs/plans/` only for unfinished work. After implementation, move durable constraints into the brief, status, or an ADR and delete the plan; Git remains the history.
 - Keep this file short and limited to stable working rules.
 
 ## Scope and privacy
