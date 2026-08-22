@@ -1,5 +1,9 @@
 # 0006: Flow-protected reading mode
 
+## Status
+
+Superseded by [0010](0010-tauri-rewrite.md). The current reader preserves the flow-first principle, but none of the Swift types or layout state described here remain active.
+
 ## Context
 
 Satori 的核心不是让用户在多个面板之间管理学习，而是让用户在 PDF 中持续阅读，遇到理解阻力时就地获得帮助。现有工作区已经有 PDF、目录和学习面板，但没有一个明确的状态可以暂时移除课程侧栏和理解面板，保护连续阅读。

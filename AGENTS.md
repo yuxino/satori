@@ -25,5 +25,7 @@ Satori is a local-first macOS learning workspace. Its primary job is to help a l
 ## Engineering rules
 
 - Follow the Satori 3.0 stack: Tauri 2, TypeScript/Vite, PDF.js, Rust, and local JSON persistence. Keep dependencies small and justify new ones.
+- The legacy Swift app exists only in tag `legacy-swift`; do not restore its source or packaging resources to the working tree.
+- Run frontend builds before Rust checks because Vite rebuilds assets embedded by Tauri.
 - Add tests for new persistence and parsing behavior; visually check material UI changes.
 - Make small, focused commits. Do not stage unrelated files.

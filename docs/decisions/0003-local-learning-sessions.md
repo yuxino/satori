@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted - 2026-08-04
+Accepted in principle. The Swift-era storage shape was replaced by the Tauri store in [0010](0010-tauri-rewrite.md); local per-book history, bounded follow-ups, ephemeral images, and provider `store: false` remain active.
 
 ## Context
 

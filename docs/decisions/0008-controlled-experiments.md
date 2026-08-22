@@ -1,5 +1,9 @@
 # 0008: Controlled concept experiments
 
+## Status
+
+Superseded by [0010](0010-tauri-rewrite.md). Code execution and experiments were removed from the current product and must not be restored without a new decision.
+
 ## Context
 
 Satori should occasionally let a reader manipulate an idea from the PDF, but it

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted - 2026-08-03; AI provider portion superseded by [0002](0002-qwen-model-studio.md) on 2026-08-04
+Partially superseded: the Swift toolchain was replaced by [0010](0010-tauri-rewrite.md), and the single-provider assumption by [0011](0011-multi-provider-profiles.md). The local-first, macOS-only decision remains active.
 
 ## Context
 

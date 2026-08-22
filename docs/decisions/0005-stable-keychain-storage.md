@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted; development-signing behavior amended by ADR 0012
+Superseded by [0011](0011-multi-provider-profiles.md) and [0012](0012-development-keychain-authorization.md). The Qwen v2 entry is migration input only; current credentials are profile-scoped.
 
 ## Context
 

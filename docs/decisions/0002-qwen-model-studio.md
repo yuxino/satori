@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted - 2026-08-04
+Superseded by [0011](0011-multi-provider-profiles.md). Model Studio remains a built-in preset and the legacy default, but is no longer the only provider.
 
 ## Context
 

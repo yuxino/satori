@@ -1,5 +1,9 @@
 # 0007: Selection-first understanding
 
+## Status
+
+Implementation superseded by [0010](0010-tauri-rewrite.md). Selection-first page evidence remains a product principle; the Swift actions and models described below are historical.
+
 ## Context
 
 Satori 的价值不是让用户把书整理成一套学习管理数据，而是在阅读过程中遇到阻力时，尽快把一段原文理解清楚。此前 PDF 选区只有一个“问 AI”入口，选中文字会被拼进普通问题里；“运行”也和理解动作处在同一层，容易把阅读现场带向工具切换。

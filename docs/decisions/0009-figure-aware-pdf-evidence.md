@@ -1,5 +1,9 @@
 # 0009: Figure-aware PDF evidence
 
+## Status
+
+Superseded by the page-as-evidence model in [0010](0010-tauri-rewrite.md). The current app sends bounded rendered page evidence instead of maintaining this text-first figure detector.
+
 ## Context
 
 文字层可靠的 PDF 也可能把关键知识放在图、表或空间关系里。真实的操作系统教材第 187 页就是这种情况：前一页末尾写“磁盘的结构如图 6-2 所示”，下一页顶部才出现磁道、扇区、柱面的图。只发送文字时，模型能读到术语，却看不到读者正在看的结构图。
