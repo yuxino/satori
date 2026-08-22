@@ -10,7 +10,7 @@ Satori is a local-first macOS PDF learning workspace. Reading stays central: the
 
 - Stack: Tauri 2, Vite, TypeScript, PDF.js, Rust, and local JSON persistence. The removed Swift app is available only at tag `legacy-swift`.
 - Reader: single/spread layouts, per-book page and zoom restoration, outline navigation, text and scanned-page rendering, and VLM-based outline recovery.
-- Home: a monochrome `READING PASS` containing the current book, 52-week activity grid, bookshelf, and recent understandings. Book covers are sharp typographic covers rather than PDF thumbnails.
+- Home: a restrained monochrome editorial layout containing the current book, 52-week activity grid, bookshelf, and recent Q&A. Book covers are sharp typographic covers rather than PDF thumbnails; labels describe questions and answers without claiming the learner understood them.
 - Teacher: opening the page-side entry has no AI or Keychain side effects. A request starts only after an explicit question, page explanation, or region action; page images are ephemeral.
 - History: completed Q&A is stored locally per book, can reopen the source page, and sends only bounded recent text for follow-ups.
 - AI services: multiple named Model Studio, OpenAI, or custom OpenAI-compatible visual profiles. The active profile is explicit and never silently replaced.
@@ -19,7 +19,7 @@ Satori is a local-first macOS PDF learning workspace. Reading stays central: the
 
 ## Version and installation
 
-- Current release: `v3.3.0`, containing the reading-pass home, revised Satori mascot border, and repository cleanup.
+- Current release: `v3.3.0`, containing the refined monochrome home, revised Satori mascot border, and repository cleanup.
 - The signed release bundle is built for Apple silicon and published through GitHub Releases; the same build is installed locally at `/Applications/Satori.app`.
 - The previous local application bundle is kept as a timestamped backup in `/Applications`.
 

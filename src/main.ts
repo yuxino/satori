@@ -194,26 +194,17 @@ function renderHome() {
   const wrap = document.createElement("div");
   wrap.className = "home-wrap";
 
-  // 阅读凭证题头：品牌与票号承担识别，设置使用明确的齿轮图标。
+  // 首页题头只保留字标与明确的设置入口，避免主题化装饰压过阅读内容。
   const header = document.createElement("header");
   header.className = "home-masthead";
   const brand = document.createElement("div");
   brand.className = "home-brand";
   const title = document.createElement("h1");
   title.textContent = "satori";
-  const sub = document.createElement("p");
-  sub.textContent = "READING PASS · PRIVATE EDITION";
-  brand.append(title, sub);
+  brand.appendChild(title);
 
   const headerActions = document.createElement("div");
   headerActions.className = "home-header-actions";
-  const passMeta = document.createElement("div");
-  passMeta.className = "home-pass-meta";
-  const localLabel = document.createElement("span");
-  localLabel.textContent = "LOCAL FIRST";
-  const passNumber = document.createElement("strong");
-  passNumber.textContent = `NO. ${homePassNumber()}`;
-  passMeta.append(localLabel, passNumber);
   const settingsBtn = document.createElement("button");
   settingsBtn.className = "home-settings-action";
   settingsBtn.type = "button";
@@ -221,7 +212,7 @@ function renderHome() {
   settingsBtn.title = "设置 AI 服务";
   settingsBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V20.3h-3v-.08a1.7 1.7 0 0 0-1.04-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-2.12-2.12.06-.06A1.7 1.7 0 0 0 7 15a1.7 1.7 0 0 0-1.56-1.04H5.3v-3h.14A1.7 1.7 0 0 0 7 9.92a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.12-2.12.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 11.7 4.7V4.6h3v.1a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.12 2.12-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.04h.14v3h-.14A1.7 1.7 0 0 0 19.4 15Z"/></svg>`;
   settingsBtn.addEventListener("click", () => openSettings());
-  headerActions.append(passMeta, settingsBtn);
+  headerActions.appendChild(settingsBtn);
   if (currentDoc) {
     const closeBtn = document.createElement("button");
     closeBtn.className = "home-close";
@@ -249,7 +240,7 @@ function renderHome() {
   activityTitle.textContent = "学习足迹";
   const activityMeta = document.createElement("span");
   const activeDays = Object.keys(store.activity).length;
-  activityMeta.textContent = activeDays > 0 ? `${activeDays} 天有读过 · ${store.qa.length} 段理解` : "从第一天开始";
+  activityMeta.textContent = activeDays > 0 ? `${activeDays} 天有读过 · ${store.qa.length} 次提问` : "从第一天开始";
   activityHeading.append(activityTitle, activityMeta);
   activitySection.append(activityHeading, buildActivityGrid());
   wrap.appendChild(activitySection);
@@ -284,7 +275,7 @@ function renderHome() {
   }
   homeGrid.appendChild(booksSection);
 
-  // 理解痕迹：问题之外也露出一行答案，让记录有学习价值。
+  // 最近问答：同时露出问题与回答摘要，但不替用户判断是否已经理解。
   const recent = store.qa
     .slice()
     .sort((a, b) => b.ts - a.ts)
@@ -292,7 +283,7 @@ function renderHome() {
   const qaSection = document.createElement("section");
   qaSection.className = "home-section home-traces";
   const qaTitle = document.createElement("h2");
-  qaTitle.textContent = "最近弄懂的";
+  qaTitle.textContent = "最近问过";
   qaSection.appendChild(qaTitle);
   if (recent.length > 0) {
     const qaList = document.createElement("div");
@@ -323,7 +314,7 @@ function renderHome() {
   } else {
     const empty = document.createElement("div");
     empty.className = "home-empty";
-    empty.textContent = "你问过的问题，会在这里变成可以回看的理解痕迹。";
+    empty.textContent = "问过的问题和回答会留在这里，方便之后回看。";
     qaSection.appendChild(empty);
   }
   homeGrid.appendChild(qaSection);
@@ -345,16 +336,6 @@ function bookProgress(book: BookRecord): { percent: number; detail: string } {
   };
 }
 
-function homePassNumber(): string {
-  const seed = `${store.books.map((book) => book.id).join(":")}:${store.qa.length}`;
-  let hash = 2166136261;
-  for (const character of seed) {
-    hash ^= character.charCodeAt(0);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `SR-${String(Math.abs(hash) % 1000000).padStart(6, "0")}`;
-}
-
 function featuredBook(): BookRecord | null {
   if (currentBook) return currentBook;
   const latestQA = store.qa.slice().sort((a, b) => b.ts - a.ts)[0];
@@ -372,21 +353,13 @@ function studySummaryText(): string {
   }
   const streak = computeStreak();
   if (streak > 0) return `最近连续读了 ${streak} 天。今天从一页开始就好。`;
-  if (store.qa.length > 0) return `这里留着 ${store.qa.length} 段理解痕迹，随时可以回来接着想。`;
+  if (store.qa.length > 0) return `这里留着 ${store.qa.length} 次问答，随时可以回来接着想。`;
   return "不设任务，也不催进度。只从眼前这一页开始。";
 }
 
 function buildContinueStage(book: BookRecord): HTMLElement {
   const stage = document.createElement("section");
   stage.className = "home-continue";
-
-  const ticketMark = document.createElement("div");
-  ticketMark.className = "home-ticket-mark";
-  const ticketType = document.createElement("span");
-  ticketType.textContent = "CURRENT READING · ADMIT ONE";
-  const ticketNumber = document.createElement("strong");
-  ticketNumber.textContent = `PASS ${homePassNumber()}`;
-  ticketMark.append(ticketType, ticketNumber);
 
   const cover = document.createElement("div");
   cover.className = "home-featured-cover";
@@ -403,7 +376,7 @@ function buildContinueStage(book: BookRecord): HTMLElement {
   const meta = document.createElement("p");
   meta.className = "home-continue-meta";
   const qCount = store.qa.filter((entry) => entry.book_id === book.id).length;
-  meta.textContent = `${progress.detail} · 留下 ${qCount} 段理解`;
+  meta.textContent = `${progress.detail} · 问过 ${qCount} 次`;
   const bar = document.createElement("div");
   bar.className = "home-continue-progress";
   bar.setAttribute("aria-label", `阅读进度 ${progress.percent}%`);
@@ -427,7 +400,7 @@ function buildContinueStage(book: BookRecord): HTMLElement {
   footer.append(button, progressLabel);
 
   copy.append(note, bar, footer);
-  stage.append(ticketMark, cover, copy);
+  stage.append(cover, copy);
 
   const latestUnderstanding = store.qa
     .filter((entry) => entry.book_id === book.id)
@@ -437,15 +410,15 @@ function buildContinueStage(book: BookRecord): HTMLElement {
     const trace = document.createElement("button");
     trace.type = "button";
     trace.className = "home-last-trace";
-    trace.title = `回到第 ${latestUnderstanding.page} 页查看这段理解`;
+    trace.title = `回到第 ${latestUnderstanding.page} 页查看这次问答`;
     const traceLabel = document.createElement("span");
     traceLabel.className = "home-eyebrow";
-    traceLabel.textContent = "上次弄懂";
+    traceLabel.textContent = "上次提问";
     const traceQuestion = document.createElement("strong");
     traceQuestion.textContent = latestUnderstanding.question;
     const traceMeta = document.createElement("span");
     traceMeta.className = "home-last-trace-meta";
-    traceMeta.textContent = `第 ${latestUnderstanding.page} 页 · 回看这段理解`;
+    traceMeta.textContent = `第 ${latestUnderstanding.page} 页 · 回看这次问答`;
     trace.append(traceLabel, traceQuestion, traceMeta);
     trace.addEventListener("click", async () => {
       await openBook(book);
@@ -592,7 +565,7 @@ function buildBookCard(book: BookRecord): HTMLButtonElement {
   meta.className = "home-book-meta";
   const qCount = store.qa.filter((q) => q.book_id === book.id).length;
   const progress = bookProgress(book);
-  meta.textContent = `${progress.detail} · ${qCount} 段理解`;
+  meta.textContent = `${progress.detail} · ${qCount} 次提问`;
   body.append(name, meta);
 
   const hint = document.createElement("span");
@@ -1290,7 +1263,7 @@ function buildSheetHeader(): HTMLDivElement {
   const heading = document.createElement("div");
   heading.className = "sheet-heading";
   const title = document.createElement("strong");
-  title.textContent = sheetHistoryMode ? "理解痕迹" : "问书";
+  title.textContent = sheetHistoryMode ? "问答记录" : "问书";
   const context = document.createElement("span");
   const contextPage = !sheetHistoryMode && sheetQA ? sheetQA.page : currentPage;
   const chapter = chapterLabelForPage(contextPage);
