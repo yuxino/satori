@@ -19,9 +19,11 @@ PDF の教科書を読むための macOS アプリです。主役は常にペー
 - **AI サービスを選択**：Alibaba Cloud Model Studio、OpenAI、OpenAI-compatible のクラウド・ローカル接続を複数保存し、使用する接続とモデルをいつでも切り替えられます。
 - **ローカル保存**：本棚、読書位置、過去の質疑は Mac 内に保存。API Key は macOS Keychain にのみ保存されます。
 
-## はじめに
+## ダウンロード
 
-macOS 14+ が必要です。
+macOS 14+ と Apple シリコン搭載 Mac が必要です。[GitHub Releases](https://github.com/yuxino/satori/releases/latest) から最新版をダウンロードしてください。
+
+現在のビルドは Apple の公証を受けていません。初回起動時は Control キーを押しながら Satori をクリックし、**開く**を選んでもう一度確認してください。ソースから実行することもできます。
 
 ```bash
 npm install

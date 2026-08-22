@@ -12,7 +12,7 @@
 - 工具链：Tauri 2 + Vite + TS + PDF.js（决策见 `docs/decisions/0010-tauri-rewrite.md`）
 - 存储：本地 JSON（Application Support）；API Key 只进 macOS Keychain
 - AI 服务：多个命名 profile；内置百炼与 OpenAI，也可配置 OpenAI-compatible 云端/本地服务。百炼 `qwen3-vl-plus` 仍是旧用户默认；远程请求 `store: false`
-- 版本：Git tag `v3.0.0`（Tauri 重写主线，main 分支）；旧 Swift 版 tag `legacy-swift`
+- 版本：`v3.1.0`（多 AI 服务、学习体验与整体 UI 重设计）；旧 Swift 版 tag `legacy-swift`
 
 ## Completed so far
 

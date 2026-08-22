@@ -19,9 +19,11 @@
 - **自选 AI 服务**：可以同时配置多份阿里云百炼、OpenAI 或 OpenAI-compatible 云端与本地服务，并随时切换当前连接和模型。
 - **本地保存**：书库、阅读位置和过往问答保存在 Mac 上；API Key 只存入 macOS 钥匙串。
 
-## 开始使用
+## 下载
 
-需要 macOS 14+。
+需要 macOS 14+ 和 Apple 芯片 Mac。请从 [GitHub Releases](https://github.com/yuxino/satori/releases/latest) 下载最新版本。
+
+当前版本尚未经过 Apple 公证。首次启动时，请按住 Control 点击 Satori，选择「打开」，再确认一次。也可以从源码运行：
 
 ```bash
 npm install

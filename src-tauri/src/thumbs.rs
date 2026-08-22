@@ -37,7 +37,12 @@ pub fn load_thumb(app: AppHandle, path: String, page: usize) -> Result<Option<St
 
 /// 写入缩略图缓存（JPEG base64）。
 #[tauri::command]
-pub fn save_thumb(app: AppHandle, path: String, page: usize, jpeg_base64: String) -> Result<(), String> {
+pub fn save_thumb(
+    app: AppHandle,
+    path: String,
+    page: usize,
+    jpeg_base64: String,
+) -> Result<(), String> {
     let bytes = base64_decode(&jpeg_base64).map_err(|e| format!("解码缩略图失败：{e}"))?;
     let file = thumbs_dir(&app)?.join(cache_key(&path, page));
     fs::write(&file, &bytes).map_err(|e| format!("写入缩略图缓存失败：{e}"))

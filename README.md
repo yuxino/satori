@@ -19,9 +19,11 @@ A macOS app for reading PDF textbooks. The page stays at the center; when a para
 - **Choose your AI service** — keep multiple Alibaba Cloud Model Studio, OpenAI, or OpenAI-compatible cloud and local connections, then switch the active connection and model at any time.
 - **Stored locally** — your library, reading position, and past Q&A stay on your Mac; API keys are stored only in macOS Keychain.
 
-## Getting started
+## Download
 
-Requires macOS 14+.
+Requires macOS 14+ and an Apple silicon Mac. Download the latest build from [GitHub Releases](https://github.com/yuxino/satori/releases/latest).
+
+The current build is not Apple-notarized. On first launch, Control-click Satori, choose **Open**, then confirm once. To run from source instead:
 
 ```bash
 npm install
