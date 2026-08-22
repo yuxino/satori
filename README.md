@@ -24,11 +24,11 @@ Requires macOS 14+.
 
 ```bash
 npm install
-npx tauri dev
+npm run app
 ```
 
 ## Privacy
 
-Books and history stay on your Mac. Explanations are generated on demand by Alibaba Cloud Model Studio (Qwen) from the current page image.
+Books and history stay on your Mac. Explanations are generated on demand by the AI service you configure from the relevant page images.
 
 [MIT](LICENSE) © 2026 yuxino

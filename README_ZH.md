@@ -24,11 +24,11 @@
 
 ```bash
 npm install
-npx tauri dev
+npm run app
 ```
 
 ## 隐私
 
-书和阅读历史都存在本机。解释由阿里云百炼（Qwen）基于当前页图像按需生成。
+书和阅读历史都存在本机。解释由你配置的 AI 服务根据相关书页图像按需生成。
 
 [MIT](LICENSE) © 2026 yuxino

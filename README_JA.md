@@ -24,11 +24,11 @@ macOS 14+ が必要です。
 
 ```bash
 npm install
-npx tauri dev
+npm run app
 ```
 
 ## プライバシー
 
-本と履歴はすべてローカルに保存されます。説明は Alibaba Cloud Model Studio（Qwen）が現在のページ画像からオンデマンドで生成します。
+本と履歴はすべてローカルに保存されます。説明は、設定した AI サービスが関連するページ画像からオンデマンドで生成します。
 
 [MIT](LICENSE) © 2026 yuxino

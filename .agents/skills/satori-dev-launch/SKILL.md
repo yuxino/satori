@@ -7,22 +7,24 @@ description: 启动 satori Tauri 应用进行开发/查看时使用。当用户�
 
 ## 核心规则
 
-启动 satori 应用用于开发或查看时，**必须**用 `./scripts/dev-app.sh`，**不要**用 `npm run tauri dev`。
+启动 satori 应用用于开发或查看时，**必须**用 `npm run app`（内部调用 `./scripts/dev-app.sh`），**不要**用 `npm run tauri dev`。
 
 ## 为什么
 
 - `npm run tauri dev`（debug 构建，`!custom-protocol`）会触发 Tauri 运行时 Dock 图标覆盖，把 Dock 图标替换成**未蒙版的方形图标**（macOS 不套圆角蒙版）。这是已知坑，详见 `docs/plans/2026-08-16-tauri-dock-icon-design.md`。
-- `./scripts/dev-app.sh` 用与 `tauri build` 完全相同的构建路径（release + `custom-protocol`，该 feature 已写死在 `src-tauri/Cargo.toml`），Dock 图标走 bundle icns + 系统蒙版，圆角正确；并打包成 `satori-dev.app` 用 `mimi Local Development` 证书签名（与旧版钥匙串 ACL 匹配，Key 迁移可读）。
+- `./scripts/dev-app.sh` 用与 `tauri build` 相同的 release + `custom-protocol` 路径，Dock 图标走 bundle icns + 系统蒙版，圆角正确；脚本自动选择唯一的 `Apple Development` 身份并在签名后校验 bundle ID。发布用的 `Developer ID Application` 只允许通过环境变量显式选择。
+- 普通 `tauri dev` 运行的是随重编译变化的 ad-hoc debug 二进制，会放大 macOS Keychain 授权问题。专用入口的启动与设置状态检查不解密 Key；真正测试或提问时才允许授权。
 
 ## 使用步骤
 
 ```bash
-./scripts/dev-app.sh
+npm run app
 ```
 
-- 会自动 pkill 旧 dev 实例、`npm run build` 前端、release 构建（Rust）、组装并启动 `src-tauri/target/release/satori-dev.app`。
+- 会自动停止旧 dev 实例、构建前端与 release Rust、组装并启动 `src-tauri/target/release/satori-dev.app`。
 - 首次或改动 Rust 时构建较慢（约 1 分钟），建议后台运行并等待输出。
-- 改前端后**必须重跑 `./scripts/dev-app.sh`**——release 构建加载的是打包进二进制的 `dist/`，没有热更新。
+- 改前端后**必须重跑 `npm run app`**——release 构建加载的是打包进二进制的 `dist/`，没有热更新。
+- 可用 `SATORI_CODESIGN_IDENTITY` 明确指定带 Team ID 的 Apple 签名身份；发现多个 `Apple Development` 身份时脚本会要求显式选择。若机器只有本地自签证书，打开应用和查看连接状态不会弹授权，但任何改变应用内容的前端或 Rust 重建后，每个已保存连接在首次主动使用 AI 时仍可能需要一次 macOS 授权；安装 Apple Development 身份后可跨重建稳定授权。
 
 ## 打包 release（仅当用户明确要求）
 
@@ -37,9 +39,9 @@ npx tauri build
 - 前端类型检查：`npx tsc --noEmit`
 - 前端构建：`npx vite build`
 - Rust 检查：`cd src-tauri && cargo check`
-- 全量构建入口：`./scripts/dev-app.sh`（内部先 `npm run build` 再 cargo）
+- 全量构建入口：`npm run app`（内部先 `npm run build` 再 cargo）
 
 ## 注意
 
-- API Key 开发兜底：`~/Library/Application Support/com.yuxino.satori/satori/dev-api-key`（纯文本），存在时 App 完全不碰钥匙串。测试阶段往里写一次即可，避免每次启动弹钥匙串。
+- 不允许使用明文文件或环境变量保存 API Key。开发构建与发布构建都只使用 macOS Keychain。
 - 窗口标题不带 "(dev)" 标记（与 mimi 不同），Dock 图标即唯一区分。

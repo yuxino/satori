@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted; development-signing behavior amended by ADR 0012
 
 ## Context
 

@@ -19,7 +19,8 @@
 - **多 AI 服务配置（2026-08-22）**：设置页从“单个百炼 Key + 模型”升级为 master-detail 多连接管理。可同时保存多份百炼、OpenAI 或自定义 OpenAI-compatible 连接；配置名称、服务地址、模型、鉴权开关分别持久化，并明确“保存”和“设为当前”是两个动作。内置服务固定官方地址，自定义远端必须 HTTPS，本机 loopback 可用 HTTP；支持无需鉴权的本地/远程兼容服务
 - **设置 UI 重做**：780×560 macOS 偏好设置式界面，左侧连接列表、右侧编辑器、固定底部操作栏；支持添加/删除、Key 替换/移除、图片能力连接测试、字段错误、加载/成功/失败状态、未保存更改确认。已实机检查主窗口尺寸、内容滚动、底栏可见性、键盘焦点、Esc 和确认卡片；背景 inert、焦点环、深色变量、窄窗与减少动态样式齐全
 - **多 provider 安全边界**：AI 命令只接收 profile ID，Rust 从 Store 读取唯一档案；Keychain secret 绑定 provider + 规范化 endpoint + auth scope，关闭鉴权时完全不读取 Key；禁止重定向、限制响应大小并脱敏服务端错误。删除默认 Key 会清理旧 Qwen 条目并写 Keychain tombstone；损坏/未来版本 Store 不再静默回退百炼
-- **旧配置无感迁移**：旧 `settings.model_id` 迁入确定性百炼 profile；旧 v3/v2 Keychain 或开发 Key 只允许绑定官方百炼 scope。Store 写入串行且原子化，保存前固定快照，profile ID/active ID/版本均验证。Rust 现有 22 项迁移、URL、请求体、SSE、错误与安全单测全部通过
+- **开发模式授权治理**：启动、设置页和状态刷新改为 Keychain existence-only 查询，不再解密 Key；自动目录恢复禁止弹系统授权，用户主动提问/测试后按 profile + scope + generation 缓存在 Rust 进程内。generation 同时绑定 Keychain envelope 与非敏感 sidecar，多实例通过本地锁串行保存/删除，旧缓存不会跨连接变更复用。`npm run app` 只自动选择唯一的 Apple Development 身份并校验结果；本地自签环境会明确提示每个连接首次主动使用的限制。已用两个不同 CDHash 的临时条目与正式 App 验证启动/设置无 XARA 弹窗
+- **旧配置无感迁移**：旧 `settings.model_id` 迁入确定性百炼 profile；旧 v3/v2 Keychain 或开发 Key 只允许绑定官方百炼 scope。Store 写入串行且原子化，保存前固定快照，profile ID/active ID/版本均验证。Rust 现有 23 项迁移、URL、请求体、SSE、错误、缓存与安全单测全部通过
 
 - **首页 / 总览**：启动落在首页（不再直接跳进上次的书）。GitHub 风格学习活动热力格子图（最近 26 周，薰衣草色阶按当天阅读页数+提问量分级）+ 统计卡片（学习天数/阅读页数/提问次数）+ 我的书卡片（进度条，`BookRecord.pageCount` 打开时记录）+ 最近提问列表；书菜单里「总览 · 学习活动」可随时返回。活动日志 `Store.activity`（日期 → pages/questions），翻页计数由阅读位置持久化防抖落盘、提问计数随保存问答落盘
 - **AI 交互打磨**：悬浮球重设计（渐变圆 + 白色四角星图标 + 悬停上浮 + 悬停浮现「问这一页」标签）、讲解卡片顶部渐变 accent 条、流式回答前「正在讲…」三点动画、发送按钮悬停反馈、框选选区圆角柔边
@@ -49,6 +50,7 @@
 - **Tauri dev 模式 Dock 图标是方形**：必须走 release + `custom-protocol`（详见 `docs/plans/2026-08-16-tauri-dock-icon-design.md`）
 - **设置确认不要用 `window.confirm`**：当前 Tauri capability 不允许 `plugin:dialog|confirm`，会触发致命错误；设置页使用自己的可访问确认卡片
 - **AI 命令不能信任 WebView 传来的完整 profile**：命令只收 ID，Rust 从 Store 解析；否则已保存 Key 可能被借给另一个自定义地址
+- **自签证书不能让 Keychain 授权跨重建稳定**：没有 Apple Team ID 时，macOS partition 按精确 CDHash 授权；普通本地证书的 designated requirement 稳定也不够。启动/查看连接状态只做 existence-only 查询；完整跨重建免弹需 Apple Development 身份（或显式选择带 Team ID 的其他 Apple 身份）
 - **前端构建与 Rust 测试不要并行**：Vite 会清理并重建 `dist/`，同时运行会让 Tauri `generate_context!` 短暂找不到嵌入资源；先 `npm run build`，再跑 Cargo
 - **白屏**：`custom-protocol` 决定前端资源是否嵌入二进制；dev-app.sh 用 `--features` 传可能不生效，已直接写进 Cargo.toml
 - **滚动容器**：绝对定位页面不撑起滚动高度，必须加普通流式 spacer 撑高
@@ -58,7 +60,7 @@
 - **扫描件解码**：JBIG2/JPEG2000/ICC 页需要 wasm 解码器。**wasm 不能走 Vite 的 `?url` 导入**——`?url` 会加内容哈希（`jbig2-xxx.wasm`），而 pdf.js 按固定名请求 `{wasmUrl}jbig2.wasm`，哈希名 404 → JBIG2 解码静默失败 → 整页渲染空白（system.pdf 292/294 页全白，模型答「这页是空白的」）。已把解码器放 `public/`（原样拷到 dist 根、固定文件名），`wasmUrl = "/"`。JBig2Error 修复后 software.pdf 正常是因为它全是 DCTDecode（JPEG），浏览器原生解码、不依赖 wasm
 - **serde 字段名**：`OutlineResult.printed_page` 用 `#[serde(rename="page", alias="printed_page")]`，前端按 `page` 读，否则全是 NaN
 - **Tauri 命令宏名冲突**：`outline_trace` 之类命令定义在 lib.rs 顶层会与同名宏冲突，需放模块里（qwen.rs）再 `qwen::xxx` 注册
-- 旧钥匙串条目 ACL 只信任旧签名；新 App 用同证书同 bundle id 签名即可读
+- 旧钥匙串条目首次切换到新的 Apple Team 签名时可能需要一次“始终允许”或重新保存；不要通过放宽 ACL、明文文件或 `/usr/bin/security` 代读绕过
 - Rust 侧调试日志：`debug_log()` 写 `~/Library/Application Support/com.yuxino.satori/debug.log`（release 下 stdout 不可见）；保留错误路径日志，成功路径不写
 
 ## Next milestone
