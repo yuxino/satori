@@ -196,77 +196,68 @@ function renderHome() {
   const wrap = document.createElement("div");
   wrap.className = "home-wrap";
 
-  // 标题 + （正在读书时）返回按钮
-  const header = document.createElement("div");
-  header.className = "home-header";
+  // 书房题头：品牌只占一行，操作留给右侧。
+  const header = document.createElement("header");
+  header.className = "home-masthead";
   const brand = document.createElement("div");
   brand.className = "home-brand";
   const logo = document.createElement("span");
   logo.className = "home-logo";
-  logo.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5l2.4 7.1 7.1 2.4-7.1 2.4L12 21.5l-2.4-7.1-7.1-2.4 7.1-2.4z" /></svg>`;
+  logo.textContent = "悟";
   const title = document.createElement("h1");
   title.textContent = "satori";
-  brand.append(logo, title);
   const sub = document.createElement("p");
-  sub.textContent = "读懂你手上的 PDF";
-  header.append(brand, sub);
+  sub.textContent = "一个安静的 PDF 学习书房";
+  const brandCopy = document.createElement("div");
+  brandCopy.append(title, sub);
+  brand.append(logo, brandCopy);
+
+  const headerActions = document.createElement("div");
+  headerActions.className = "home-header-actions";
+  const settingsBtn = document.createElement("button");
+  settingsBtn.className = "home-quiet-action";
+  settingsBtn.textContent = "AI 服务";
+  settingsBtn.addEventListener("click", () => openSettings());
+  headerActions.appendChild(settingsBtn);
   if (currentDoc) {
     const closeBtn = document.createElement("button");
     closeBtn.className = "home-close";
-    closeBtn.textContent = "× 返回阅读";
+    closeBtn.textContent = "返回书页";
     closeBtn.title = "回到刚才读的位置";
     closeBtn.addEventListener("click", hideHome);
-    header.appendChild(closeBtn);
+    headerActions.appendChild(closeBtn);
   }
+  header.append(brand, headerActions);
   wrap.appendChild(header);
 
-  // 学习活动热力格子图
-  const activitySection = document.createElement("section");
-  activitySection.className = "home-section";
-  const activityTitle = document.createElement("h2");
-  activityTitle.textContent = "学习活动";
-  activitySection.appendChild(activityTitle);
-
-  // 统计行
-  const stats = document.createElement("div");
-  stats.className = "home-stats";
-  const days = Object.keys(store.activity).length;
-  const pages = Object.values(store.activity).reduce((s, a) => s + a.pages, 0);
-  const qs = store.qa.length;
-  stats.append(
-    statChip(`${computeStreak()}`, "连续学习（天）"),
-    statChip(`${days}`, "学习天数"),
-    statChip(`${pages}`, "阅读页数"),
-    statChip(`${qs}`, "提问次数"),
-  );
-  activitySection.appendChild(stats);
-
-  activitySection.appendChild(buildActivityGrid());
-
-  // 图例：少 → 多
-  const legend = document.createElement("div");
-  legend.className = "home-legend";
-  legend.append(document.createTextNode("少"));
-  for (let lv = 0; lv <= 4; lv++) {
-    const swatch = document.createElement("span");
-    swatch.className = `grid-cell level-${lv}`;
-    legend.appendChild(swatch);
+  const featured = featuredBook();
+  if (featured) {
+    wrap.appendChild(buildContinueStage(featured));
+  } else {
+    wrap.appendChild(buildEmptyDesk());
   }
-  legend.append(document.createTextNode("多"));
-  activitySection.appendChild(legend);
-  wrap.appendChild(activitySection);
 
-  // 我的书
+  const homeGrid = document.createElement("div");
+  homeGrid.className = "home-grid";
+
+  // 书架：纵向书脊，不再做卡片矩阵。
   const booksSection = document.createElement("section");
-  booksSection.className = "home-section";
+  booksSection.className = "home-section home-library";
   const booksTitle = document.createElement("h2");
-  booksTitle.textContent = "我的书";
-  booksSection.appendChild(booksTitle);
+  booksTitle.textContent = "书架";
+  const addBtn = document.createElement("button");
+  addBtn.className = "home-section-action";
+  addBtn.textContent = "打开 PDF…";
+  addBtn.addEventListener("click", () => void pickAndOpenBook());
+  const booksHeading = document.createElement("div");
+  booksHeading.className = "home-section-heading";
+  booksHeading.append(booksTitle, addBtn);
+  booksSection.appendChild(booksHeading);
 
   if (store.books.length === 0) {
     const empty = document.createElement("div");
     empty.className = "home-empty";
-    empty.textContent = "还没有书。打开一本 PDF，开始读懂它。";
+    empty.textContent = "书架还是空的。打开一本 PDF，它会留在这里。";
     booksSection.appendChild(empty);
   } else {
     const list = document.createElement("div");
@@ -274,117 +265,172 @@ function renderHome() {
     for (const book of store.books) list.appendChild(buildBookCard(book));
     booksSection.appendChild(list);
   }
-  const openBtn = document.createElement("button");
-  openBtn.className = "open-book home-open";
-  openBtn.textContent = store.books.length === 0 ? "打开一本书" : "添加一本书";
-  openBtn.addEventListener("click", () => void pickAndOpenBook());
-  booksSection.appendChild(openBtn);
-  wrap.appendChild(booksSection);
+  homeGrid.appendChild(booksSection);
 
-  // 最近提问
+  // 理解痕迹：问题之外也露出一行答案，让记录有学习价值。
   const recent = store.qa
     .slice()
     .sort((a, b) => b.ts - a.ts)
-    .slice(0, 5);
+    .slice(0, 4);
+  const qaSection = document.createElement("section");
+  qaSection.className = "home-section home-traces";
+  const qaTitle = document.createElement("h2");
+  qaTitle.textContent = "最近弄懂的";
+  qaSection.appendChild(qaTitle);
   if (recent.length > 0) {
-    const qaSection = document.createElement("section");
-    qaSection.className = "home-section";
-    const qaTitle = document.createElement("h2");
-    qaTitle.textContent = "最近提问";
-    qaSection.appendChild(qaTitle);
     const qaList = document.createElement("div");
     qaList.className = "home-recent";
     for (const entry of recent) {
       const book = store.books.find((b) => b.id === entry.book_id);
       const item = document.createElement("button");
       item.className = "home-recent-item";
-      const badge = document.createElement("span");
-      badge.className = "home-recent-badge";
-      badge.textContent = `${book?.name.replace(/\.pdf$/i, "") ?? "书"} · P${entry.page}`;
+      const meta = document.createElement("span");
+      meta.className = "home-recent-meta";
+      meta.textContent = `${bookName(book?.name ?? "书")} · 第 ${entry.page} 页`;
       const q = document.createElement("span");
       q.className = "home-recent-q";
-      q.textContent = entry.question.length > 40 ? `${entry.question.slice(0, 40)}…` : entry.question;
-      item.append(badge, q);
-      item.addEventListener("click", () => {
+      q.textContent = entry.question;
+      const answer = document.createElement("span");
+      answer.className = "home-recent-answer";
+      answer.textContent = plainTextExcerpt(entry.answer, 74);
+      item.append(meta, q, answer);
+      item.addEventListener("click", async () => {
         const target = store.books.find((b) => b.id === entry.book_id);
-        if (target) void openBook(target);
+        if (!target) return;
+        await openBook(target);
+        await reopenQA(entry);
       });
       qaList.appendChild(item);
     }
     qaSection.appendChild(qaList);
-    wrap.appendChild(qaSection);
+  } else {
+    const empty = document.createElement("div");
+    empty.className = "home-empty";
+    empty.textContent = "你问过的问题，会在这里变成可以回看的理解痕迹。";
+    qaSection.appendChild(empty);
   }
+  homeGrid.appendChild(qaSection);
 
+  wrap.appendChild(homeGrid);
   homeView.appendChild(wrap);
 }
 
-function statChip(value: string, label: string): HTMLDivElement {
-  const chip = document.createElement("div");
-  chip.className = "home-stat";
-  const v = document.createElement("b");
-  v.textContent = value;
-  const l = document.createElement("span");
-  l.textContent = label;
-  chip.append(v, l);
-  return chip;
+function bookName(name: string): string {
+  return name.replace(/\.pdf$/i, "");
 }
 
-/// 最近一年的 GitHub 风格热力格子图（52 列 × 7 行，铺满容器，格子正方形）。
-function buildActivityGrid(): HTMLDivElement {
-  const weeks = 52;
+function bookProgress(book: BookRecord): { percent: number; detail: string } {
+  const total = book.pageCount;
+  const percent = total && total > 0 ? Math.min(100, Math.round((book.last_page / total) * 100)) : 0;
+  return {
+    percent,
+    detail: total ? `第 ${book.last_page} / ${total} 页` : `读到第 ${book.last_page} 页`,
+  };
+}
+
+function featuredBook(): BookRecord | null {
+  if (currentBook) return currentBook;
+  const latestQA = store.qa.slice().sort((a, b) => b.ts - a.ts)[0];
+  return store.books.find((book) => book.id === latestQA?.book_id) ?? store.books[0] ?? null;
+}
+
+function studySummaryText(): string {
+  const today = store.activity[todayKey()];
+  if (today && (today.pages > 0 || today.questions > 0)) {
+    const parts = [];
+    if (today.pages > 50) parts.push("读过一阵");
+    else if (today.pages > 0) parts.push(`翻过 ${today.pages} 页`);
+    if (today.questions > 0) parts.push(`问过 ${today.questions} 次`);
+    return `今天已经${parts.join("，")}。慢一点也没关系。`;
+  }
+  const streak = computeStreak();
+  if (streak > 0) return `最近连续读了 ${streak} 天。今天从一页开始就好。`;
+  if (store.qa.length > 0) return `这里留着 ${store.qa.length} 段理解痕迹，随时可以回来接着想。`;
+  return "不设任务，也不催进度。只从眼前这一页开始。";
+}
+
+function buildContinueStage(book: BookRecord): HTMLElement {
+  const stage = document.createElement("section");
+  stage.className = "home-continue";
+
+  const cover = document.createElement("div");
+  cover.className = "home-featured-cover";
+  hydrateBookCover(cover, book);
+
+  const copy = document.createElement("div");
+  copy.className = "home-continue-copy";
+  const eyebrow = document.createElement("span");
+  eyebrow.className = "home-eyebrow";
+  eyebrow.textContent = currentBook?.id === book.id ? "书页还在原处" : "接着读";
+  const title = document.createElement("h2");
+  title.textContent = bookName(book.name);
+  const progress = bookProgress(book);
+  const meta = document.createElement("p");
+  meta.className = "home-continue-meta";
+  const qCount = store.qa.filter((entry) => entry.book_id === book.id).length;
+  meta.textContent = `${progress.detail} · 留下 ${qCount} 段理解`;
+  const bar = document.createElement("div");
+  bar.className = "home-continue-progress";
+  bar.setAttribute("aria-label", `阅读进度 ${progress.percent}%`);
+  const fill = document.createElement("span");
+  fill.style.width = `${progress.percent}%`;
+  bar.appendChild(fill);
+  const button = document.createElement("button");
+  button.className = "home-primary-action";
+  button.textContent = currentBook?.id === book.id ? "回到书页" : "继续阅读";
+  button.addEventListener("click", () => void openBook(book));
+  copy.append(eyebrow, title, meta, bar, button);
+
+  const aside = document.createElement("aside");
+  aside.className = "home-rhythm";
+  const rhythmLabel = document.createElement("span");
+  rhythmLabel.className = "home-eyebrow";
+  rhythmLabel.textContent = "最近的节奏";
+  const summary = document.createElement("p");
+  summary.textContent = studySummaryText();
+  aside.append(rhythmLabel, summary, buildActivityStrip());
+
+  stage.append(cover, copy, aside);
+  return stage;
+}
+
+function buildEmptyDesk(): HTMLElement {
+  const empty = document.createElement("section");
+  empty.className = "home-continue home-first-book";
+  const kicker = document.createElement("span");
+  kicker.className = "home-eyebrow";
+  kicker.textContent = "你的书房还空着";
+  const title = document.createElement("h2");
+  title.textContent = "带一本正在读的书进来。";
+  const body = document.createElement("p");
+  body.textContent = "Satori 会记住你读到哪里，并在真正卡住时陪你把这一页弄懂。";
+  const button = document.createElement("button");
+  button.className = "home-primary-action";
+  button.textContent = "打开 PDF…";
+  button.addEventListener("click", () => void pickAndOpenBook());
+  empty.append(kicker, title, body, button);
+  return empty;
+}
+
+/// 最近四周的节奏提示。它是背景反馈，不是连续打卡目标。
+function buildActivityStrip(): HTMLDivElement {
   const today = new Date();
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
-
-  const grid = document.createElement("div");
-  grid.className = "activity-grid";
-
-  // 月份标签：第 1 行，放在月份变更的那一列。
-  let prevMonth = -1;
-  for (let w = weeks - 1; w >= 0; w--) {
-    const date = new Date(monday);
-    date.setDate(monday.getDate() - w * 7);
-    if (date.getMonth() !== prevMonth) {
-      const label = document.createElement("div");
-      label.className = "grid-month-label";
-      label.textContent = `${date.getMonth() + 1}月`;
-      label.style.gridColumn = String(weeks - w + 1);
-      label.style.gridRow = "1";
-      grid.appendChild(label);
-      prevMonth = date.getMonth();
-    }
+  const strip = document.createElement("div");
+  strip.className = "home-activity-strip";
+  strip.setAttribute("role", "img");
+  strip.setAttribute("aria-label", "最近四周的阅读与提问节奏");
+  for (let offset = 27; offset >= 0; offset--) {
+    const date = new Date(today);
+    date.setDate(today.getDate() - offset);
+    const key = dateKey(date);
+    const act = store.activity[key];
+    const score = act ? act.pages + act.questions * 5 : 0;
+    const mark = document.createElement("span");
+    mark.className = `level-${activityLevel(score)}`;
+    mark.title = `${key} · 阅读 ${act?.pages ?? 0} 页 · 提问 ${act?.questions ?? 0}`;
+    strip.appendChild(mark);
   }
-
-  // 星期提示（第 1 列，行 2-8：一 / 三 / 五）。
-  const weekdayNames = ["一", "", "三", "", "五", "", ""];
-  for (let dow = 0; dow < 7; dow++) {
-    if (!weekdayNames[dow]) continue;
-    const l = document.createElement("div");
-    l.className = "grid-weekday";
-    l.textContent = weekdayNames[dow];
-    l.style.gridColumn = "1";
-    l.style.gridRow = String(dow + 2);
-    grid.appendChild(l);
-  }
-
-  // 52 × 7 个格子。
-  for (let w = weeks - 1; w >= 0; w--) {
-    for (let dow = 0; dow < 7; dow++) {
-      const date = new Date(monday);
-      date.setDate(monday.getDate() - w * 7 + dow);
-      const key = dateKey(date);
-      const act = store.activity[key];
-      const score = act ? act.pages + act.questions * 5 : 0;
-      const cell = document.createElement("div");
-      cell.className = `grid-cell level-${activityLevel(score)}`;
-      cell.title = `${key}　阅读 ${act?.pages ?? 0} 页 · 提问 ${act?.questions ?? 0}`;
-      if (date.getTime() > today.getTime()) cell.classList.add("future");
-      cell.style.gridColumn = String(weeks - w + 1);
-      cell.style.gridRow = String(dow + 2);
-      grid.appendChild(cell);
-    }
-  }
-  return grid;
+  return strip;
 }
 
 /// 连续学习天数：从今天（今天没学则从昨天）往前数连续有活动的天数。
@@ -408,14 +454,40 @@ function activityLevel(score: number): number {
   return 4;
 }
 
-function buildBookCard(book: BookRecord): HTMLDivElement {
-  const card = document.createElement("div");
+function buildBookCard(book: BookRecord): HTMLButtonElement {
+  const card = document.createElement("button");
+  card.type = "button";
   card.className = "home-book";
 
-  // 左侧迷你封面：读缓存好的第 1 页缩略图；没有缓存就放一个占位块。
   const cover = document.createElement("div");
   cover.className = "home-book-cover";
-  const initial = (book.name.replace(/\.pdf$/i, "") || "书").slice(0, 1);
+  hydrateBookCover(cover, book);
+
+  const body = document.createElement("div");
+  body.className = "home-book-body";
+
+  const name = document.createElement("div");
+  name.className = "home-book-name";
+  name.textContent = bookName(book.name);
+
+  const meta = document.createElement("div");
+  meta.className = "home-book-meta";
+  const qCount = store.qa.filter((q) => q.book_id === book.id).length;
+  const progress = bookProgress(book);
+  meta.textContent = `${progress.detail} · ${qCount} 段理解`;
+  body.append(name, meta);
+
+  const hint = document.createElement("span");
+  hint.className = "home-book-hint";
+  hint.textContent = book.id === currentBook?.id ? "正在读" : `${progress.percent}%`;
+
+  card.append(cover, body, hint);
+  card.addEventListener("click", () => void openBook(book));
+  return card;
+}
+
+function hydrateBookCover(cover: HTMLElement, book: BookRecord) {
+  const initial = (bookName(book.name) || "书").slice(0, 1);
   cover.textContent = initial;
   void loadThumb(book.path, 1)
     .then((b64) => {
@@ -427,51 +499,20 @@ function buildBookCard(book: BookRecord): HTMLDivElement {
       cover.appendChild(img);
     })
     .catch(() => undefined);
+}
 
-  const body = document.createElement("div");
-  body.className = "home-book-body";
-
-  const name = document.createElement("div");
-  name.className = "home-book-name";
-  name.textContent = book.name.replace(/\.pdf$/i, "");
-
-  const meta = document.createElement("div");
-  meta.className = "home-book-meta";
-  const qCount = store.qa.filter((q) => q.book_id === book.id).length;
-  const total = book.pageCount;
-  const pct = total && total > 0 ? Math.min(100, Math.round((book.last_page / total) * 100)) : 0;
-  meta.textContent = total
-    ? `第 ${book.last_page} / ${total} 页 · 问过 ${qCount} 次`
-    : `读到了第 ${book.last_page} 页 · 问过 ${qCount} 次`;
-  body.appendChild(name);
-  body.appendChild(meta);
-
-  const barRow = document.createElement("div");
-  barRow.className = "home-progress-row";
-  if (total && total > 0) {
-    const bar = document.createElement("div");
-    bar.className = "home-progress";
-    const fill = document.createElement("div");
-    fill.className = "home-progress-fill";
-    fill.style.width = `${pct}%`;
-    bar.appendChild(fill);
-    barRow.appendChild(bar);
-    const pctLabel = document.createElement("span");
-    pctLabel.className = "home-progress-pct";
-    pctLabel.textContent = `${pct}%`;
-    barRow.appendChild(pctLabel);
-    body.appendChild(barRow);
-  }
-
-  // 悬停提示「继续阅读」
-  const hint = document.createElement("span");
-  hint.className = "home-book-hint";
-  hint.textContent = book.id === currentBook?.id ? "返回阅读 →" : "继续阅读 →";
-  body.appendChild(hint);
-
-  card.append(cover, body);
-  card.addEventListener("click", () => void openBook(book));
-  return card;
+function plainTextExcerpt(markdown: string, maxLength: number): string {
+  const plain = markdown
+    .replace(/```[\s\S]*?```/g, "代码示例")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^[#>*+-]+\s*/gm, "")
+    .replace(/\*\*|__/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!plain) return "回答已保存在这本书里。";
+  return plain.length > maxLength ? `${plain.slice(0, maxLength)}…` : plain;
 }
 
 async function pickAndOpenBook() {
@@ -648,10 +689,21 @@ function buildTOC() {
   tocDrawer.innerHTML = "";
 
   // PDF 目录（章节快速跳转）。
-  const tocTitle = document.createElement("div");
-  tocTitle.className = "toc-section-title";
-  tocTitle.textContent = "目录";
-  tocDrawer.appendChild(tocTitle);
+  const tocHeader = document.createElement("div");
+  tocHeader.className = "toc-header";
+  const tocHeading = document.createElement("div");
+  const tocTitle = document.createElement("strong");
+  tocTitle.textContent = "这本书";
+  const tocBook = document.createElement("span");
+  tocBook.textContent = currentBook ? bookName(currentBook.name) : "目录";
+  tocHeading.append(tocTitle, tocBook);
+  const tocClose = document.createElement("button");
+  tocClose.type = "button";
+  tocClose.textContent = "×";
+  tocClose.setAttribute("aria-label", "收起目录");
+  tocClose.addEventListener("click", () => tocDrawer.classList.remove("open"));
+  tocHeader.append(tocHeading, tocClose);
+  tocDrawer.appendChild(tocHeader);
 
   const renderOutline = (outline: OutlineEntry[], sourceNote: string) => {
     if (!tocDrawer.isConnected) return;
@@ -663,7 +715,8 @@ function buildTOC() {
       return;
     }
     for (const item of outline) {
-      const el = document.createElement("div");
+      const el = document.createElement("button");
+      el.type = "button";
       el.className = `toc-item depth-${Math.min(item.depth + 1, 3)}`;
       el.textContent = item.title;
       el.title = `跳到第 ${item.page} 页`;
@@ -828,7 +881,7 @@ async function reopenQA(entry: QAEntry) {
     void reader.onScroll();
   }
   // 在老师面板里展示这条历史问答（记录为当前问答，可从「问过的」返回）。
-  sheetQA = { question: entry.question, answer: entry.answer };
+  sheetQA = { question: entry.question, answer: entry.answer, page: entry.page };
   sheetHistoryMode = false;
   renderQAIntoSheet(entry.question, entry.answer);
 }
@@ -983,7 +1036,7 @@ async function askQuestion(question: string) {
 // ---- 老师面板 ----
 
 /// 面板当前展示的问答（从「问过的」列表返回时恢复用）。
-let sheetQA: { question: string; answer: string } | null = null;
+let sheetQA: { question: string; answer: string; page: number } | null = null;
 /// 面板是否正显示「问过的」历史列表（而不是一轮问答）。
 let sheetHistoryMode = false;
 
@@ -1037,16 +1090,20 @@ function appendComposer(
 ) {
   const composer = document.createElement("div");
   composer.className = className ? `composer ${className}` : "composer";
-  const input = document.createElement("input");
+  const input = document.createElement("textarea");
+  input.rows = 1;
   input.placeholder = placeholder;
-  input.setAttribute("aria-label", "向老师提问");
+  input.setAttribute("aria-label", "继续问这本书");
   const send = document.createElement("button");
   send.type = "button";
-  send.textContent = "发送";
+  send.textContent = "问";
+  send.setAttribute("aria-label", "发送问题");
   send.disabled = true;
 
   const syncSendState = () => {
     send.disabled = input.value.trim() === "";
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 88)}px`;
   };
   const submit = () => {
     const text = input.value.trim();
@@ -1058,7 +1115,10 @@ function appendComposer(
 
   input.addEventListener("input", syncSendState);
   input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") submit();
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      submit();
+    }
   });
   send.addEventListener("click", submit);
   composer.append(input, send);
@@ -1079,9 +1139,11 @@ function renderQAIntoSheet(question: string, answerMarkdown: string) {
   const a = document.createElement("div");
   a.className = "turn answer";
   setAnswerContent(a, answerMarkdown);
+  appendActions(a);
   scroll.appendChild(a);
   teacherSheet.append(scroll);
   showTeacherSheet();
+  appendComposer("还有哪里没想通？", (text) => void followUp(text));
 }
 
 /// 老师卡片头部：拖拽条 + 「问过的」切换 + 收起按钮。三种视图共用。
@@ -1092,10 +1154,23 @@ function buildSheetHeader(): HTMLDivElement {
   grip.className = "grip";
   grip.title = "收起";
   grip.addEventListener("click", closeTeacherSheet);
+
+  const heading = document.createElement("div");
+  heading.className = "sheet-heading";
+  const title = document.createElement("strong");
+  title.textContent = sheetHistoryMode ? "理解痕迹" : "问书";
+  const context = document.createElement("span");
+  const contextPage = !sheetHistoryMode && sheetQA ? sheetQA.page : currentPage;
+  const chapter = chapterLabelForPage(contextPage);
+  context.textContent = currentBook
+    ? `第 ${contextPage} 页${chapter ? ` · ${chapter}` : ""}`
+    : "和这一页一起想清楚";
+  heading.append(title, context);
+
   // 「问过的」：在面板里切换「当前问答 ⇄ 这本书问过的问题列表」。
   const historyBtn = document.createElement("button");
   historyBtn.className = "sheet-history";
-  historyBtn.textContent = sheetHistoryMode ? "返回问答" : "问过的";
+  historyBtn.textContent = sheetHistoryMode ? "返回" : "回看";
   historyBtn.title = sheetHistoryMode ? "返回刚才的问答" : "查看这本书问过的问题";
   historyBtn.addEventListener("click", () => {
     if (sheetHistoryMode) {
@@ -1112,9 +1187,10 @@ function buildSheetHeader(): HTMLDivElement {
   });
   const close = document.createElement("button");
   close.className = "sheet-close";
-  close.textContent = "收起";
+  close.textContent = "×";
+  close.setAttribute("aria-label", "收起问书面板");
   close.addEventListener("click", closeTeacherSheet);
-  header.append(grip, historyBtn, close);
+  header.append(grip, heading, historyBtn, close);
   return header;
 }
 
@@ -1141,10 +1217,16 @@ function showHistoryList() {
       scroll.appendChild(empty);
     } else {
       for (const entry of mine.slice(0, 50)) {
-        const item = document.createElement("div");
+        const item = document.createElement("button");
+        item.type = "button";
         item.className = "qa-history-item";
-        const question = entry.question.length > 28 ? `${entry.question.slice(0, 28)}…` : entry.question;
-        item.textContent = `第 ${entry.page} 页 · ${question}`;
+        const meta = document.createElement("span");
+        meta.textContent = `第 ${entry.page} 页`;
+        const question = document.createElement("strong");
+        question.textContent = entry.question;
+        const excerpt = document.createElement("span");
+        excerpt.textContent = plainTextExcerpt(entry.answer, 60);
+        item.append(meta, question, excerpt);
         item.title = "回到这页并重看这段问答";
         item.addEventListener("click", () => void reopenQA(entry));
         scroll.appendChild(item);
@@ -1157,7 +1239,7 @@ function showHistoryList() {
 
 function openTeacherSheet(question: string) {
   // 记录当前问答，供「问过的」列表返回时恢复。
-  sheetQA = { question, answer: "" };
+  sheetQA = { question, answer: "", page: currentPage };
   sheetHistoryMode = false;
   teacherSheet.innerHTML = "";
 
@@ -1198,22 +1280,41 @@ function openTeacherPrompt() {
 
   const prompt = document.createElement("div");
   prompt.className = "teacher-prompt";
+  const eyebrow = document.createElement("span");
+  eyebrow.className = "teacher-eyebrow";
+  eyebrow.textContent = "从眼前这页开始";
   const title = document.createElement("h3");
-  title.textContent = "这页哪里卡住了？";
+  title.textContent = "你想先弄懂什么？";
   const hint = document.createElement("p");
-  hint.textContent = "直接问一句，或者让我先讲讲这一页。";
-  const quick = document.createElement("button");
-  quick.type = "button";
-  quick.className = "teacher-page-explain";
-  quick.textContent = "讲讲这一页";
-  quick.addEventListener("click", () => {
-    quick.disabled = true;
-    void askPageQuestion();
-  });
-  prompt.append(title, hint, quick);
+  hint.textContent = "说出卡住的地方，或选一个起点。只有你发问后，我才会读取书页。";
+  const starts = document.createElement("div");
+  starts.className = "teacher-starts";
+  const suggestions = [
+    { label: "先概括这一页", action: () => void askPageQuestion() },
+    {
+      label: "说清核心概念",
+      action: () => void askQuestion("这一页最核心的概念是什么？先用大白话说清楚，再指出书上对应的位置。"),
+    },
+    {
+      label: "带我走一个例子",
+      action: () => void askQuestion("请用一个具体的小例子，带我一步步理解这一页。"),
+    },
+  ];
+  for (const suggestion of suggestions) {
+    const quick = document.createElement("button");
+    quick.type = "button";
+    quick.className = "teacher-page-explain";
+    quick.textContent = suggestion.label;
+    quick.addEventListener("click", () => {
+      for (const button of starts.querySelectorAll("button")) button.setAttribute("disabled", "true");
+      suggestion.action();
+    });
+    starts.appendChild(quick);
+  }
+  prompt.append(eyebrow, title, hint, starts);
   teacherSheet.append(prompt);
   showTeacherSheet();
-  appendComposer("比如：这张图为什么这样连接？", (text) => void askQuestion(text), "prompt-composer");
+  appendComposer("把不懂的地方说给我听…", (text) => void askQuestion(text), "prompt-composer");
 }
 
 function appendActions(answerNode: HTMLDivElement) {
@@ -1276,7 +1377,7 @@ async function followUp(text: string) {
     history.push({ role: "assistant", content: fullText });
     a.classList.remove("streaming");
     appendActions(a);
-    sheetQA = { question: text, answer: fullText };
+    sheetQA = { question: text, answer: fullText, page: currentPage };
     await saveQA(text, fullText);
   } catch (err) {
     setAnswerContent(a, `出错了：${String(err)}`);
@@ -1661,7 +1762,7 @@ function renderBottomBar() {
   // 书：显示当前书名，点击弹出书列表（切换书）。
   const bookBtn = document.createElement("button");
   bookBtn.className = "action-btn book-btn";
-  bookBtn.textContent = currentBook?.name ?? "书";
+  bookBtn.textContent = currentBook ? bookName(currentBook.name) : "书";
   bookBtn.title = "切换书";
   bookBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -1686,7 +1787,8 @@ function renderBottomBar() {
   homeBtn.addEventListener("click", () => showHome());
 
   // 页码：点击变成输入框，输入页码回车跳转。
-  const pageNum = document.createElement("span");
+  const pageNum = document.createElement("button");
+  pageNum.type = "button";
   pageNum.className = "page-num";
   pageNum.title = "点击输入页码跳转";
   pageNum.textContent = `${currentPage} / ${currentDoc?.pageCount ?? 0}`;
@@ -1797,7 +1899,8 @@ function renderBottomBar() {
     zoomFactor = clampZoom(zoomFactor - 0.25);
     void applyZoom();
   });
-  const zoomPct = document.createElement("span");
+  const zoomPct = document.createElement("button");
+  zoomPct.type = "button";
   zoomPct.className = "zoom-pct";
   zoomPct.title = "回到适合宽度";
   zoomPct.addEventListener("click", () => {
@@ -1823,7 +1926,20 @@ function renderBottomBar() {
   const chapterLabel = document.createElement("span");
   chapterLabel.className = "chapter-label";
 
-  bottomBar.append(homeBtn, bookBtn, prev, next, reviewBtn, pageNum, chapterLabel, thumbs, zoomGroup, layoutBtn);
+  const libraryGroup = document.createElement("div");
+  libraryGroup.className = "rail-group rail-library";
+  libraryGroup.append(homeBtn, bookBtn, reviewBtn);
+  const navigationGroup = document.createElement("div");
+  navigationGroup.className = "rail-group rail-navigation";
+  navigationGroup.append(prev, pageNum, next);
+  const contextGroup = document.createElement("div");
+  contextGroup.className = "rail-context";
+  contextGroup.appendChild(chapterLabel);
+  const viewGroup = document.createElement("div");
+  viewGroup.className = "rail-group rail-view";
+  viewGroup.append(zoomGroup, layoutBtn);
+
+  bottomBar.append(libraryGroup, navigationGroup, contextGroup, viewGroup, thumbs);
   updateBottomBarZoom();
   updateLayoutButton();
 
@@ -1834,9 +1950,13 @@ function renderBottomBar() {
 /// 当前页所在的章级标题（目录里 depth=0 的最后一条 ≤ 当前页的条目），
 /// 没有目录时返回空。
 function currentChapterLabel(): string {
+  return chapterLabelForPage(currentPage);
+}
+
+function chapterLabelForPage(page: number): string {
   let chapter = "";
   for (const item of effectiveOutline) {
-    if (item.page > currentPage) break;
+    if (item.page > page) break;
     if (item.depth === 0) chapter = item.title;
   }
   return chapter;
@@ -1900,7 +2020,8 @@ function toggleBookMenu() {
   menu.appendChild(title);
 
   // 回到首页/总览。
-  const homeItem = document.createElement("div");
+  const homeItem = document.createElement("button");
+  homeItem.type = "button";
   homeItem.className = "book-menu-item";
   homeItem.textContent = "总览 · 学习活动";
   homeItem.addEventListener("click", () => {
@@ -1918,6 +2039,8 @@ function toggleBookMenu() {
   } else {
     for (const book of store.books) {
       const item = document.createElement("div");
+      item.tabIndex = 0;
+      item.setAttribute("role", "button");
       item.className = "book-menu-item";
       item.dataset.bookId = book.id;
       const name = document.createElement("span");
@@ -1944,6 +2067,11 @@ function toggleBookMenu() {
         menu.remove();
         bookMenuEl = null;
         if (book.id !== currentBook?.id) void openBook(book);
+      });
+      item.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        item.click();
       });
       menu.appendChild(item);
     }
