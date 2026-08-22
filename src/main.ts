@@ -180,10 +180,10 @@ async function relayoutOnResize() {
 /// 显示首页（总览）：覆盖在阅读面上滑入，当前阅读状态保留在下面，
 /// 关闭后立即回到原位（不重载）。
 function showHome() {
-  teacherSheet.classList.remove("open");
   tocDrawer.classList.remove("open");
   renderHome();
   homeView.classList.add("open");
+  closeTeacherSheet();
 }
 
 function hideHome() {
@@ -999,8 +999,71 @@ function showTyping(el: HTMLElement) {
 }
 
 function closeTeacherSheet() {
+  const hadFocus = teacherSheet.contains(document.activeElement);
   teacherSheet.classList.remove("open");
+  teacherSheet.setAttribute("aria-hidden", "true");
   sheetHistoryMode = false;
+  if (hadFocus) {
+    if (homeView.classList.contains("open")) {
+      (document.activeElement as HTMLElement | null)?.blur();
+    } else {
+      (document.getElementById("ask-fab") as HTMLButtonElement | null)?.focus();
+    }
+  }
+}
+
+function showTeacherSheet() {
+  teacherSheet.classList.add("open");
+  teacherSheet.setAttribute("aria-hidden", "false");
+}
+
+function resetTeacherSheetPositionIfNeeded() {
+  const rect = teacherSheet.getBoundingClientRect();
+  if (
+    teacherSheet.style.left !== "" &&
+    (rect.left > window.innerWidth - 40 || rect.top > window.innerHeight - 40 || rect.left < -40 || rect.top < 40)
+  ) {
+    teacherSheet.style.left = "";
+    teacherSheet.style.top = "";
+    teacherSheet.style.right = "";
+    teacherSheet.style.bottom = "";
+  }
+}
+
+function appendComposer(
+  placeholder: string,
+  onSubmit: (text: string) => void,
+  className?: string,
+) {
+  const composer = document.createElement("div");
+  composer.className = className ? `composer ${className}` : "composer";
+  const input = document.createElement("input");
+  input.placeholder = placeholder;
+  input.setAttribute("aria-label", "向老师提问");
+  const send = document.createElement("button");
+  send.type = "button";
+  send.textContent = "发送";
+  send.disabled = true;
+
+  const syncSendState = () => {
+    send.disabled = input.value.trim() === "";
+  };
+  const submit = () => {
+    const text = input.value.trim();
+    if (!text || streaming) return;
+    input.value = "";
+    syncSendState();
+    onSubmit(text);
+  };
+
+  input.addEventListener("input", syncSendState);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") submit();
+  });
+  send.addEventListener("click", submit);
+  composer.append(input, send);
+  teacherSheet.append(composer);
+  queueMicrotask(() => input.focus());
 }
 
 /// 把一轮问答渲染进面板（新问答/回看历史/从历史列表返回共用）。
@@ -1018,7 +1081,7 @@ function renderQAIntoSheet(question: string, answerMarkdown: string) {
   setAnswerContent(a, answerMarkdown);
   scroll.appendChild(a);
   teacherSheet.append(scroll);
-  teacherSheet.classList.add("open");
+  showTeacherSheet();
 }
 
 /// 老师卡片头部：拖拽条 + 「问过的」切换 + 收起按钮。三种视图共用。
@@ -1074,7 +1137,7 @@ function showHistoryList() {
     if (mine.length === 0) {
       const empty = document.createElement("div");
       empty.className = "qa-history-empty";
-      empty.textContent = "还没有问过问题。框选一段，或点「问这一页」。";
+      empty.textContent = "还没有问过问题。框选一段，或点「问书」。";
       scroll.appendChild(empty);
     } else {
       for (const entry of mine.slice(0, 50)) {
@@ -1089,7 +1152,7 @@ function showHistoryList() {
     }
   }
   teacherSheet.append(scroll);
-  teacherSheet.classList.add("open");
+  showTeacherSheet();
 }
 
 function openTeacherSheet(question: string) {
@@ -1099,16 +1162,7 @@ function openTeacherSheet(question: string) {
   teacherSheet.innerHTML = "";
 
   // 如果卡片之前被拖出可视区（比如窗口缩小了），回到默认位置。
-  const rect = teacherSheet.getBoundingClientRect();
-  if (
-    teacherSheet.style.left !== "" &&
-    (rect.left > window.innerWidth - 40 || rect.top > window.innerHeight - 40 || rect.left < -40 || rect.top < 40)
-  ) {
-    teacherSheet.style.left = "";
-    teacherSheet.style.top = "";
-    teacherSheet.style.right = "";
-    teacherSheet.style.bottom = "";
-  }
+  resetTeacherSheetPositionIfNeeded();
 
   // 头部：拖拽条 + 关闭按钮。
   teacherSheet.appendChild(buildSheetHeader());
@@ -1126,35 +1180,40 @@ function openTeacherSheet(question: string) {
   scroll.appendChild(answerTurn);
 
   teacherSheet.append(scroll);
-  teacherSheet.classList.add("open");
+  showTeacherSheet();
 
-  // 追问输入框
-  const composer = document.createElement("div");
-  composer.className = "composer";
-  const input = document.createElement("input");
-  input.placeholder = "还不懂？再问一句…";
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !streaming) {
-      const text = input.value.trim();
-      if (text) {
-        input.value = "";
-        void followUp(text);
-      }
-    }
-  });
-  const send = document.createElement("button");
-  send.textContent = "发送";
-  send.addEventListener("click", () => {
-    const text = input.value.trim();
-    if (text && !streaming) {
-      input.value = "";
-      void followUp(text);
-    }
-  });
-  composer.append(input, send);
-  teacherSheet.append(composer);
+  appendComposer("还不懂？再问一句…", (text) => void followUp(text));
+}
 
-  void input.focus();
+/// 打开老师入口但不发起网络请求。用户发送问题或明确选择
+/// “讲讲这一页”之后，才会读取 Keychain 并调用模型。
+function openTeacherPrompt() {
+  if (!currentDoc) return;
+  history = [];
+  sheetQA = null;
+  sheetHistoryMode = false;
+  teacherSheet.innerHTML = "";
+  resetTeacherSheetPositionIfNeeded();
+  teacherSheet.appendChild(buildSheetHeader());
+
+  const prompt = document.createElement("div");
+  prompt.className = "teacher-prompt";
+  const title = document.createElement("h3");
+  title.textContent = "这页哪里卡住了？";
+  const hint = document.createElement("p");
+  hint.textContent = "直接问一句，或者让我先讲讲这一页。";
+  const quick = document.createElement("button");
+  quick.type = "button";
+  quick.className = "teacher-page-explain";
+  quick.textContent = "讲讲这一页";
+  quick.addEventListener("click", () => {
+    quick.disabled = true;
+    void askPageQuestion();
+  });
+  prompt.append(title, hint, quick);
+  teacherSheet.append(prompt);
+  showTeacherSheet();
+  appendComposer("比如：这张图为什么这样连接？", (text) => void askQuestion(text), "prompt-composer");
 }
 
 function appendActions(answerNode: HTMLDivElement) {
@@ -1422,7 +1481,7 @@ function clampZoom(z: number): number {
   return Math.min(3, Math.max(0.5, z));
 }
 
-// ---- 悬浮「问」按钮：点一下问当前页 ----
+// ---- 悬浮「问书」按钮：只展开提问，不立即调用模型 ----
 function setupAskFab() {
   const fab = document.getElementById("ask-fab") as HTMLButtonElement;
   fab.addEventListener("click", () => {
@@ -1430,7 +1489,7 @@ function setupAskFab() {
       closeTeacherSheet();
       return;
     }
-    void askPageQuestion();
+    openTeacherPrompt();
   });
 }
 

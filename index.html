@@ -10,12 +10,14 @@
       <div id="reader-surface"></div>
       <div id="home-view"></div>
       <div id="toc-drawer"></div>
-      <div id="teacher-sheet"></div>
+      <div id="teacher-sheet" role="dialog" aria-label="问书" aria-hidden="true"></div>
       <div id="bottom-bar"></div>
-      <button id="ask-fab" title="问这一页">
-        <span class="fab-label">问这一页</span>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M12 2.5l2.4 7.1 7.1 2.4-7.1 2.4L12 21.5l-2.4-7.1-7.1-2.4 7.1-2.4z" />
+      <button id="ask-fab" type="button" title="问书" aria-label="打开问书面板">
+        <span class="fab-label">问书</span>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4.5 5.7c2.9-.8 5.4-.2 7.5 1.6v11c-2.1-1.8-4.6-2.4-7.5-1.6v-11Z" />
+          <path d="M19.5 5.7c-2.9-.8-5.4-.2-7.5 1.6v11c2.1-1.8 4.6-2.4 7.5-1.6v-11Z" />
+          <path d="M7.6 9.1c.9-.1 1.7 0 2.4.3M14 9.4c.7-.3 1.5-.4 2.4-.3" />
         </svg>
       </button>
     </div>

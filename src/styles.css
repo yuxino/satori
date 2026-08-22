@@ -902,12 +902,70 @@ body {
   background: var(--lavender-soft);
 }
 
+#teacher-sheet .teacher-prompt {
+  padding: 14px 20px 4px;
+}
+
+#teacher-sheet .teacher-prompt h3 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+#teacher-sheet .teacher-prompt p {
+  margin: 6px 0 14px;
+  color: var(--ink-soft);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+#teacher-sheet .teacher-page-explain {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--paper);
+  color: var(--ink-soft);
+  font-family: var(--sans);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+#teacher-sheet .teacher-page-explain::after {
+  content: "→";
+  color: var(--lavender);
+}
+
+#teacher-sheet .teacher-page-explain:hover:not(:disabled) {
+  border-color: var(--lavender);
+  background: var(--lavender-soft);
+  color: var(--ink);
+}
+
+#teacher-sheet .teacher-page-explain:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 #teacher-sheet .composer {
   display: flex;
   gap: 8px;
   padding: 10px 20px 14px;
   border-top: 1px solid var(--line);
   flex-shrink: 0;
+}
+
+#teacher-sheet .composer.prompt-composer {
+  padding-top: 12px;
+  border-top: none;
 }
 
 #teacher-sheet .composer input {
@@ -954,47 +1012,63 @@ body {
   cursor: default;
 }
 
-/* ---- 悬浮「问」按钮 ---- */
+/* ---- 悬浮「问书」按钮：像夹在页边的一枚小书签，不做通用 AI 星星球 ---- */
 
 #ask-fab {
   position: absolute;
   right: 18px;
   bottom: 48px;
   z-index: 35;
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  border: none;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  background: linear-gradient(145deg, #a796d4 0%, #8d7bb8 55%, #7c6aa8 100%);
-  box-shadow:
-    0 4px 10px rgba(125, 107, 169, 0.32),
-    0 12px 30px rgba(125, 107, 169, 0.38),
-    inset 0 1px 0 rgba(255, 255, 255, 0.28);
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  color: var(--lavender);
+  background: var(--sheet);
+  box-shadow: 0 8px 26px rgba(43, 42, 40, 0.14);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
 }
 
 #ask-fab svg {
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.18));
+  stroke: currentColor;
+  stroke-width: 1.55;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#ask-fab::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 5px;
+  height: 5px;
+  border-top: 1px solid currentColor;
+  border-right: 1px solid currentColor;
+  border-radius: 0 3px 0 0;
+  opacity: 0.32;
 }
 
 #ask-fab:hover {
-  transform: translateY(-2px) scale(1.05);
-  box-shadow:
-    0 6px 14px rgba(125, 107, 169, 0.38),
-    0 18px 40px rgba(125, 107, 169, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  transform: translateY(-2px);
+  border-color: var(--lavender);
+  background: var(--lavender-soft);
+  box-shadow: 0 12px 32px rgba(43, 42, 40, 0.18);
 }
 
 #ask-fab:active {
-  transform: translateY(0) scale(0.95);
-  box-shadow:
-    0 2px 8px rgba(125, 107, 169, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transform: translateY(0) scale(0.97);
+  box-shadow: 0 4px 14px rgba(43, 42, 40, 0.14);
+}
+
+#ask-fab:focus-visible,
+#teacher-sheet :where(button, input):focus-visible {
+  outline: 2px solid var(--lavender);
+  outline-offset: 2px;
 }
 
 /* 悬停时左侧浮现的小标签，说明这个按钮是干什么的。 */
@@ -2098,6 +2172,19 @@ body {
   #settings-modal *,
   #settings-modal *::before,
   #settings-modal *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
+  #teacher-sheet,
+  #teacher-sheet *,
+  #teacher-sheet *::before,
+  #teacher-sheet *::after,
+  #ask-fab,
+  #ask-fab::before,
+  #ask-fab::after {
     scroll-behavior: auto !important;
     transition-duration: 0.001ms !important;
     animation-duration: 0.001ms !important;
