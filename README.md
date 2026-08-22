@@ -1,7 +1,7 @@
 <div align="center">
   <img src="Resources/Assets/satori-icon.png" width="112" alt="satori">
   <h1>satori</h1>
-  <p>Select what you don't understand in a PDF and get an explanation based on that page.</p>
+  <p>Read PDF textbooks. Ask only when something does not click.</p>
   <p>
     <a href="README_ZH.md">简体中文</a>
     · <a href="README_JA.md">日本語</a>
@@ -10,13 +10,14 @@
 
 `Satori` comes from the Japanese word 悟り (satori, "enlightenment").
 
-A macOS app for reading PDF textbooks. Open a book, read full-screen, and when a paragraph, figure, or code block doesn't make sense — select it and get an explanation of that part.
+A macOS app for reading PDF textbooks. The page stays at the center; when a paragraph, figure, or code block does not make sense, select it and ask, or open the page-side question panel.
 
 ## Features
 
-- **Ask about anything on the page** — select a paragraph, a figure, or a code block; works on both text-native and scanned PDFs.
-- **A reader, not a workbench** — continuous scrolling, pinch to zoom, page thumbnails, and jump to any page by number.
-- **Your books and history** — switch between books anytime; reading position and past Q&A are saved on your Mac.
+- **Ask around the page** — select a paragraph, figure, or code block, or type your own question; works with both text-native and scanned PDFs.
+- **Reading first** — single-page and two-page layouts, outline navigation, and zoom all stay out of the page's way; each book reopens where you left it.
+- **Choose your AI service** — keep multiple Alibaba Cloud Model Studio, OpenAI, or OpenAI-compatible cloud and local connections, then switch the active connection and model at any time.
+- **Stored locally** — your library, reading position, and past Q&A stay on your Mac; API keys are stored only in macOS Keychain.
 
 ## Getting started
 
@@ -27,8 +28,10 @@ npm install
 npm run app
 ```
 
+Open Settings and add an AI service connection before asking a question.
+
 ## Privacy
 
-Books and history stay on your Mac. Explanations are generated on demand by the AI service you configure from the relevant page images.
+Books and history stay on your Mac. Relevant page images are sent to the active AI service only after you submit a question or explicitly ask for a page explanation; opening the question panel alone does not make a request.
 
 [MIT](LICENSE) © 2026 yuxino
