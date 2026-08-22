@@ -214,6 +214,7 @@ fn normalized_history_role(role: &str) -> &'static str {
 async fn read_api_key(
     app: &tauri::AppHandle,
     profile: &ResolvedProfile,
+    allow_keychain_interaction: bool,
 ) -> Result<Option<String>, String> {
     if !profile.api_key_required {
         return Ok(None);
@@ -222,7 +223,12 @@ async fn read_api_key(
     let profile_id = profile.id.clone();
     let expected_scope = profile.credential_scope.clone();
     let saved = tokio::task::spawn_blocking(move || {
-        crate::keychain::read_profile_api_key(&app, &profile_id, &expected_scope)
+        crate::keychain::read_profile_api_key(
+            &app,
+            &profile_id,
+            &expected_scope,
+            allow_keychain_interaction,
+        )
     })
     .await
     .map_err(|error| format!("读取「{}」的 API Key 时任务失败：{error}", profile.name))?
@@ -240,8 +246,9 @@ async fn send_chat_request(
     app: &tauri::AppHandle,
     profile: &ResolvedProfile,
     body: &ChatRequest,
+    allow_keychain_interaction: bool,
 ) -> Result<Response, String> {
-    let api_key = read_api_key(app, profile).await?;
+    let api_key = read_api_key(app, profile, allow_keychain_interaction).await?;
     let mut request = client.post(profile.chat_url.clone()).json(body);
     if let Some(api_key) = api_key.as_deref() {
         request = request.bearer_auth(api_key);
@@ -534,7 +541,7 @@ pub async fn ask_visual(
     messages.push(ChatMessage::parts("user", user_parts));
 
     let body = build_chat_request(&profile, messages, true, 900);
-    let response = send_chat_request(&state.client, &app, &profile, &body).await?;
+    let response = send_chat_request(&state.client, &app, &profile, &body, true).await?;
     collect_stream(response, &app, &request_id).await
 }
 
@@ -556,7 +563,7 @@ pub async fn extract_outline(
         ChatMessage::parts("user", user_parts),
     ];
     let body = build_chat_request(&profile, messages, false, 3000);
-    let response = send_chat_request(&state.client, &app, &profile, &body).await?;
+    let response = send_chat_request(&state.client, &app, &profile, &body, false).await?;
     let content = parse_non_stream_response(response).await?;
     parse_outline_content(&content)
 }
@@ -580,7 +587,7 @@ pub async fn find_page_by_title(
         ChatMessage::parts("user", user_parts),
     ];
     let body = build_chat_request(&profile, messages, false, 200);
-    let response = send_chat_request(&state.client, &app, &profile, &body).await?;
+    let response = send_chat_request(&state.client, &app, &profile, &body, false).await?;
     let content = parse_non_stream_response(response).await?;
     Ok(parse_page_number(&content))
 }
@@ -611,7 +618,7 @@ pub async fn test_ai_profile(
         ),
     ];
     let body = build_chat_request(&profile, messages, false, 64);
-    let response = send_chat_request(&state.client, &app, &profile, &body).await?;
+    let response = send_chat_request(&state.client, &app, &profile, &body, true).await?;
     parse_non_stream_response(response).await
 }
 

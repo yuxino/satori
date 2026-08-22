@@ -4,6 +4,7 @@
   "version": "3.0.0",
   "type": "module",
   "scripts": {
+    "app": "./scripts/dev-app.sh",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",

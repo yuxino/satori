@@ -77,12 +77,62 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-# Sign with a local identity when available so keychain grants survive
-# rebuilds; ad-hoc otherwise.
-if IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk '/1\)/ {print $2; exit}')" && [[ -n "$IDENTITY" ]]; then
-  codesign --force --sign "$IDENTITY" "$APP"
+# Prefer an Apple-issued development identity. macOS can bind Keychain access
+# to its stable Team ID across rebuilds. Developer ID identities are never
+# selected automatically: development must not silently use a release key.
+# A self-signed certificate has no Team ID, so modern Keychain partition checks
+# fall back to the binary's changing CDHash.
+IDENTITIES="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+APPLE_DEVELOPMENT_IDENTITIES="$(awk '/"Apple Development:/ {print $2}' <<<"$IDENTITIES")"
+APPLE_DEVELOPMENT_COUNT="$(awk '/"Apple Development:/ {count++} END {print count + 0}' <<<"$IDENTITIES")"
+LOCAL_IDENTITIES="$(awk '/"mimi Local Development"/ {print $2}' <<<"$IDENTITIES")"
+LOCAL_IDENTITY_COUNT="$(awk '/"mimi Local Development"/ {count++} END {print count + 0}' <<<"$IDENTITIES")"
+SIGNING_KIND="explicit"
+if [[ -n "${SATORI_CODESIGN_IDENTITY:-}" ]]; then
+  IDENTITY="$SATORI_CODESIGN_IDENTITY"
+elif (( APPLE_DEVELOPMENT_COUNT > 1 )); then
+  printf '%s\n' 'error: multiple Apple Development identities found; set SATORI_CODESIGN_IDENTITY to the intended certificate hash.' >&2
+  printf '%s\n' "$APPLE_DEVELOPMENT_IDENTITIES" >&2
+  exit 1
+elif (( APPLE_DEVELOPMENT_COUNT == 1 )); then
+  IDENTITY="$APPLE_DEVELOPMENT_IDENTITIES"
+  SIGNING_KIND="apple-team"
+elif (( LOCAL_IDENTITY_COUNT > 1 )); then
+  printf '%s\n' 'error: multiple local development identities found; set SATORI_CODESIGN_IDENTITY to the intended certificate hash.' >&2
+  printf '%s\n' "$LOCAL_IDENTITIES" >&2
+  exit 1
+elif (( LOCAL_IDENTITY_COUNT == 1 )); then
+  IDENTITY="$LOCAL_IDENTITIES"
+  SIGNING_KIND="local"
 else
-  codesign --force --sign - "$APP"
+  IDENTITY="-"
+  SIGNING_KIND="adhoc"
+fi
+
+codesign --force --timestamp=none --sign "$IDENTITY" "$APP"
+codesign --verify --deep --strict --verbose=2 "$APP"
+
+SIGNATURE_INFO="$(codesign -d --verbose=4 "$APP" 2>&1)"
+BUNDLE_IDENTIFIER="$(sed -n 's/^Identifier=//p' <<<"$SIGNATURE_INFO")"
+TEAM_IDENTIFIER="$(sed -n 's/^TeamIdentifier=//p' <<<"$SIGNATURE_INFO")"
+AUTHORITY="$(sed -n 's/^Authority=//p' <<<"$SIGNATURE_INFO" | head -1)"
+
+if [[ "$BUNDLE_IDENTIFIER" != "com.yuxino.satori" ]]; then
+  printf 'error: unexpected signed bundle identifier: %s\n' "$BUNDLE_IDENTIFIER" >&2
+  exit 1
+fi
+
+if [[ "$SIGNING_KIND" == "apple-team" && ( -z "$TEAM_IDENTIFIER" || "$TEAM_IDENTIFIER" == "not set" ) ]]; then
+  printf 'error: selected Apple signing identity produced no Team ID\n' >&2
+  exit 1
+fi
+
+if [[ -n "$TEAM_IDENTIFIER" && "$TEAM_IDENTIFIER" != "not set" ]]; then
+  printf 'signed with %s (Team ID: %s); changing to this signing team may require one final authorization for existing credentials\n' "${AUTHORITY:-$IDENTITY}" "$TEAM_IDENTIFIER"
+else
+  printf '%s\n' 'warning: this build has no Apple Team ID; opening the app and viewing connection status stay silent.' >&2
+  printf '%s\n' '         Any frontend or Rust rebuild changes the CDHash, so each saved profile may require authorization on its first explicit AI use.' >&2
+  printf '%s\n' '         Install an Apple Development certificate, or set SATORI_CODESIGN_IDENTITY to an Apple identity with a Team ID, to eliminate rebuild prompts.' >&2
 fi
 
 echo "launching $APP"

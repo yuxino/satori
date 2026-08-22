@@ -1398,13 +1398,13 @@ function credentialLabel(profile: AIProfile, state: CredentialState): string {
   if (!profile.api_key_required) return "无需 Key";
   if (state.phase === "loading") return "检查中";
   if (state.phase === "error") return "读取失败";
-  return state.saved ? "已安全保存" : "尚未保存";
+  return state.saved ? "已保存 · 使用时验证" : "尚未保存";
 }
 
 function keyPlaceholder(profile: AIProfile, state: CredentialState): string {
   if (!profile.api_key_required) return "此连接不使用 API Key";
   if (state.phase === "loading") return "正在检查钥匙串…";
-  if (state.saved) return "已安全保存 · 输入新 Key 可替换";
+  if (state.saved) return "已保存 · 首次使用时由 macOS 验证授权 · 输入新 Key 可替换";
   return "粘贴 API Key";
 }
 

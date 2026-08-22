@@ -885,6 +885,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "futures-channel"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2825,9 +2835,11 @@ name = "satori"
 version = "3.0.0"
 dependencies = [
  "base64 0.22.1",
+ "fs2",
  "futures-util",
  "keyring",
  "reqwest 0.12.28",
+ "security-framework 3.7.0",
  "serde",
  "serde_json",
  "tauri",
@@ -2835,6 +2847,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tokio",
  "urlencoding",
+ "zeroize",
 ]
 
 [[package]]
