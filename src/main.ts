@@ -196,21 +196,16 @@ function renderHome() {
   const wrap = document.createElement("div");
   wrap.className = "home-wrap";
 
-  // 书房题头：品牌只占一行，操作留给右侧。
+  // 书房题头：只保留字标，不借用单字印章或“禅意”符号装饰品牌。
   const header = document.createElement("header");
   header.className = "home-masthead";
   const brand = document.createElement("div");
   brand.className = "home-brand";
-  const logo = document.createElement("span");
-  logo.className = "home-logo";
-  logo.textContent = "悟";
   const title = document.createElement("h1");
   title.textContent = "satori";
   const sub = document.createElement("p");
-  sub.textContent = "一个安静的 PDF 学习书房";
-  const brandCopy = document.createElement("div");
-  brandCopy.append(title, sub);
-  brand.append(logo, brandCopy);
+  sub.textContent = "PDF 学习书房";
+  brand.append(title, sub);
 
   const headerActions = document.createElement("div");
   headerActions.className = "home-header-actions";
@@ -393,18 +388,45 @@ function buildContinueStage(book: BookRecord): HTMLElement {
   button.className = "home-primary-action";
   button.textContent = currentBook?.id === book.id ? "回到书页" : "继续阅读";
   button.addEventListener("click", () => void openBook(book));
-  copy.append(eyebrow, title, meta, bar, button);
+  copy.append(eyebrow, title, meta);
 
-  const aside = document.createElement("aside");
-  aside.className = "home-rhythm";
-  const rhythmLabel = document.createElement("span");
-  rhythmLabel.className = "home-eyebrow";
-  rhythmLabel.textContent = "最近的节奏";
-  const summary = document.createElement("p");
-  summary.textContent = studySummaryText();
-  aside.append(rhythmLabel, summary);
+  const note = document.createElement("p");
+  note.className = "home-continue-note";
+  note.textContent = studySummaryText();
+  const footer = document.createElement("div");
+  footer.className = "home-continue-footer";
+  const progressLabel = document.createElement("span");
+  progressLabel.className = "home-progress-label";
+  progressLabel.textContent = `${progress.percent}%`;
+  footer.append(button, progressLabel);
 
-  stage.append(cover, copy, aside);
+  copy.append(note, bar, footer);
+  stage.append(cover, copy);
+
+  const latestUnderstanding = store.qa
+    .filter((entry) => entry.book_id === book.id)
+    .sort((a, b) => b.ts - a.ts)[0];
+  if (latestUnderstanding) {
+    stage.classList.add("has-trace");
+    const trace = document.createElement("button");
+    trace.type = "button";
+    trace.className = "home-last-trace";
+    trace.title = `回到第 ${latestUnderstanding.page} 页查看这段理解`;
+    const traceLabel = document.createElement("span");
+    traceLabel.className = "home-eyebrow";
+    traceLabel.textContent = "上次弄懂";
+    const traceQuestion = document.createElement("strong");
+    traceQuestion.textContent = latestUnderstanding.question;
+    const traceMeta = document.createElement("span");
+    traceMeta.className = "home-last-trace-meta";
+    traceMeta.textContent = `第 ${latestUnderstanding.page} 页 · 回看这段理解`;
+    trace.append(traceLabel, traceQuestion, traceMeta);
+    trace.addEventListener("click", async () => {
+      await openBook(book);
+      await reopenQA(latestUnderstanding);
+    });
+    stage.appendChild(trace);
+  }
   return stage;
 }
 

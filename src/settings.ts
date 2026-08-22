@@ -66,7 +66,7 @@ const OPENAI_URL = "https://api.openai.com/v1";
 const PROVIDERS: Record<AIProviderKind, ProviderSpec> = {
   model_studio: {
     label: "阿里云百炼",
-    shortLabel: "百",
+    shortLabel: "百炼",
     defaultName: "阿里云百炼",
     baseURL: MODEL_STUDIO_URL,
     defaultModel: "qwen3-vl-plus",
@@ -74,7 +74,7 @@ const PROVIDERS: Record<AIProviderKind, ProviderSpec> = {
   },
   open_ai: {
     label: "OpenAI",
-    shortLabel: "O",
+    shortLabel: "OpenAI",
     defaultName: "OpenAI",
     baseURL: OPENAI_URL,
     defaultModel: "gpt-5.6-terra",
@@ -82,7 +82,7 @@ const PROVIDERS: Record<AIProviderKind, ProviderSpec> = {
   },
   open_ai_compatible: {
     label: "OpenAI 兼容",
-    shortLabel: "兼",
+    shortLabel: "兼容",
     defaultName: "自定义连接",
     baseURL: "",
     defaultModel: "",
