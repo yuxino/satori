@@ -12,7 +12,7 @@ description: 启动 satori Tauri 应用进行开发/查看时使用。当用户�
 ## 为什么
 
 - `npm run tauri dev`（debug 构建，`!custom-protocol`）会触发 Tauri 运行时 Dock 图标覆盖，把 Dock 图标替换成**未蒙版的方形图标**（macOS 不套圆角蒙版）。这是已知坑，详见 `docs/plans/2026-08-16-tauri-dock-icon-design.md`。
-- `./scripts/dev-app.sh` 用与 `tauri build` 相同的 release + `custom-protocol` 路径，Dock 图标走 bundle icns + 系统蒙版，圆角正确；脚本自动选择唯一的 `Apple Development` 身份并在签名后校验 bundle ID。发布用的 `Developer ID Application` 只允许通过环境变量显式选择。
+- `./scripts/dev-app.sh` 使用 release + `custom-protocol` 的稳定签名壳，Dock 图标走 bundle icns + 系统蒙版，圆角正确；开发专用协议从仓库 `dist/` 读取最新前端，发布包仍使用内嵌资源。脚本自动选择唯一的 `Apple Development` 身份并在签名后校验 bundle ID。发布用的 `Developer ID Application` 只允许通过环境变量显式选择。
 - 普通 `tauri dev` 运行的是随重编译变化的 ad-hoc debug 二进制，会放大 macOS Keychain 授权问题。专用入口的启动与设置状态检查不解密 Key；真正测试或提问时才允许授权。
 
 ## 使用步骤
@@ -21,10 +21,10 @@ description: 启动 satori Tauri 应用进行开发/查看时使用。当用户�
 npm run app
 ```
 
-- 会自动停止旧 dev 实例、构建前端与 release Rust、组装并启动 `src-tauri/target/release/satori-dev.app`。
-- 首次或改动 Rust 时构建较慢（约 1 分钟），建议后台运行并等待输出。
-- 改前端后**必须重跑 `npm run app`**——release 构建加载的是打包进二进制的 `dist/`，没有热更新。
-- 可用 `SATORI_CODESIGN_IDENTITY` 明确指定带 Team ID 的 Apple 签名身份；发现多个 `Apple Development` 身份时脚本会要求显式选择。若机器只有本地自签证书，打开应用和查看连接状态不会弹授权，但任何改变应用内容的前端或 Rust 重建后，每个已保存连接在首次主动使用 AI 时仍可能需要一次 macOS 授权；安装 Apple Development 身份后可跨重建稳定授权。
+- 会自动停止旧 dev 实例并构建前端；只有 Rust、Cargo/Tauri 配置、图标、启动脚本或签名身份变化时，才重建并签名 `src-tauri/target/release/satori-dev.app`。
+- 首次或改动原生代码时构建较慢（约 1 分钟）；只有前端变化时会直接复用签名壳。
+- 改前端后仍重跑 `npm run app`，让 Vite 更新 `dist/` 并重开页面；原生 CDHash 不变，不会因此重新触发 Keychain 授权。
+- 可用 `SATORI_CODESIGN_IDENTITY` 明确指定带 Team ID 的 Apple 签名身份；发现多个 `Apple Development` 身份时脚本会要求显式选择。若机器只有本地自签证书，Rust/配置/签名变化后，每个已保存连接在首次主动使用 AI 时仍可能需要一次 macOS 授权；安装 Apple Development 身份后可跨原生重建稳定授权。
 
 ## 打包 release（仅当用户明确要求）
 

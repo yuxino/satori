@@ -19,12 +19,12 @@
 - **多 AI 服务配置（2026-08-22）**：设置页从“单个百炼 Key + 模型”升级为 master-detail 多连接管理。可同时保存多份百炼、OpenAI 或自定义 OpenAI-compatible 连接；配置名称、服务地址、模型、鉴权开关分别持久化，并明确“保存”和“设为当前”是两个动作。内置服务固定官方地址，自定义远端必须 HTTPS，本机 loopback 可用 HTTP；支持无需鉴权的本地/远程兼容服务
 - **设置 UI 重做**：780×560 macOS 偏好设置式界面，左侧连接列表、右侧编辑器、固定底部操作栏；支持添加/删除、Key 替换/移除、图片能力连接测试、字段错误、加载/成功/失败状态、未保存更改确认。已实机检查主窗口尺寸、内容滚动、底栏可见性、键盘焦点、Esc 和确认卡片；背景 inert、焦点环、深色变量、窄窗与减少动态样式齐全
 - **多 provider 安全边界**：AI 命令只接收 profile ID，Rust 从 Store 读取唯一档案；Keychain secret 绑定 provider + 规范化 endpoint + auth scope，关闭鉴权时完全不读取 Key；禁止重定向、限制响应大小并脱敏服务端错误。删除默认 Key 会清理旧 Qwen 条目并写 Keychain tombstone；损坏/未来版本 Store 不再静默回退百炼
-- **开发模式授权治理**：启动、设置页和状态刷新改为 Keychain existence-only 查询，不再解密 Key；自动目录恢复禁止弹系统授权，用户主动提问/测试后按 profile + scope + generation 缓存在 Rust 进程内。generation 同时绑定 Keychain envelope 与非敏感 sidecar，多实例通过本地锁串行保存/删除，旧缓存不会跨连接变更复用。`npm run app` 只自动选择唯一的 Apple Development 身份并校验结果；本地自签环境会明确提示每个连接首次主动使用的限制。已用两个不同 CDHash 的临时条目与正式 App 验证启动/设置无 XARA 弹窗
-- **旧配置无感迁移**：旧 `settings.model_id` 迁入确定性百炼 profile；旧 v3/v2 Keychain 或开发 Key 只允许绑定官方百炼 scope。Store 写入串行且原子化，保存前固定快照，profile ID/active ID/版本均验证。Rust 现有 23 项迁移、URL、请求体、SSE、错误、缓存与安全单测全部通过
+- **开发模式授权治理**：启动、设置页和状态刷新改为 Keychain existence-only 查询，不再解密 Key；自动目录恢复禁止弹系统授权，用户主动提问/测试后按 profile + scope + generation 缓存在 Rust 进程内。generation 同时绑定 Keychain envelope 与非敏感 sidecar，多实例通过本地锁串行保存/删除，旧缓存不会跨连接变更复用。`npm run app` 只自动选择唯一的 Apple Development 身份并校验结果；开发专用 `tauri://` 处理器从 `dist/` 读取前端，脚本只在原生输入或签名变化时重建 `.app`。已实测纯前端重启前后最终 CDHash 均为 `98ba24c…`；前一轮同机制的新进程实际读取 Key 并请求服务时无 SecurityAgent 或新 XARA 日志
+- **旧配置无感迁移**：旧 `settings.model_id` 迁入确定性百炼 profile；旧 v3/v2 Keychain 或开发 Key 只允许绑定官方百炼 scope。Store 写入串行且原子化，保存前固定快照，profile ID/active ID/版本均验证。Rust 现有 26 项迁移、URL、请求体、SSE、错误、缓存、安全与开发资源路径单测全部通过
 
 - **首页 / 总览**：启动落在首页（不再直接跳进上次的书）。GitHub 风格学习活动热力格子图（最近 26 周，薰衣草色阶按当天阅读页数+提问量分级）+ 统计卡片（学习天数/阅读页数/提问次数）+ 我的书卡片（进度条，`BookRecord.pageCount` 打开时记录）+ 最近提问列表；书菜单里「总览 · 学习活动」可随时返回。活动日志 `Store.activity`（日期 → pages/questions），翻页计数由阅读位置持久化防抖落盘、提问计数随保存问答落盘
 - **问书入口去副作用（2026-08-22）**：泛 AI 的星光悬浮球改为安静的书页图标。点击只展开「这页哪里卡住了？」提问面板并聚焦输入框，不读取 Keychain、不渲染页面图、不调用模型；只有用户发送问题或明确点「讲讲这一页」后才开始请求。已实机确认打开面板无 SecurityAgent/XARA 日志，Esc 可收起
-- **AI 回答交互**：讲解卡片顶部渐变 accent 条、流式回答前「正在讲…」三点动画、发送按钮悬停反馈、框选选区圆角柔边
+- **AI 回答交互**：讲解卡片改为紧凑的页边批注（420px、14px 无衬线正文、短行距、低权重操作与输入区），不再像放大的书页正文；保留流式回答前「正在讲…」三点动画、发送反馈和框选选区圆角柔边
 - **流式回答自动滚动**：首问/框选回答随内容增长自动滚到底（追问原本就有）
 - **清理**：删除未用 import/参数；移除旧全局 `settings.zoom`（缩放已按书记录，没记过的书打开即适合宽度，不再继承旧的 0.5）
 
@@ -44,16 +44,16 @@
 - **扫描书目录自动恢复（已闭环验证）**：开书后延迟触发 → 渲染书前部 4 页（scale 1.3）→ `extract_outline`（Qwen 提取印刷页码目录）→ 过滤前置内容（考试大纲/考核目标/题型举例/参考答案/罗马数字前缀等）→ `find_page_by_title` 在正文候选页定位第一章 → 偏移 = 实际页 − 印刷页 → 映射全部条目为 PDF 页码 → 持久化到 store；失败原因显示在目录抽屉
 - 扫描书目录恢复期间**暂停缩略图预热**（`preheatPaused`），避免整书预热排队挤占 PDF.js worker（此前渲染目录页要 100s+，修复后 1s）
 - 应用菜单：打开调试工具（⌥⌘I）、设置、退出
-- `scripts/dev-app.sh`：release 构建 + `custom-protocol` 打包真实 .app，Dock 图标圆角
+- `scripts/dev-app.sh`：release + `custom-protocol` 打包真实 .app，Dock 图标圆角；前端始终重建，签名原生壳按 native fingerprint 复用
 
 ## Known facts / pitfalls（避免重踩）
 
 - **Tauri dev 模式 Dock 图标是方形**：必须走 release + `custom-protocol`（详见 `docs/plans/2026-08-16-tauri-dock-icon-design.md`）
 - **设置确认不要用 `window.confirm`**：当前 Tauri capability 不允许 `plugin:dialog|confirm`，会触发致命错误；设置页使用自己的可访问确认卡片
 - **AI 命令不能信任 WebView 传来的完整 profile**：命令只收 ID，Rust 从 Store 解析；否则已保存 Key 可能被借给另一个自定义地址
-- **自签证书不能让 Keychain 授权跨重建稳定**：没有 Apple Team ID 时，macOS partition 按精确 CDHash 授权；普通本地证书的 designated requirement 稳定也不够。启动/查看连接状态只做 existence-only 查询；完整跨重建免弹需 Apple Development 身份（或显式选择带 Team ID 的其他 Apple 身份）
+- **自签证书不能让 Keychain 授权跨原生重建稳定**：没有 Apple Team ID 时，macOS partition 按精确 CDHash 授权；普通本地证书的 designated requirement 稳定也不够。开发脚本已让前端改动复用同一签名壳；Rust、原生配置或签名变化后仍可能授权一次。完整跨原生重建免弹需 Apple Development 身份（或显式选择带 Team ID 的其他 Apple 身份）
 - **前端构建与 Rust 测试不要并行**：Vite 会清理并重建 `dist/`，同时运行会让 Tauri `generate_context!` 短暂找不到嵌入资源；先 `npm run build`，再跑 Cargo
-- **白屏**：`custom-protocol` 决定前端资源是否嵌入二进制；dev-app.sh 用 `--features` 传可能不生效，已直接写进 Cargo.toml
+- **白屏**：发布构建的 `custom-protocol` 使用内嵌资源；开发构建额外启用 `dev-live`，用受限 `tauri://` 处理器读取 `dist/`。两条路径都必须在构建后实机打开，不能只看 TypeScript 编译
 - **滚动容器**：绝对定位页面不撑起滚动高度，必须加普通流式 spacer 撑高
 - **初次布局**：WebView 未完成布局时 clientWidth 为 0；需等一帧再量宽度 + ResizeObserver 兜底
 - **渲染模糊**：canvas scale 按每页逻辑宽度算（显示宽度×2），硬编码 /72 会超 canvas 上限被降级
