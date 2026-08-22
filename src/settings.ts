@@ -9,7 +9,7 @@ import {
   type Settings,
 } from "./api";
 
-export interface OpenAISettingsOptions {
+interface OpenAISettingsOptions {
   settings: Settings;
   persistSettings(next: Settings): Promise<void>;
   onChange?(next: Settings): void;

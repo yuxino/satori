@@ -1,26 +1,26 @@
 /* Satori 3.0 — 一本书，旁边坐着一个老师。 */
 
 :root {
-  /* 中性编辑工作台：纸白、石墨和单一墨蓝，不借用 AI 产品常见的彩色雾面。 */
-  --paper: #f5f6f5;
-  --paper-deep: #eceeec;
-  --ink: #202326;
-  --ink-soft: #62676b;
-  --ink-faint: #80868b;
-  --lavender: #40566c;
-  --lavender-soft: #e4e8ea;
-  --line: #d7dad8;
-  --sheet: #fdfdfc;
-  --activity-0: #e8ebea;
-  --activity-1: #d3dadc;
-  --activity-2: #afbdc4;
-  --activity-3: #7f94a2;
-  --activity-4: #40566c;
+  /* 黑白编辑工作台：暖金只是一条书签，不承担大面积界面上色。 */
+  --paper: #f6f6f4;
+  --paper-deep: #e9e9e6;
+  --ink: #121315;
+  --ink-soft: #55575a;
+  --ink-faint: #7b7d80;
+  --accent: #1b1c1e;
+  --accent-soft: #e9e9e7;
+  --warm: #b48237;
+  --line: #d8d8d5;
+  --sheet: #fefefd;
+  --activity-0: #e7e7e4;
+  --activity-1: #d0d0cc;
+  --activity-2: #a6a6a1;
+  --activity-3: #6d6e70;
+  --activity-4: #1b1c1e;
   /* 统一的浮层设计语言。 */
   --shadow-card: 0 8px 30px rgba(24, 30, 34, 0.12);
   --shadow-pop: 0 14px 48px rgba(0, 0, 0, 0.2);
   --radius-card: 14px;
-  --radius-pill: 999px;
   --serif: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
   --display: "Iowan Old Style", "Baskerville", "Times New Roman", serif;
   --sans: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
@@ -28,20 +28,21 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #222526;
-    --paper-deep: #191c1d;
-    --ink: #f1f2f1;
-    --ink-soft: #b3b8b8;
-    --ink-faint: #8f9698;
-    --lavender: #a7b8c3;
-    --lavender-soft: #333a3e;
-    --line: #414647;
-    --sheet: #272a2b;
-    --activity-0: #333839;
-    --activity-1: #455055;
-    --activity-2: #5e717a;
-    --activity-3: #7f96a1;
-    --activity-4: #a7b8c3;
+    --paper: #202122;
+    --paper-deep: #151617;
+    --ink: #f2f2ef;
+    --ink-soft: #b7b7b2;
+    --ink-faint: #92938f;
+    --accent: #f2f2ef;
+    --accent-soft: #353634;
+    --warm: #d4a45b;
+    --line: #41413f;
+    --sheet: #272827;
+    --activity-0: #353633;
+    --activity-1: #4d4e4b;
+    --activity-2: #71726e;
+    --activity-3: #a1a29d;
+    --activity-4: #eeeeea;
     --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.5);
     --shadow-pop: 0 14px 48px rgba(0, 0, 0, 0.6);
   }
@@ -115,11 +116,11 @@ body {
   position: fixed;
   z-index: 60;
   display: none;
-  border: 2px solid var(--lavender);
-  background: rgba(64, 86, 108, 0.14);
+  border: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--warm) 14%, transparent);
   pointer-events: none;
   border-radius: 3px;
-  box-shadow: 0 0 0 1px rgba(64, 86, 108, 0.18);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--warm) 20%, transparent);
 }
 
 /* ---- 阅读栏：悬停出现，自动淡出 ---- */
@@ -145,10 +146,25 @@ body {
 #loading-overlay .spinner {
   width: 18px;
   height: 18px;
-  border: 2px solid var(--lavender-soft);
-  border-top-color: var(--lavender);
+  border: 2px solid var(--accent-soft);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+#fatal-error {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  background: var(--paper);
+  color: #9a3128;
+  font: 14px/1.7 var(--sans);
+  text-align: left;
+  white-space: pre-wrap;
 }
 
 @keyframes spin {
@@ -180,7 +196,7 @@ body {
 
 #empty-state .open-book {
   border: none;
-  background: var(--lavender);
+  background: var(--accent);
   color: white;
   font-size: 15px;
   padding: 10px 26px;
@@ -191,7 +207,7 @@ body {
 }
 
 #empty-state .open-book:hover {
-  background: color-mix(in srgb, var(--lavender) 84%, black);
+  background: color-mix(in srgb, var(--accent) 84%, black);
 }
 
 /* ---- 首页：今天的书桌 ---- */
@@ -277,15 +293,15 @@ body {
 }
 
 .home-close {
-  color: var(--lavender);
-  background: color-mix(in srgb, var(--lavender-soft) 70%, transparent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
 }
 
 .home-quiet-action:hover,
 .home-close:hover,
 .home-section-action:hover {
   color: var(--ink);
-  background: var(--lavender-soft);
+  background: var(--accent-soft);
 }
 
 .home-continue {
@@ -309,7 +325,7 @@ body {
 }
 
 .home-featured-cover {
-  --book-cover: #30475d;
+  --book-cover: #202124;
   position: relative;
   width: 104px;
   height: 146px;
@@ -333,6 +349,17 @@ body {
   width: 1px;
   background: rgba(255, 255, 255, 0.22);
   box-shadow: 2px 0 rgba(0, 0, 0, 0.13);
+}
+
+.book-cover-type::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 13px;
+  width: 6px;
+  height: 18px;
+  background: var(--warm);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%);
 }
 
 .book-cover-kicker {
@@ -367,7 +394,7 @@ body {
 
 .home-eyebrow {
   display: block;
-  color: var(--lavender);
+  color: var(--accent);
   font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.12em;
@@ -405,16 +432,16 @@ body {
 .home-continue-progress span {
   display: block;
   height: 100%;
-  background: var(--lavender);
+  background: var(--accent);
 }
 
 .home-primary-action {
   min-height: 38px;
   margin-top: 0;
   padding: 9px 18px;
-  border: 1px solid var(--lavender);
+  border: 1px solid var(--accent);
   border-radius: 9px;
-  background: var(--lavender);
+  background: var(--accent);
   color: #fff;
   font: 13px/1 var(--sans);
   cursor: pointer;
@@ -424,7 +451,7 @@ body {
 
 .home-primary-action:hover {
   transform: translateY(-1px);
-  background: color-mix(in srgb, var(--lavender) 86%, white);
+  background: color-mix(in srgb, var(--accent) 86%, white);
 }
 
 .home-continue-footer {
@@ -473,7 +500,7 @@ body {
 }
 
 .home-last-trace:hover strong {
-  color: var(--lavender);
+  color: var(--accent);
 }
 
 .home-first-book {
@@ -560,6 +587,7 @@ body {
 }
 
 .grid-cell.future { opacity: 0.35; }
+.grid-cell.today { box-shadow: 0 0 0 1px var(--warm); }
 .grid-cell.level-1 { background: var(--activity-1); }
 .grid-cell.level-2 { background: var(--activity-2); }
 .grid-cell.level-3 { background: var(--activity-3); }
@@ -594,7 +622,7 @@ body {
 
 .home-section-action {
   margin-right: -8px;
-  color: var(--lavender);
+  color: var(--accent);
 }
 
 .home-books,
@@ -621,11 +649,11 @@ body {
 
 .home-book:hover {
   padding-left: 8px;
-  color: var(--lavender);
+  color: var(--accent);
 }
 
 .home-book-cover {
-  --book-cover: #30475d;
+  --book-cover: #202124;
   position: relative;
   width: 34px;
   height: 42px;
@@ -637,6 +665,12 @@ body {
   color: white;
   font: 15px/1 var(--serif);
   box-shadow: 0 3px 8px rgba(35, 31, 42, 0.14);
+}
+
+.home-book-cover.book-cover-type::after {
+  right: 5px;
+  width: 4px;
+  height: 11px;
 }
 
 .book-cover-monogram {
@@ -693,11 +727,11 @@ body {
 
 .home-recent-item:hover {
   padding-left: 8px;
-  color: var(--lavender);
+  color: var(--accent);
 }
 
 .home-recent-meta {
-  color: var(--lavender);
+  color: var(--accent);
   font-size: 10.5px;
   letter-spacing: 0.02em;
 }
@@ -730,7 +764,7 @@ body {
 }
 
 .home-wrap :where(button):focus-visible {
-  outline: 2px solid var(--lavender);
+  outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
 
@@ -768,7 +802,7 @@ body {
   position: absolute;
   inset: 0 auto 0 0;
   width: 3px;
-  background: var(--lavender);
+  background: var(--accent);
   opacity: 0.72;
 }
 
@@ -832,14 +866,14 @@ body {
 #teacher-sheet .sheet-history { right: 40px; }
 #teacher-sheet .sheet-close { right: 14px; font-size: 18px; top: 14px; }
 #teacher-sheet .sheet-history:hover,
-#teacher-sheet .sheet-close:hover { color: var(--lavender); }
+#teacher-sheet .sheet-close:hover { color: var(--accent); }
 
 #teacher-sheet .qa-scroll {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
   padding: 18px 22px 16px;
-  scrollbar-color: color-mix(in srgb, var(--lavender) 35%, transparent) transparent;
+  scrollbar-color: color-mix(in srgb, var(--accent) 35%, transparent) transparent;
 }
 
 #teacher-sheet .turn { margin-bottom: 18px; }
@@ -848,8 +882,8 @@ body {
   position: relative;
   margin: 0 0 15px;
   padding: 10px 13px 10px 15px;
-  border-left: 2px solid var(--lavender);
-  background: color-mix(in srgb, var(--lavender-soft) 64%, transparent);
+  border-left: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 64%, transparent);
   color: var(--ink-soft);
   font: 12.5px/1.55 var(--sans);
 }
@@ -858,7 +892,7 @@ body {
   content: "你问";
   display: block;
   margin-bottom: 3px;
-  color: var(--lavender);
+  color: var(--accent);
   font-size: 9.5px;
   font-weight: 600;
   letter-spacing: 0.12em;
@@ -896,8 +930,8 @@ body {
 #teacher-sheet .turn.answer blockquote {
   margin: 0 0 11px;
   padding: 8px 12px;
-  border-left: 2px solid var(--lavender);
-  background: var(--lavender-soft);
+  border-left: 2px solid var(--accent);
+  background: var(--accent-soft);
   color: var(--ink-soft);
 }
 
@@ -919,16 +953,16 @@ body {
 #teacher-sheet .turn.answer code.inline-code {
   padding: 1px 5px;
   border-radius: 4px;
-  background: var(--lavender-soft);
-  color: var(--lavender);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
-#teacher-sheet .turn.answer a { color: var(--lavender); text-underline-offset: 2px; }
+#teacher-sheet .turn.answer a { color: var(--accent); text-underline-offset: 2px; }
 #teacher-sheet .turn.answer strong { font-weight: 650; }
 
 #teacher-sheet .turn.answer.streaming:not(:has(.typing))::after {
   content: "▍";
-  color: var(--lavender);
+  color: var(--accent);
   animation: blink 1s steps(2) infinite;
 }
 
@@ -944,7 +978,7 @@ body {
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: var(--lavender);
+  background: var(--accent);
   opacity: 0.35;
   animation: typing-bounce 1.2s ease-in-out infinite;
 }
@@ -978,15 +1012,15 @@ body {
   cursor: pointer;
 }
 
-#teacher-sheet .actions button::after { content: "  →"; color: var(--lavender); }
-#teacher-sheet .actions button:hover { color: var(--lavender); }
+#teacher-sheet .actions button::after { content: "  →"; color: var(--accent); }
+#teacher-sheet .actions button:hover { color: var(--accent); }
 
 #teacher-sheet .teacher-prompt {
   padding: 24px 24px 12px;
 }
 
 #teacher-sheet .teacher-eyebrow {
-  color: var(--lavender);
+  color: var(--accent);
   font-size: 9.5px;
   font-weight: 600;
   letter-spacing: 0.12em;
@@ -1026,8 +1060,8 @@ body {
   cursor: pointer;
 }
 
-#teacher-sheet .teacher-page-explain::after { content: "→"; color: var(--lavender); }
-#teacher-sheet .teacher-page-explain:hover:not(:disabled) { color: var(--lavender); }
+#teacher-sheet .teacher-page-explain::after { content: "→"; color: var(--accent); }
+#teacher-sheet .teacher-page-explain:hover:not(:disabled) { color: var(--accent); }
 #teacher-sheet .teacher-page-explain:disabled { opacity: 0.45; cursor: default; }
 
 #teacher-sheet .qa-history-item {
@@ -1045,10 +1079,10 @@ body {
   font-family: var(--sans);
 }
 
-#teacher-sheet .qa-history-item > span:first-child { color: var(--lavender); font-size: 10px; }
+#teacher-sheet .qa-history-item > span:first-child { color: var(--accent); font-size: 10px; }
 #teacher-sheet .qa-history-item strong { overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 #teacher-sheet .qa-history-item > span:last-child { color: var(--ink-faint); font-size: 11px; line-height: 1.45; }
-#teacher-sheet .qa-history-item:hover strong { color: var(--lavender); }
+#teacher-sheet .qa-history-item:hover strong { color: var(--accent); }
 
 #teacher-sheet .qa-history-empty {
   padding: 12px 2px;
@@ -1093,7 +1127,7 @@ body {
   flex: none;
   border: 0;
   border-radius: 9px;
-  background: var(--lavender);
+  background: var(--accent);
   color: white;
   font: 12px/1 var(--sans);
   cursor: pointer;
@@ -1118,7 +1152,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--lavender);
+  color: var(--accent);
   background: var(--sheet);
   box-shadow: 0 7px 22px rgba(43, 42, 40, 0.13);
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
@@ -1146,8 +1180,8 @@ body {
 
 #ask-fab:hover {
   transform: translateY(-1px);
-  border-color: var(--lavender);
-  background: var(--lavender-soft);
+  border-color: var(--accent);
+  background: var(--accent-soft);
   box-shadow: 0 10px 28px rgba(43, 42, 40, 0.17);
 }
 
@@ -1159,7 +1193,7 @@ body {
 #ask-fab:focus-visible,
 #teacher-sheet :where(button, textarea):focus-visible,
 #bottom-bar :where(button, input):focus-visible {
-  outline: 2px solid var(--lavender);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -1204,7 +1238,7 @@ body {
   transform: translateX(-50%);
   z-index: 45;
   background: rgba(43, 42, 40, 0.88);
-  color: #f5f2ea;
+  color: #f5f5f2;
   font-size: 13px;
   padding: 10px 20px;
   border-radius: 999px;
@@ -1228,7 +1262,7 @@ body {
 
 #reopen-cue button {
   border: none;
-  background: var(--lavender);
+  background: var(--accent);
   color: white;
   font-size: 12px;
   padding: 4px 12px;
@@ -1239,7 +1273,7 @@ body {
 }
 
 #reopen-cue button:hover {
-  background: color-mix(in srgb, var(--lavender) 84%, black);
+  background: color-mix(in srgb, var(--accent) 84%, black);
 }
 
 /* ---- AI 服务设置：macOS 偏好设置式 master-detail ---- */
@@ -1255,10 +1289,10 @@ body {
   --settings-text-faint: #767d82;
   --settings-line: #d7dad8;
   --settings-line-strong: #c0c6c5;
-  --settings-accent: #40566c;
-  --settings-accent-hover: #32475a;
-  --settings-accent-soft: #e4e8ea;
-  --settings-focus: #40566c;
+  --settings-accent: #1b1c1e;
+  --settings-accent-hover: #000000;
+  --settings-accent-soft: #e9e9e7;
+  --settings-focus: #b48237;
   --settings-success: #287a45;
   --settings-success-soft: #e8f4ec;
   --settings-warning: #8a5b00;
@@ -2100,10 +2134,10 @@ body {
     --settings-text-faint: #969d9f;
     --settings-line: #414647;
     --settings-line-strong: #555c5e;
-    --settings-accent: #a7b8c3;
-    --settings-accent-hover: #bbc8d0;
-    --settings-accent-soft: #333a3e;
-    --settings-focus: #b1c0ca;
+    --settings-accent: #f2f2ef;
+    --settings-accent-hover: #ffffff;
+    --settings-accent-soft: #353634;
+    --settings-focus: #d4a45b;
     --settings-success: #79d598;
     --settings-success-soft: #203a2a;
     --settings-warning: #f0c36d;
@@ -2355,8 +2389,8 @@ body {
 }
 
 #bottom-bar .nav-btn:hover {
-  background: var(--lavender-soft);
-  color: var(--lavender);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 #bottom-bar .action-btn {
@@ -2374,8 +2408,8 @@ body {
 }
 
 #bottom-bar .action-btn:hover {
-  background: var(--lavender-soft);
-  color: var(--lavender);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* 首页按钮：房子图标，垂直居中。 */
@@ -2389,7 +2423,7 @@ body {
 }
 
 #bottom-bar .home-btn:hover {
-  color: var(--lavender);
+  color: var(--accent);
 }
 
 #bottom-bar .home-btn svg {
@@ -2418,8 +2452,8 @@ body {
 }
 
 #bottom-bar .page-num:hover {
-  color: var(--lavender);
-  background: var(--lavender-soft);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /* 当前章节提示（大书翻页时知道自己在哪一章）。 */
@@ -2436,7 +2470,7 @@ body {
 
 #bottom-bar .page-jump-input {
   width: 50px;
-  border: 1px solid var(--lavender);
+  border: 1px solid var(--accent);
   border-radius: 6px;
   padding: 2px 6px;
   font-size: 12px;
@@ -2535,8 +2569,8 @@ body {
 }
 
 #bottom-bar .zoom-group button:hover {
-  background: var(--lavender-soft);
-  color: var(--lavender);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 #bottom-bar .zoom-pct {
@@ -2549,8 +2583,8 @@ body {
 }
 
 #bottom-bar .zoom-pct:hover {
-  color: var(--lavender);
-  background: var(--lavender-soft);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /* ---- 书菜单（统一浮层语言） ---- */
@@ -2598,11 +2632,11 @@ body {
 }
 
 #book-menu .book-menu-item:hover {
-  background: var(--lavender-soft);
+  background: var(--accent-soft);
 }
 
 #book-menu .book-menu-item.current {
-  color: var(--lavender);
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -2660,9 +2694,9 @@ body {
 }
 
 #book-menu .book-menu-open:hover {
-  border-color: var(--lavender);
-  color: var(--lavender);
-  background: var(--lavender-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /* ---- 回看抽屉 ---- */
@@ -2703,8 +2737,8 @@ body {
 }
 
 #toc-drawer .toc-item:hover {
-  color: var(--lavender);
-  background: color-mix(in srgb, var(--lavender-soft) 68%, transparent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 68%, transparent);
 }
 
 #toc-drawer .toc-item.depth-1 {
@@ -2769,7 +2803,7 @@ body {
   cursor: pointer;
 }
 
-#toc-drawer .toc-header button:hover { background: var(--lavender-soft); color: var(--lavender); }
+#toc-drawer .toc-header button:hover { background: var(--accent-soft); color: var(--accent); }
 
 @media (max-width: 860px) {
   .home-wrap { width: min(100% - 36px, 720px); padding-top: 26px; }

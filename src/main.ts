@@ -23,8 +23,6 @@ function showFatalError(message: string) {
   if (root.querySelector("#fatal-error")) return;
   const div = document.createElement("div");
   div.id = "fatal-error";
-  div.style.cssText =
-    "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#f7f4ee;z-index:100;font:14px/1.7 -apple-system,'PingFang SC',sans-serif;color:#8a2b2b;padding:40px;text-align:left;white-space:pre-wrap;";
   div.textContent = `出错了：\n${message}`;
   root.appendChild(div);
 }
@@ -452,6 +450,7 @@ function buildEmptyDesk(): HTMLElement {
 function buildActivityGrid(): HTMLDivElement {
   const weeks = 52;
   const today = new Date();
+  const currentDateKey = dateKey(today);
   const monday = new Date(today);
   monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
 
@@ -502,6 +501,7 @@ function buildActivityGrid(): HTMLDivElement {
       const score = activity ? activity.pages + activity.questions * 5 : 0;
       const cell = document.createElement("span");
       cell.className = `grid-cell level-${activityLevel(score)}`;
+      if (key === currentDateKey) cell.classList.add("today");
       if (date.getTime() > today.getTime()) cell.classList.add("future");
       cell.style.gridColumn = String(weeks - week + 2);
       cell.style.gridRow = String(day + 2);
@@ -578,7 +578,7 @@ function buildBookCard(book: BookRecord): HTMLButtonElement {
 
 function hydrateBookCover(cover: HTMLElement, book: BookRecord) {
   const title = bookName(book.name) || "未命名";
-  const palette = ["#30475d", "#594148", "#3f554c", "#4b4a62", "#6a4b36", "#354e57"];
+  const palette = ["#202124", "#343537", "#48494b", "#5b5c5e", "#6d6e70", "#7e7e7b"];
   let hash = 0;
   for (const character of `${book.id}:${title}`) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
 
@@ -2249,7 +2249,7 @@ function scheduleBottomBarUpdate() {
 
   // 高亮当前页缩略图（直接改 border 颜色，比浮动框更简单可靠）。
   for (const [p, el] of thumbElements) {
-    el.style.borderColor = p === currentPage ? "var(--lavender)" : "transparent";
+    el.style.borderColor = p === currentPage ? "var(--accent)" : "transparent";
   }
   // 让当前页缩略图滚入视野（只横向滚动缩略图条本身）。
   const target = (currentPage - 1) * THUMB_STEP - barRect.width / 2 + THUMB_WIDTH / 2;

@@ -18,7 +18,7 @@ export interface BookRecord {
 }
 
 /** 某一天的学习活动量（总览热力格子图用）。 */
-export interface DayActivity {
+interface DayActivity {
   pages: number;
   questions: number;
 }
@@ -73,20 +73,20 @@ export interface HistoryTurn {
   content: string;
 }
 
-export interface EvidencePage {
+interface EvidencePage {
   page: number;
   jpeg: string;
 }
 
-export interface AskRequest {
+interface AskRequest {
   question: string;
   evidence: EvidencePage[];
   history: HistoryTurn[];
 }
 
-export const DEFAULT_PROFILE_ID = "model-studio-default";
+const DEFAULT_PROFILE_ID = "model-studio-default";
 
-export function defaultModelStudioProfile(): AIProfile {
+function defaultModelStudioProfile(): AIProfile {
   return {
     id: DEFAULT_PROFILE_ID,
     name: "阿里云百炼",
@@ -182,7 +182,7 @@ export function testAIProfile(profileId: string): Promise<string> {
 
 // ---- 扫描书目录恢复 ----
 
-export interface OutlineExtractRequest {
+interface OutlineExtractRequest {
   pages: EvidencePage[];
 }
 

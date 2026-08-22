@@ -9,7 +9,7 @@ export interface RegionSelection {
   rect: { x: number; y: number; width: number; height: number };
 }
 
-export interface ReaderCallbacks {
+interface ReaderCallbacks {
   onPageChange?: (page: number) => void;
   onRegionSelected?: (region: RegionSelection) => void;
 }

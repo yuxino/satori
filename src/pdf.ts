@@ -15,7 +15,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 const wasmUrl = "/";
 
 /// PDF 大纲目录项（扁平化，含层级深度）。
-export interface OutlineItem {
+interface OutlineItem {
   title: string;
   page: number;
   depth: number;
