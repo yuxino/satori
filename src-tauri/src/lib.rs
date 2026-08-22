@@ -147,7 +147,7 @@ pub fn run() {
             // 应用菜单（macOS 菜单栏）。调试工具不默认打开，由用户手动触发。
             let menu = Menu::with_items(
                 app,
-                &[&SubmenuBuilder::new(app, "satori")
+                &[&SubmenuBuilder::new(app, "Satori")
                     .item(
                         &MenuItemBuilder::with_id("toggle-devtools", "打开调试工具")
                             .accelerator("CmdOrCtrl+Option+I")
@@ -160,7 +160,7 @@ pub fn run() {
                     )
                     .separator()
                     .item(
-                        &MenuItemBuilder::with_id("quit", "退出 satori")
+                        &MenuItemBuilder::with_id("quit", "退出 Satori")
                             .accelerator("CmdOrCtrl+Q")
                             .build(app)?,
                     )

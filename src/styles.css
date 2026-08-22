@@ -244,7 +244,6 @@ body {
 }
 
 .home-masthead,
-.home-brand,
 .home-header-actions,
 .home-section-heading {
   display: flex;
@@ -253,18 +252,8 @@ body {
 
 .home-masthead {
   min-height: 38px;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 24px;
-}
-
-.home-brand {
-  gap: 16px;
-}
-
-.home-brand h1 {
-  font: 600 22px/1 var(--display);
-  letter-spacing: 0.22em;
-  text-transform: lowercase;
 }
 
 .home-header-actions {
@@ -284,18 +273,27 @@ body {
 }
 
 .home-settings-action {
-  width: 34px;
+  min-width: 64px;
   height: 34px;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   flex: none;
-  padding: 0;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
+  padding: 0 11px 0 9px;
+  border: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--sheet) 78%, transparent);
   color: var(--ink-soft);
+  font: 12px/1 var(--sans);
   cursor: pointer;
-  transition: color 0.16s ease, background 0.16s ease;
+  box-shadow: 0 1px 2px rgba(30, 35, 38, 0.025);
+  transition: color 0.16s ease, border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+.home-settings-action svg {
+  width: 17px;
+  height: 17px;
 }
 
 .home-close {
@@ -308,6 +306,15 @@ body {
 .home-section-action:hover {
   color: var(--ink);
   background: var(--accent-soft);
+}
+
+.home-settings-action:hover {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
+  transform: translateY(-1px);
+}
+
+.home-settings-action:active {
+  transform: translateY(0);
 }
 
 .home-continue {
@@ -1349,15 +1356,6 @@ body {
   min-width: 0;
 }
 
-#settings-modal .settings-eyebrow {
-  display: block;
-  margin-bottom: 2px;
-  color: var(--settings-accent);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-}
-
 #settings-modal .settings-title {
   margin: 0;
   color: var(--settings-text);
@@ -1384,9 +1382,13 @@ body {
   border-radius: 8px;
   background: transparent;
   color: var(--settings-text-muted);
-  font: 21px/1 var(--sans);
   cursor: pointer;
   transition: color 0.15s ease, background 0.15s ease;
+}
+
+#settings-modal .settings-icon-button svg {
+  width: 18px;
+  height: 18px;
 }
 
 #settings-modal .settings-icon-button:hover {

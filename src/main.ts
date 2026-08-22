@@ -194,23 +194,18 @@ function renderHome() {
   const wrap = document.createElement("div");
   wrap.className = "home-wrap";
 
-  // 首页题头只保留字标与明确的设置入口，避免主题化装饰压过阅读内容。
+  // 首页题头只保留操作入口，让内容本身承担页面识别。
   const header = document.createElement("header");
   header.className = "home-masthead";
-  const brand = document.createElement("div");
-  brand.className = "home-brand";
-  const title = document.createElement("h1");
-  title.textContent = "satori";
-  brand.appendChild(title);
 
   const headerActions = document.createElement("div");
   headerActions.className = "home-header-actions";
   const settingsBtn = document.createElement("button");
   settingsBtn.className = "home-settings-action";
   settingsBtn.type = "button";
-  settingsBtn.setAttribute("aria-label", "设置 AI 服务");
-  settingsBtn.title = "设置 AI 服务";
-  settingsBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V20.3h-3v-.08a1.7 1.7 0 0 0-1.04-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-2.12-2.12.06-.06A1.7 1.7 0 0 0 7 15a1.7 1.7 0 0 0-1.56-1.04H5.3v-3h.14A1.7 1.7 0 0 0 7 9.92a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.12-2.12.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 11.7 4.7V4.6h3v.1a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.12 2.12-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.04h.14v3h-.14A1.7 1.7 0 0 0 19.4 15Z"/></svg>`;
+  settingsBtn.setAttribute("aria-label", "打开设置");
+  settingsBtn.title = "设置";
+  settingsBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.75v2.1M12 18.15v2.1M20.25 12h-2.1M5.85 12h-2.1M17.83 6.17l-1.48 1.48M7.65 16.35l-1.48 1.48M17.83 17.83l-1.48-1.48M7.65 7.65 6.17 6.17"/><circle cx="12" cy="12" r="4.15"/><circle cx="12" cy="12" r="1.05" fill="currentColor" stroke="none"/></svg><span>设置</span>`;
   settingsBtn.addEventListener("click", () => openSettings());
   headerActions.appendChild(settingsBtn);
   if (currentDoc) {
@@ -221,7 +216,7 @@ function renderHome() {
     closeBtn.addEventListener("click", hideHome);
     headerActions.appendChild(closeBtn);
   }
-  header.append(brand, headerActions);
+  header.appendChild(headerActions);
   wrap.appendChild(header);
 
   const featured = featuredBook();
@@ -438,7 +433,7 @@ function buildEmptyDesk(): HTMLElement {
   const title = document.createElement("h2");
   title.textContent = "带一本正在读的书进来。";
   const body = document.createElement("p");
-  body.textContent = "Satori 会记住你读到哪里，并在真正卡住时陪你把这一页弄懂。";
+  body.textContent = "阅读位置会留在这台 Mac 上，真正卡住时再请老师一起弄懂这一页。";
   const button = document.createElement("button");
   button.className = "home-primary-action";
   button.textContent = "打开 PDF…";
@@ -589,7 +584,7 @@ function hydrateBookCover(cover: HTMLElement, book: BookRecord) {
   if (cover.classList.contains("home-featured-cover")) {
     const kicker = document.createElement("span");
     kicker.className = "book-cover-kicker";
-    kicker.textContent = "SATORI · READING";
+    kicker.textContent = "READING · EDITION";
     const coverTitle = document.createElement("strong");
     coverTitle.className = "book-cover-title";
     coverTitle.textContent = title;

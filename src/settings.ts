@@ -191,7 +191,6 @@ class AISettingsController {
 
     const header = createElement("header", "settings-header");
     const heading = createElement("div", "settings-heading");
-    const eyebrow = createElement("span", "settings-eyebrow", "SATORI");
     const title = createElement("h2", "settings-title", "设置");
     title.id = "settings-dialog-title";
     const description = createElement(
@@ -200,10 +199,10 @@ class AISettingsController {
       "在这台 Mac 上管理 AI 服务。密钥只保存在 macOS 钥匙串。",
     );
     description.id = "settings-dialog-description";
-    heading.append(eyebrow, title, description);
+    heading.append(title, description);
 
     const closeButton = createButton("settings-icon-button", "关闭设置");
-    closeButton.textContent = "×";
+    closeButton.innerHTML = `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="m5.5 5.5 9 9M14.5 5.5l-9 9"/></svg>`;
     closeButton.addEventListener("click", () => void this.requestClose());
     header.append(heading, closeButton);
 
