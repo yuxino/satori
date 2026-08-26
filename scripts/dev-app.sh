@@ -17,18 +17,13 @@ cd "$PROJECT_DIR"
 export CARGO_HOME="${CARGO_HOME:-$PROJECT_DIR/.cargo-home}"
 export npm_config_cache="${npm_config_cache:-$PROJECT_DIR/.npm-cache}"
 
-# Stop any previous dev instance.
-pkill -f "satori-dev.app/Contents/MacOS/satori" 2>/dev/null || true
-pkill -f "target/debug/satori" 2>/dev/null || true
-
-# Build the latest frontend. The development-only `tauri://` handler reads
-# these files from disk, so CSS/TypeScript changes do not have to be embedded
-# into (and therefore do not change) the signed native binary.
-npm run build
-
 APP="$PROJECT_DIR/src-tauri/target/release/satori-dev.app"
 STAMP="$PROJECT_DIR/src-tauri/target/release/satori-dev.native.sha256"
 
+# Resolve a stable identity before stopping a working app or rebuilding any
+# assets. Missing signing prerequisites must fail without disrupting the
+# current development session.
+#
 # Prefer an Apple-issued development identity. macOS can bind Keychain access
 # to its stable Team ID across rebuilds. Developer ID identities are never
 # selected automatically: development must not silently use a release key.
@@ -41,6 +36,11 @@ LOCAL_IDENTITIES="$(awk '/"mimi Local Development"/ {print $2}' <<<"$IDENTITIES"
 LOCAL_IDENTITY_COUNT="$(awk '/"mimi Local Development"/ {count++} END {print count + 0}' <<<"$IDENTITIES")"
 SIGNING_KIND="explicit"
 if [[ -n "${SATORI_CODESIGN_IDENTITY:-}" ]]; then
+  if [[ "$SATORI_CODESIGN_IDENTITY" == "-" ]]; then
+    printf '%s\n' 'error: SATORI_CODESIGN_IDENTITY=- is not allowed for the real development app.' >&2
+    printf '%s\n' 'Ad-hoc signing changes identity after native rebuilds and can repeat macOS authorization.' >&2
+    exit 1
+  fi
   IDENTITY="$SATORI_CODESIGN_IDENTITY"
 elif (( APPLE_DEVELOPMENT_COUNT > 1 )); then
   printf '%s\n' 'error: multiple Apple Development identities found; set SATORI_CODESIGN_IDENTITY to the intended certificate hash.' >&2
@@ -57,9 +57,25 @@ elif (( LOCAL_IDENTITY_COUNT == 1 )); then
   IDENTITY="$LOCAL_IDENTITIES"
   SIGNING_KIND="local"
 else
-  IDENTITY="-"
-  SIGNING_KIND="adhoc"
+  cat >&2 <<'EOF'
+error: development launch requires a stable macOS code-signing identity.
+
+Install an Apple Development identity, create the shared long-lived
+"mimi Local Development" identity, or set SATORI_CODESIGN_IDENTITY to an
+existing certificate fingerprint. Ad-hoc signing is rejected because it can
+make macOS request authorization again after every native rebuild.
+EOF
+  exit 1
 fi
+
+# Stop any previous dev instance.
+pkill -f "satori-dev.app/Contents/MacOS/satori" 2>/dev/null || true
+pkill -f "target/debug/satori" 2>/dev/null || true
+
+# Build the latest frontend. The development-only `tauri://` handler reads
+# these files from disk, so CSS/TypeScript changes do not have to be embedded
+# into (and therefore do not change) the signed native binary.
+npm run build
 
 # Hash only inputs that affect the native shell. `dist/` is deliberately not
 # included: it is served from disk by the feature-gated development protocol.

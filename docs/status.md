@@ -1,6 +1,6 @@
 # Current status
 
-Updated: 2026-08-23
+Updated: 2026-08-26
 
 ## Product
 
@@ -41,6 +41,7 @@ Satori is a local-first macOS PDF learning workspace. Reading stays central: the
 
 - Run frontend builds before Rust checks; Vite rebuilds assets embedded by Tauri.
 - Use `npm run app` for development viewing. Plain `tauri dev` changes the app identity and Dock icon behavior.
+- The real development app fails closed when no stable code-signing identity exists; ad-hoc signing is not a supported fallback because it changes macOS authorization identity after native rebuilds.
 - A self-signed identity has no Apple Team ID. Native rebuilds may require one authorization per saved profile on its first explicit AI use; startup and status inspection must remain interaction-free.
 - AI IPC accepts profile IDs only. Rust loads the trusted profile and verifies the credential scope before sending a request.
 - Fixed-name PDF.js WASM decoders belong in `public/`; Vite-hashed imports break JBIG2/JPEG2000/ICC decoding.
