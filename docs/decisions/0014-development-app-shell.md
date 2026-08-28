@@ -10,7 +10,7 @@
 
 1. 开发查看统一使用 `npm run app`，由 `scripts/dev-app.sh` 组装真实 `.app`；不把普通 `tauri dev` 作为受支持的应用启动入口。
 2. 开发壳使用 release 构建并启用 `tauri/custom-protocol`，让 Dock 图标来自 bundle 的 `icon.icns` 并由 macOS 正常蒙版。
-3. 仅开发构建启用 `dev-live`，通过受限磁盘资源处理器读取仓库 `dist/`。发布构建仍使用内嵌资源，不包含开发文件访问能力。
+3. 仅开发构建启用 `dev-live`，通过受限磁盘资源处理器读取仓库 `dist/`，并提供开发者工具菜单。发布构建仍使用内嵌资源，不包含开发文件访问能力或 WebView 开发者工具。
 4. 启动脚本按 Rust 源码、Cargo/Tauri 配置、图标、脚本和签名身份计算原生指纹。只有这些输入变化才重建并签名应用壳；普通前端变化只更新 `dist/`，保持 CDHash 不变。
 5. 签名身份选择与 Keychain 授权边界遵循 ADR 0012。脚本自动选择唯一的 Apple Development 身份；发布用 Developer ID 只能显式指定。
 

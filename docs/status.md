@@ -13,23 +13,23 @@ Satori is a local-first macOS PDF learning workspace. Reading stays central: the
 - Home: a restrained monochrome editorial layout containing the current book, 52-week activity grid, bookshelf, and recent Q&A. Book covers are sharp typographic covers rather than PDF thumbnails; labels describe questions and answers without claiming the learner understood them.
 - Brand treatment: in-page product-name decoration has been removed so the reading content stays primary. The app name appears as `Satori` only where system context requires it; the home settings entry now uses a quieter, clearer labeled icon.
 - Updates: the app checks GitHub Releases once after launch and offers a manual recheck in the settings header. A new stable version adds a quiet dot to the home settings button and opens only the official Releases page; Satori does not claim to install the current ZIP release in place.
-- Teacher: opening the page-side entry has no AI or Keychain side effects. A request starts only after an explicit question, page explanation, or region action; page images are ephemeral.
+- Teacher: opening the page-side entry has no AI or Keychain side effects. A request starts only after an explicit question, page explanation, region action, or outline-recognition action whose page range is disclosed first; page images are ephemeral.
 - History: completed Q&A is stored locally per book, can reopen the source page, and sends only bounded recent text for follow-ups.
 - AI services: multiple named Model Studio, OpenAI, or custom OpenAI-compatible visual profiles. The active profile is explicit and never silently replaced.
 - Credentials: API keys live only in macOS Keychain and are bound to profile, normalized endpoint, and auth scope. The renderer receives existence status, never secret data.
-- Safety: Rust resolves persisted profiles for AI commands, rejects insecure custom endpoints, disables redirects, sends `store: false` remotely, and does not read a key when auth is disabled. PDF.js is pinned to the patched 6.2.108 release, and model-generated links are limited to credential-free HTTP(S) destinations.
+- Safety: Rust resolves persisted profiles for AI commands, rejects insecure or overridden endpoints again before every save, disables redirects, sends `store: false` remotely, and does not read a key when auth is disabled. Normal questions send only the current page; adjacent pages require an explicit previous/next-page request. PDF.js is pinned to the patched 6.2.108 release; reopening a missing book fails closed instead of guessing a same-named path, and Tauri capabilities are least privilege.
 
 ## Version and installation
 
-- Current release: `v3.3.1`, a maintenance release that removes completed plans and superseded Swift-era decisions, keeping current constraints in ADRs 0010–0014.
-- The signed release bundle is built for Apple silicon and published through GitHub Releases; the same build is installed locally at `/Applications/Satori.app`.
-- The previous local application bundle is kept as a timestamped backup in `/Applications`.
+- Current source version: `3.3.1`. The published `v3.3.1` asset predates the current PDF.js, explicit page-transmission, request-safety, and capability hardening work; it must not be described as containing the current privacy boundary.
+- The published Apple-silicon bundle is locally signed, has no Apple Team ID or hardened-runtime/notarization proof, and is rejected by Gatekeeper assessment. `/Applications/Satori.app` is a separate local build and is not byte-identical to the published ZIP.
+- Future Tauri bundles declare macOS 14 as the minimum system version. The installed and published `v3.3.1` bundle still declares an older minimum and is not retroactively fixed by the source change.
 
 ## Verification baseline
 
-- Frontend: six focused Node tests, strict TypeScript unused-symbol checks, the Vite production build, and a production dependency audit pass. PDF.js loads as a separate reader-only chunk instead of delaying the home screen.
-- Rust: 29 tests pass; `cargo fmt --check` and Clippy with warnings denied pass.
-- Real app: the stable signed development shell opens the home, reader, directory, and settings screens; reports `v3.3.1` as current; and remains usable at the 720×520 minimum window size without SecurityAgent/XARA activity.
+- Frontend: 19 Node tests, strict TypeScript unused-symbol checking, and the Vite production build pass; `npm audit` reports no known vulnerabilities. PDF.js loads as a separate reader-only chunk instead of delaying the home screen.
+- Rust: the full test suite passes; `cargo fmt --check`, release and `dev-live` checks, and Clippy with warnings denied pass.
+- Real app: the signed development shell opens the home and settings screens, reports `v3.3.1`, uses the macOS 14 minimum-version metadata, and exits normally. No SecurityAgent/XARA process was triggered during the check.
 
 ## Repository hygiene
 
@@ -46,7 +46,7 @@ Satori is a local-first macOS PDF learning workspace. Reading stays central: the
 - A self-signed identity has no Apple Team ID. Native rebuilds may require one authorization per saved profile on its first explicit AI use; startup and status inspection must remain interaction-free.
 - AI IPC accepts profile IDs only. Rust loads the trusted profile and verifies the credential scope before sending a request.
 - Fixed-name PDF.js WASM decoders belong in `public/`; Vite-hashed imports break JBIG2/JPEG2000/ICC decoding.
-- Opening a PDF must never trigger scanned-outline recovery. The directory action must disclose that front pages will be sent to the active AI service and wait for an explicit click.
+- Opening a PDF must never trigger scanned-outline recovery. The directory action must disclose both bounded stages—including the exact page ranges and image counts for directory extraction and chapter-location sampling—and wait for an explicit click.
 - Switching books invalidates any in-flight explanation. Late chunks and completed answers must never appear in, or be saved against, a different book.
 - Removing a book must use separate accessible controls and an explicit destructive confirmation that names the local reading data and Q&A being removed.
 - Update checks use only the fixed GitHub API endpoint and the build version; download actions may open only the exact official Releases URL. Do not imply in-place installation until signed updater artifacts and a durable release pipeline exist.
@@ -55,6 +55,7 @@ Satori is a local-first macOS PDF learning workspace. Reading stays central: the
 
 ## Next work
 
-1. Validate one real page question with Model Studio, OpenAI, and a local OpenAI-compatible visual service.
-2. Install an Apple Development identity with a Team ID to eliminate the remaining native-rebuild authorization limitation.
-3. Continue refining the reading and explanation flow from real study sessions; keep the home visually quiet.
+1. When release work is explicitly authorized, publish a new version from the hardened source so users are no longer directed to the older `v3.3.1` asset; verify the exact ZIP, signature, Gatekeeper boundary, minimum OS, and launch behavior before updating release claims.
+2. Add an explicit “relink moved PDF” flow that preserves the existing book ID and learning history; missing stored paths currently fail closed and require the learner to choose the file again.
+3. Validate one real page question with Model Studio, OpenAI, and a local OpenAI-compatible visual service, then address extreme-page thumbnail and initial page-sizing memory costs from representative PDFs.
+4. Install an Apple Development identity with a Team ID to eliminate the remaining native-rebuild authorization limitation.

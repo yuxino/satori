@@ -24,17 +24,19 @@ A macOS app for reading PDF textbooks. The page stays at the center; when a para
 
 Requires macOS 14+ and an Apple silicon Mac. Download the latest build from [GitHub Releases](https://github.com/yuxino/satori/releases/latest).
 
-The current build is not Apple-notarized. On first launch, Control-click Satori, choose **Open**, then confirm once. Building from source requires Node.js 22.13+ and Rust:
+The published v3.3.1 build predates the explicit page-transmission controls in the current source. Do not use v3.3.1 with sensitive PDFs. Until a newer release is available, run the current source with Node.js 22.13+, Rust, and a stable macOS code-signing identity (Apple Development or a long-lived self-signed identity):
 
 ```bash
 npm install
 npm run app
 ```
 
+The published build is not Apple-notarized. If you still test it, Control-click Satori, choose **Open**, then confirm once.
+
 Open Settings and add an AI service connection before asking a question.
 
 ## Privacy
 
-Books and history stay on your Mac. Relevant page images are sent to the active AI service only after you submit a question or explicitly ask for a page explanation; opening the question panel alone does not make a request.
+In the current source, books and history stay on your Mac. Relevant page images are sent to the active AI service only after you submit a question, complete an explicit region selection, or choose the outline-recognition action after its page range is disclosed; opening the question panel alone does not make a request.
 
 [MIT](LICENSE) © 2026 yuxino

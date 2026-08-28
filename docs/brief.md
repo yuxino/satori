@@ -7,7 +7,7 @@ Build a local-first Mac reading workspace that helps the learner understand diff
 ## Current product
 
 - Open local text, scanned, or mixed PDFs without copying them into the repository or cloud storage.
-- Render pages with PDF.js and restore each book's page, zoom, spread mode, and recovered outline. For a scanned book without a directory, send front pages for outline recovery only after the learner chooses the disclosed directory action.
+- Render pages with PDF.js and restore each book's page, zoom, spread mode, and recovered outline. For a scanned book without a directory, send only the bounded page sets disclosed by the directory action after the learner chooses it.
 - Use the visible page or a selected region as ephemeral visual evidence for an explanation.
 - Keep the bookshelf, reading activity, and per-book Q&A history in local Application Support storage.
 - Configure multiple named visual AI services while keeping every API key in macOS Keychain.
@@ -23,4 +23,4 @@ Build a local-first Mac reading workspace that helps the learner understand diff
 
 ## Evidence and privacy
 
-The page is the evidence. Satori renders bounded page images locally and sends them only after an explicit question or explanation action. Selected-region images and provider request context are not persisted; remote requests disable provider-side response storage where supported.
+The page is the evidence. Satori renders bounded page images locally and sends them only after an explicit question, region action, or outline-recognition action whose page range is disclosed first. A normal question sends only the current page; adjacent pages are included only when the learner explicitly asks about the previous or next page. Selected-region images and provider request context are not persisted; remote requests disable provider-side response storage where supported.

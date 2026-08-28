@@ -24,17 +24,19 @@
 
 需要 macOS 14+ 和 Apple 芯片 Mac。请从 [GitHub Releases](https://github.com/yuxino/satori/releases/latest) 下载最新版本。
 
-当前版本尚未经过 Apple 公证。首次启动时，请按住 Control 点击 Satori，选择「打开」，再确认一次。从源码运行需要 Node.js 22.13+ 和 Rust：
+已发布的 v3.3.1 早于当前源码中的显式书页发送控制，不要用 v3.3.1 打开敏感 PDF。在新版发布前，请使用 Node.js 22.13+、Rust 和稳定的 macOS 代码签名身份（Apple Development 或长期自签身份）运行当前源码：
 
 ```bash
 npm install
 npm run app
 ```
 
+已发布版本尚未经过 Apple 公证。如果仍要试用，请按住 Control 点击 Satori，选择「打开」，再确认一次。
+
 打开设置，添加一个 AI 服务连接后即可提问。
 
 ## 隐私
 
-书和阅读历史都存在本机。只有在你发送问题或明确选择「讲讲这一页」后，相关书页图像才会发送给当前使用的 AI 服务；仅仅打开「问书」面板不会发起请求。
+在当前源码中，书和阅读历史都存在本机。相关书页图像只会在你发送问题、完成明确的框选操作，或在看到发送页数后主动选择「识别目录」时发送给当前 AI 服务；仅仅打开「问书」面板不会发起请求。
 
 [MIT](LICENSE) © 2026 yuxino
