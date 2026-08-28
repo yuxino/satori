@@ -120,6 +120,27 @@ pub fn debug_log(msg: &str) {
 
 pub struct AppState {
     pub client: reqwest::Client,
+    pub direct_client: reqwest::Client,
+}
+
+impl AppState {
+    pub(crate) fn ai_client(&self, is_local: bool) -> &reqwest::Client {
+        if is_local {
+            &self.direct_client
+        } else {
+            &self.client
+        }
+    }
+}
+
+fn build_http_client(direct: bool) -> reqwest::Client {
+    let builder = reqwest::Client::builder()
+        // API requests must never forward credentials or page images to a
+        // redirect target. Users configure the final endpoint.
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(120));
+    let builder = if direct { builder.no_proxy() } else { builder };
+    builder.build().expect("failed to build http client")
 }
 
 pub fn run() {
@@ -133,13 +154,10 @@ pub fn run() {
                 .build(),
         )
         .manage(AppState {
-            client: reqwest::Client::builder()
-                // API requests must never forward credentials or page images
-                // to a redirect target. Users configure the final endpoint.
-                .redirect(reqwest::redirect::Policy::none())
-                .timeout(std::time::Duration::from_secs(120))
-                .build()
-                .expect("failed to build http client"),
+            client: build_http_client(false),
+            // Loopback AI services are a local privacy boundary. Never let
+            // HTTP_PROXY or other ambient proxy settings intercept them.
+            direct_client: build_http_client(true),
         });
     // A feature-gated development shell serves the latest Vite build from
     // disk without embedding it into each native rebuild. Production builds
@@ -152,33 +170,33 @@ pub fn run() {
         .setup(|app| {
             use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
 
-            // 应用菜单（macOS 菜单栏）。调试工具不默认打开，由用户手动触发。
-            let menu = Menu::with_items(
-                app,
-                &[&SubmenuBuilder::new(app, "Satori")
-                    .item(
-                        &MenuItemBuilder::with_id("toggle-devtools", "打开调试工具")
-                            .accelerator("CmdOrCtrl+Option+I")
-                            .build(app)?,
-                    )
-                    .item(
-                        &MenuItemBuilder::with_id("settings", "设置…")
-                            .accelerator("CmdOrCtrl+,")
-                            .build(app)?,
-                    )
-                    .separator()
-                    .item(
-                        &MenuItemBuilder::with_id("quit", "退出 Satori")
-                            .accelerator("CmdOrCtrl+Q")
-                            .build(app)?,
-                    )
-                    .build()?],
-            )?;
+            let app_menu = SubmenuBuilder::new(app, "Satori");
+            #[cfg(feature = "dev-live")]
+            let app_menu = app_menu.item(
+                &MenuItemBuilder::with_id("toggle-devtools", "打开调试工具")
+                    .accelerator("CmdOrCtrl+Option+I")
+                    .build(app)?,
+            );
+            let app_menu = app_menu
+                .item(
+                    &MenuItemBuilder::with_id("settings", "设置…")
+                        .accelerator("CmdOrCtrl+,")
+                        .build(app)?,
+                )
+                .separator()
+                .item(
+                    &MenuItemBuilder::with_id("quit", "退出 Satori")
+                        .accelerator("CmdOrCtrl+Q")
+                        .build(app)?,
+                )
+                .build()?;
+            let menu = Menu::with_items(app, &[&app_menu])?;
             app.set_menu(menu)?;
 
             Ok(())
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
+            #[cfg(feature = "dev-live")]
             "toggle-devtools" => {
                 // 手动打开 WebView 调试工具（用户决定何时查看，不自动打开）。
                 if let Some(window) = app.get_webview_window("main") {
@@ -216,7 +234,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod dev_asset_tests {
-    use super::dev_asset_relative_path;
+    use super::{build_http_client, dev_asset_relative_path, AppState};
     use std::path::PathBuf;
 
     #[test]
@@ -239,5 +257,15 @@ mod dev_asset_tests {
     fn dev_asset_rejects_plain_and_encoded_parent_segments() {
         assert_eq!(dev_asset_relative_path("/../store.json"), None);
         assert_eq!(dev_asset_relative_path("/%2e%2e/store.json"), None);
+    }
+
+    #[test]
+    fn local_ai_requests_select_the_no_proxy_client() {
+        let state = AppState {
+            client: build_http_client(false),
+            direct_client: build_http_client(true),
+        };
+        assert!(std::ptr::eq(state.ai_client(false), &state.client));
+        assert!(std::ptr::eq(state.ai_client(true), &state.direct_client));
     }
 }

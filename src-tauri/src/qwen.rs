@@ -541,7 +541,14 @@ pub async fn ask_visual(
     messages.push(ChatMessage::parts("user", user_parts));
 
     let body = build_chat_request(&profile, messages, true, 900);
-    let response = send_chat_request(&state.client, &app, &profile, &body, true).await?;
+    let response = send_chat_request(
+        state.ai_client(profile.is_local),
+        &app,
+        &profile,
+        &body,
+        true,
+    )
+    .await?;
     collect_stream(response, &app, &request_id).await
 }
 
@@ -563,7 +570,14 @@ pub async fn extract_outline(
         ChatMessage::parts("user", user_parts),
     ];
     let body = build_chat_request(&profile, messages, false, 3000);
-    let response = send_chat_request(&state.client, &app, &profile, &body, false).await?;
+    let response = send_chat_request(
+        state.ai_client(profile.is_local),
+        &app,
+        &profile,
+        &body,
+        false,
+    )
+    .await?;
     let content = parse_non_stream_response(response).await?;
     parse_outline_content(&content)
 }
@@ -587,7 +601,14 @@ pub async fn find_page_by_title(
         ChatMessage::parts("user", user_parts),
     ];
     let body = build_chat_request(&profile, messages, false, 200);
-    let response = send_chat_request(&state.client, &app, &profile, &body, false).await?;
+    let response = send_chat_request(
+        state.ai_client(profile.is_local),
+        &app,
+        &profile,
+        &body,
+        false,
+    )
+    .await?;
     let content = parse_non_stream_response(response).await?;
     Ok(parse_page_number(&content))
 }
@@ -618,7 +639,14 @@ pub async fn test_ai_profile(
         ),
     ];
     let body = build_chat_request(&profile, messages, false, 64);
-    let response = send_chat_request(&state.client, &app, &profile, &body, true).await?;
+    let response = send_chat_request(
+        state.ai_client(profile.is_local),
+        &app,
+        &profile,
+        &body,
+        true,
+    )
+    .await?;
     parse_non_stream_response(response).await
 }
 

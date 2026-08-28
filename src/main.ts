@@ -49,6 +49,8 @@ import {
 import type { PDFDocument } from "./pdf";
 import { ScrollReader, type RegionSelection } from "./reader";
 import { renderMarkdown } from "./markdown";
+import { requestedEvidencePages } from "./evidence-policy";
+import { outlineEvidencePlan } from "./outline-evidence-policy";
 import { RequestGate } from "./request-gate";
 import { openAISettings } from "./settings";
 import {
@@ -74,7 +76,7 @@ let currentBook: BookRecord | null = null;
 let currentDoc: PDFDocument | null = null;
 let reader: ScrollReader | null = null;
 let currentPage = 1;
-/// 用户缩放倍数：1 = 页面宽度铺满窗口，可 ⌘+/⌘- 调整。
+/// 用户缩放倍数：1 = 页面或展开适合窗口，可 ⌘+/⌘- 调整。
 let zoomFactor = 1;
 let history: HistoryTurn[] = [];
 const questionGate = new RequestGate();
@@ -735,7 +737,7 @@ async function openBook(book: BookRecord) {
       store.books = store.books.map((b) => (b.id === resolved.id ? resolved : b));
     }
     currentPage = Math.min(Math.max(resolved.last_page, 1), currentDoc.pageCount);
-    // 恢复这本书自己的缩放倍数；没记过就是 1（适合宽度）。
+    // 恢复这本书自己的缩放倍数；没记过就是 1（适合窗口）。
     // 每本书记住各自的缩放，切书时不会互相串。
     zoomFactor = clampZoom(resolved.zoom ?? 1);
     readerSurface.replaceChildren();
@@ -816,7 +818,7 @@ function ensureScrollListener() {
   readerSurface.addEventListener("scroll", () => void reader?.onScroll(), { passive: true });
 }
 
-// ---- 渲染：连续滚动阅读器接管，这里只做滚动/缩放入口 ----
+// ---- 渲染：翻页阅读器接管，这里只做翻页/缩放入口 ----
 
 // ---- 重开提示 ----
 function showReopenCue(book: BookRecord) {
@@ -843,6 +845,19 @@ function showReopenCue(book: BookRecord) {
 /// 当前书的有效目录（内置大纲清洗后 / 扫描恢复的持久化目录），
 /// 供底部栏「当前章节」指示使用。
 let effectiveOutline: OutlineEntry[] = [];
+
+function describePageSelection(pages: number[]): string {
+  if (pages.length === 0) return "没有可发送的页面";
+  if (pages.length === 1) return `PDF 第 ${pages[0]} 页（1 张）`;
+  const first = pages[0];
+  const last = pages[pages.length - 1];
+  const step = pages[1] - first;
+  if (pages.every((page, index) => index === 0 || page - pages[index - 1] === step)) {
+    if (step === 1) return `PDF 第 ${first}–${last} 页（${pages.length} 张）`;
+    if (step === 2) return `PDF 从第 ${first} 页起每隔一页，到第 ${last} 页（${pages.length} 张）`;
+  }
+  return `PDF 第 ${pages.join("、")} 页（${pages.length} 张）`;
+}
 
 function buildTOC() {
   tocDrawer.innerHTML = "";
@@ -910,18 +925,26 @@ function buildTOC() {
     empty.className = "toc-recovery";
     const title = document.createElement("strong");
     title.textContent = errorMessage ? "目录识别没有完成" : "这本书没有内置目录";
+    const plan = outlineEvidencePlan(renderedDoc?.pageCount ?? book.pageCount ?? 0);
     const description = document.createElement("p");
     description.id = "toc-recovery-disclosure";
-    description.textContent = errorMessage
-      ? errorMessage
-      : "需要时，可以把书前几页发送到当前 AI 服务来识别章节。打开书本身不会发送内容。";
+    description.textContent =
+      `点击后会分两次把书页发送到当前 AI 服务：先发送${describePageSelection(plan.outlinePages)}识别章节，` +
+      `再发送${describePageSelection(plan.chapterProbePages)}定位第一章。打开书本身不会发送内容。`;
+    const error = errorMessage ? document.createElement("p") : null;
+    if (error) {
+      error.id = "toc-recovery-error";
+      error.textContent = errorMessage;
+    }
     const action = document.createElement("button");
     action.type = "button";
     action.textContent = recovering ? "正在识别…" : errorMessage ? "重新识别" : "识别目录";
     action.disabled = recovering;
-    action.setAttribute("aria-describedby", description.id);
+    action.setAttribute("aria-describedby", error ? `${error.id} ${description.id}` : description.id);
     action.addEventListener("click", () => void recoverScannedOutline());
-    empty.append(title, description, action);
+    empty.append(title);
+    if (error) empty.append(error);
+    empty.append(description, action);
     tocContent.appendChild(empty);
   };
 
@@ -1016,18 +1039,18 @@ async function recoverScannedOutline() {
     if (currentDoc !== doc || currentBook?.id !== bookId) return;
 
     const pageCount = doc.pageCount;
-    // 目录通常在书前部；取第 3-6 页（跳过封面/书名页/前 1-2 页）。
-    // 4 页 + 1.3x 是请求大小与覆盖面的折中。
-    const frontFrom = 3;
-    const frontTo = Math.min(pageCount, 6);
-    if (frontTo <= frontFrom) throw new Error("页数太少，无法从书前内容识别目录。");
+    // 两阶段页面计划同时用于点击前披露，不能在请求处另写一套范围。
+    const evidencePlan = outlineEvidencePlan(pageCount);
+    if (evidencePlan.outlinePages.length === 0) {
+      throw new Error("页数太少，无法从书前内容识别目录。");
+    }
 
     // 目录识别的渲染阶段需要独占 PDF.js worker；暂停缩略图预热。
     preheatPaused = true;
     // 1) 渲染目录候选页 → Qwen 提取目录（印刷页码）。
     const pages = await exportEvidence(
       doc,
-      [...Array(frontTo - frontFrom + 1)].map((_, i) => frontFrom + i),
+      evidencePlan.outlinePages,
       1.3,
     );
     if (currentDoc !== doc || currentBook?.id !== bookId) return;
@@ -1047,13 +1070,9 @@ async function recoverScannedOutline() {
     const firstChapter = (chapters.length > 0 ? chapters : fallbackChapters).reduce((a, b) =>
       b.page < a.page ? b : a,
     );
-    // 候选正文页：第一章印刷 21 + 前置约 5-15 = PDF 约 26-36。
-    // 扫 PDF 20 到 min(45, 书页数)，每 2 页取样控制请求大小。
-    const probeFrom = Math.min(Math.max(20, 1), pageCount);
-    const probeTo = Math.min(pageCount, Math.max(probeFrom + 1, 45));
     const probePages = await exportEvidence(
       doc,
-      [...Array(Math.max(1, Math.ceil((probeTo - probeFrom + 1) / 2)))].map((_, i) => probeFrom + i * 2),
+      evidencePlan.chapterProbePages,
       1.3,
     );
     if (currentDoc !== doc || currentBook?.id !== bookId) return;
@@ -1169,30 +1188,6 @@ async function askRegionQuestion(region: RegionSelection) {
   }
 }
 
-/// 决定一次提问带哪些页的图作为证据。规则基于自然语言触发，
-/// 读者不需要学会说「跨页」——表达「还是不懂/接上文/下一页」即可。
-function evidencePages(question: string, page: number, pageCount: number): number[] {
-  const last = pageCount;
-  const q = question;
-  const pages = new Set<number>();
-  pages.add(page);
-
-  const wantsBefore =
-    /接上文|前面|上一页|前文|刚才|上文|衔接|有什么关系|连起来/.test(q);
-  const wantsAfter =
-    /下一页|然后呢|继续|往下|后面|接着讲|讲完/.test(q);
-  const confused =
-    /还是不懂|换个说法|更简单|看不懂|没懂|不明白|换角度|例子/.test(q);
-
-  if (wantsBefore && page > 1) pages.add(page - 1);
-  if (wantsAfter && page < last) pages.add(page + 1);
-  if (confused && !wantsBefore && !wantsAfter) {
-    if (page > 1) pages.add(page - 1);
-    if (page < last) pages.add(page + 1);
-  }
-
-  return [...pages].sort((a, b) => a - b);
-}
 
 /// 把若干页渲染成 JPEG 数组，供 Rust 端作为多图证据。
 async function exportEvidence(
@@ -1227,7 +1222,7 @@ async function askQuestion(question: string) {
 
   try {
     // 页面图像即证据；跨页内容按自然语言触发自动扩页。
-    const pages = evidencePages(question, context.page, context.doc.pageCount);
+    const pages = requestedEvidencePages(context.page, context.doc.pageCount, question);
     const evidence = await exportEvidence(context.doc, pages);
     if (!questionContextIsCurrent(context)) return;
 
@@ -1594,7 +1589,7 @@ async function followUp(text: string) {
 
   let fullText = "";
   try {
-    const pages = evidencePages(text, context.page, context.doc.pageCount);
+    const pages = requestedEvidencePages(context.page, context.doc.pageCount, text);
     const evidence = await exportEvidence(context.doc, pages);
     if (!questionContextIsCurrent(context)) return;
 
@@ -1959,8 +1954,7 @@ async function applyZoom() {
   persistZoom();
 }
 
-/// 记住缩放倍数：写进当前书（每本书各自的缩放）+ 全局默认（新书的起点），
-/// 防抖写盘。
+/// 记住当前书自己的缩放倍数，并防抖写盘。
 let zoomPersistTimer: number | undefined;
 function persistZoom() {
   if (!store) return;
@@ -2143,7 +2137,7 @@ function renderBottomBar() {
   const zoomPct = document.createElement("button");
   zoomPct.type = "button";
   zoomPct.className = "zoom-pct";
-  zoomPct.title = "回到适合宽度";
+  zoomPct.title = "回到适合窗口";
   zoomPct.addEventListener("click", () => {
     zoomFactor = 1;
     void applyZoom();
@@ -2157,7 +2151,7 @@ function renderBottomBar() {
   });
   zoomGroup.append(zoomOut, zoomPct, zoomIn);
 
-  // 布局切换：单页连续滚动 ⇄ 双页（书本展开）。每本书记住自己的偏好。
+  // 布局切换：单页 ⇄ 双页（书本展开）。每本书记住自己的偏好。
   const layoutBtn = document.createElement("button");
   layoutBtn.className = "action-btn layout-btn";
   layoutBtn.addEventListener("click", () => {
@@ -2184,7 +2178,7 @@ function renderBottomBar() {
   updateBottomBarZoom();
   updateLayoutButton();
 
-  // 打开书时一次性渲染全部缩略图（缓存），滚动时只更新高亮。
+  // 先渲染当前页附近的缩略图，滚动时按需补充并更新高亮。
   void renderAllThumbnails();
 }
 
@@ -2214,11 +2208,11 @@ function updateLayoutButton() {
   if (!btn) return;
   const spread = currentBook?.spread === true;
   btn.textContent = spread ? "单页" : "双页";
-  btn.title = spread ? "切换为单页连续滚动" : "切换为双页（书本展开，两页并排）";
+  btn.title = spread ? "切换为单页" : "切换为双页（书本展开，两页并排）";
 }
 
 /// 切换单页/双页布局，并把偏好记到当前书。
-/// 换布局后回到「适合宽度」（单页 = 页宽铺满，双页 = 展开宽度铺满）。
+/// 换布局后回到「适合窗口」（单页或整个展开都不超出视口）。
 async function applyLayout(spread: boolean) {
   if (!reader) return;
   zoomFactor = 1;
@@ -2226,7 +2220,7 @@ async function applyLayout(spread: boolean) {
   await reader.setSpread(spread);
   if (currentBook) {
     currentBook.spread = spread;
-    currentBook.zoom = zoomFactor; // 布局切换后回到适合宽度，一并记住
+    currentBook.zoom = zoomFactor; // 布局切换后回到适合窗口，一并记住
     store.books = store.books.map((b) => (b.id === currentBook!.id ? currentBook! : b));
     await persist();
   }

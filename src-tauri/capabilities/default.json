@@ -4,8 +4,10 @@
   "description": "Default capability for the main window",
   "windows": ["main"],
   "permissions": [
-    "core:default",
-    "dialog:default",
+    "core:app:allow-version",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "dialog:allow-open",
     {
       "identifier": "opener:allow-open-url",
       "allow": [

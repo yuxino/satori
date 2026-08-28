@@ -14,6 +14,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_DIR"
 
+APP_VERSION="$(node -p 'JSON.parse(require("fs").readFileSync("src-tauri/tauri.conf.json", "utf8")).version')"
+if [[ ! "$APP_VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+  printf 'error: invalid macOS bundle version in tauri.conf.json: %s\n' "$APP_VERSION" >&2
+  exit 1
+fi
+
 export CARGO_HOME="${CARGO_HOME:-$PROJECT_DIR/.cargo-home}"
 export npm_config_cache="${npm_config_cache:-$PROJECT_DIR/.npm-cache}"
 
@@ -114,7 +120,7 @@ if (( NEEDS_NATIVE_BUILD == 1 )); then
   cp "$PROJECT_DIR/src-tauri/target/release/satori" "$APP/Contents/MacOS/satori"
   cp "$PROJECT_DIR/src-tauri/icons/icon.icns" "$APP/Contents/Resources/icon.icns"
 
-  cat > "$APP/Contents/Info.plist" <<'PLIST'
+  cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -128,7 +134,7 @@ if (( NEEDS_NATIVE_BUILD == 1 )); then
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.education</string>
   <key>CFBundleVersion</key>
-  <string>dev</string>
+  <string>${APP_VERSION}</string>
   <key>CFBundleExecutable</key>
   <string>satori</string>
   <key>CFBundleDisplayName</key>
@@ -148,7 +154,7 @@ if (( NEEDS_NATIVE_BUILD == 1 )); then
   <key>CFBundleDevelopmentRegion</key>
   <string>zh_CN</string>
   <key>CFBundleShortVersionString</key>
-  <string>3.0.0-dev</string>
+  <string>${APP_VERSION}</string>
 </dict>
 </plist>
 PLIST

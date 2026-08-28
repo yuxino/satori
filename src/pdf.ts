@@ -4,6 +4,7 @@ import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 
 // 现代 pdfjs-dist 的 worker 通过同源 URL 加载；在 Vite 下直接 import。
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { awaitPDFDocument } from "./pdf-loading";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -44,7 +45,7 @@ export class PDFDocument {
     loadingTask.onProgress = (p: { loaded: number; total: number }) => {
       onProgress?.(p.loaded, p.total);
     };
-    const doc = await loadingTask.promise;
+    const doc = await awaitPDFDocument(loadingTask);
     return new PDFDocument(doc, loadingTask);
   }
 

@@ -1,5 +1,5 @@
-// 连续滚动阅读器：页面从上到下排列、宽度铺满，懒渲染视口附近的页面，
-// 支持缩放、框选区域、页码映射。这是「书桌」的核心渲染层。
+// 翻页阅读器：页面从上到下排列并按页导航，懒渲染视口附近的页面；
+// 放大后允许页内滚动，并支持缩放、框选区域与页码映射。
 
 import type { PDFDocument } from "./pdf";
 
@@ -43,9 +43,6 @@ export class ScrollReader {
 
   /// 当前缩放：1 = 页面（或展开）恰好放进视口（宽高都不超出）。
   private zoom = 1;
-  /// 翻页模式：始终把当前页（或展开）整页放进视口并居中，滚动后吸附回整页，
-  /// 前后翻页用 ←/→（双页按行翻）。这是默认阅读方式，不自由下拉。
-  private flip = true;
   /// 双页模式（书本展开）：两页并排，缩放按整个展开算。
   private spread = false;
   private layouts: PageLayout[] = [];
@@ -429,7 +426,7 @@ export class ScrollReader {
     const layout = this.layouts[page - 1];
     if (!layout) return;
     let target = layout.top;
-    if (this.flip && layout.displayHeight <= this.surface.clientHeight) {
+    if (layout.displayHeight <= this.surface.clientHeight) {
       // 页面放得下：垂直居中。
       target = layout.top - (this.surface.clientHeight - layout.displayHeight) / 2;
     }

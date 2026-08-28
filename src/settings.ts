@@ -16,6 +16,7 @@ import {
   versionLabel,
   type AppUpdateSnapshot,
 } from "./update";
+import { apiBaseURLError, isValidAPIBaseURL } from "./provider-url-policy";
 
 interface OpenAISettingsOptions {
   settings: Settings;
@@ -1167,21 +1168,8 @@ class AISettingsController {
     if (!profile.name.trim()) errors.name = "请输入一个便于识别的配置名称。";
     if (!profile.model_id.trim()) errors.model_id = "请输入支持图片输入的模型 ID。";
 
-    const baseURL = profile.base_url.trim();
-    if (!baseURL) {
-      errors.base_url = "请输入 API 地址。";
-    } else {
-      try {
-        const parsed = new URL(baseURL);
-        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-          errors.base_url = "API 地址必须以 http:// 或 https:// 开头。";
-        } else if (parsed.username || parsed.password) {
-          errors.base_url = "不要把账号或密钥写进 API 地址。";
-        }
-      } catch {
-        errors.base_url = "请输入有效的 API 地址。";
-      }
-    }
+    const baseURLError = apiBaseURLError(profile.base_url);
+    if (baseURLError) errors.base_url = baseURLError;
 
     if (Object.keys(errors).length > 0) {
       this.fieldErrors.set(profile.id, errors);
@@ -1505,13 +1493,7 @@ function settingsEqual(left: Settings, right: Settings): boolean {
 }
 
 function hasCompleteMetadata(profile: AIProfile): boolean {
-  if (!profile.name.trim() || !profile.model_id.trim() || !profile.base_url.trim()) return false;
-  try {
-    const url = new URL(profile.base_url.trim());
-    return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password;
-  } catch {
-    return false;
-  }
+  return Boolean(profile.name.trim() && profile.model_id.trim() && isValidAPIBaseURL(profile.base_url));
 }
 
 function nextProfileName(profiles: AIProfile[]): string {

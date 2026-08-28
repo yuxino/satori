@@ -220,7 +220,7 @@ fn validate_profiles(profiles: &[AIProfile]) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_store_for_save(store: &Store) -> Result<(), String> {
+fn validate_store_structure(store: &Store) -> Result<(), String> {
     if store.schema_version > STORE_SCHEMA_VERSION {
         return Err(format!(
             "本地数据格式版本 {} 高于当前支持的版本 {}，请升级 Satori 后再保存。",
@@ -235,6 +235,14 @@ fn validate_store_for_save(store: &Store) -> Result<(), String> {
         .any(|profile| profile.id == store.settings.active_profile_id)
     {
         return Err("当前使用的 AI 连接不存在。".to_string());
+    }
+    Ok(())
+}
+
+fn validate_store_for_save(store: &Store) -> Result<(), String> {
+    validate_store_structure(store)?;
+    for profile in &store.settings.profiles {
+        crate::provider::validate_profile_for_storage(profile)?;
     }
     Ok(())
 }
@@ -348,7 +356,7 @@ fn parse_store(raw: &str) -> Result<Store, StoreParseError> {
     let mut store: Store = serde_json::from_value(value)
         .map_err(|error| StoreParseError::Invalid(error.to_string()))?;
     store.normalize().map_err(StoreParseError::Invalid)?;
-    validate_store_for_save(&store).map_err(StoreParseError::Invalid)?;
+    validate_store_structure(&store).map_err(StoreParseError::Invalid)?;
     Ok(store)
 }
 
@@ -385,37 +393,22 @@ fn write_store_atomically(path: &std::path::Path, contents: &[u8]) -> Result<(),
     result
 }
 
-/// 书文件可能被移动或改名：如果记录的路径不存在，尝试在常见位置
-/// （原路径的父目录、用户文档目录、桌面）按文件名找回。
+/// 已保存的书只能使用 Store 中记录的精确路径；文件移动后必须由用户
+/// 再次通过原生文件选择器选择，不能按同名文件静默扩大读取范围。
+fn resolve_persisted_book_path(book: BookRecord) -> Result<BookRecord, String> {
+    let path = PathBuf::from(&book.path);
+    if !path.exists() {
+        return Err(format!(
+            "找不到已保存的书文件：{}。请重新从本机选择这份 PDF。",
+            book.path
+        ));
+    }
+    Ok(book)
+}
+
 #[tauri::command]
 pub fn resolve_book_path(book: BookRecord) -> Result<BookRecord, String> {
-    let path = PathBuf::from(&book.path);
-    if path.exists() {
-        return Ok(book);
-    }
-    if let Some(name) = path.file_name() {
-        let mut candidates: Vec<PathBuf> = Vec::new();
-        if let Some(parent) = path.parent() {
-            candidates.push(parent.join(name));
-        }
-        if let Ok(home) = std::env::var("HOME") {
-            candidates.push(PathBuf::from(&home).join("Desktop").join(name));
-            candidates.push(PathBuf::from(&home).join("Documents").join(name));
-            candidates.push(PathBuf::from(&home).join("Downloads").join(name));
-        }
-        // 也试试当前工作目录（开发时书常放在项目附近）。
-        if let Ok(cwd) = std::env::current_dir() {
-            candidates.push(cwd.join(name));
-        }
-        for candidate in candidates {
-            if candidate.exists() {
-                let mut fixed = book.clone();
-                fixed.path = candidate.to_string_lossy().to_string();
-                return Ok(fixed);
-            }
-        }
-    }
-    Err(format!("找不到书文件：{}", book.path))
+    resolve_persisted_book_path(book)
 }
 
 #[cfg(test)]
@@ -560,5 +553,37 @@ mod tests {
             Err(StoreParseError::Unsupported(version))
                 if version == u64::from(STORE_SCHEMA_VERSION + 1)
         ));
+    }
+
+    #[test]
+    fn unsafe_legacy_profile_metadata_loads_for_repair_but_cannot_be_saved() {
+        let mut store = Store::default();
+        store.settings.profiles = vec![AIProfile {
+            id: "unsafe-profile".to_string(),
+            name: "Unsafe profile".to_string(),
+            provider: AIProviderKind::OpenAiCompatible,
+            base_url: "https://user:secret@example.com/v1".to_string(),
+            model_id: "vision-model".to_string(),
+            api_key_required: true,
+        }];
+        store.settings.active_profile_id = "unsafe-profile".to_string();
+
+        assert!(validate_store_for_save(&store).is_err());
+        let raw = serde_json::to_string(&store).expect("fixture store should serialize");
+        assert!(parse_store(&raw).is_ok());
+    }
+
+    #[test]
+    fn missing_persisted_book_never_rebinds_to_a_same_named_pdf() {
+        let saved = BookRecord {
+            id: "saved-book".to_string(),
+            name: "Saved book".to_string(),
+            path: "/path/that/does/not/exist/satori-book.pdf".to_string(),
+            ..BookRecord::default()
+        };
+
+        let error =
+            resolve_persisted_book_path(saved).expect_err("a missing path must fail closed");
+        assert!(error.contains("重新从本机选择"));
     }
 }

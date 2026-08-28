@@ -115,6 +115,26 @@ pub(crate) fn resolve_profile(profile: &AIProfile) -> Result<ResolvedProfile, St
     })
 }
 
+pub(crate) fn validate_profile_for_storage(profile: &AIProfile) -> Result<(), String> {
+    if profile.name.trim().is_empty() {
+        return Err("连接名称不能为空。".to_string());
+    }
+    resolve_profile(profile)?;
+    match profile.provider {
+        AIProviderKind::ModelStudio
+            if profile.base_url.trim() != MODEL_STUDIO_API_BASE || !profile.api_key_required =>
+        {
+            Err("阿里云百炼连接必须使用内置地址和 Key 鉴权。".to_string())
+        }
+        AIProviderKind::OpenAi
+            if profile.base_url.trim() != OPENAI_API_BASE || !profile.api_key_required =>
+        {
+            Err("OpenAI 连接必须使用内置地址和 Key 鉴权。".to_string())
+        }
+        _ => Ok(()),
+    }
+}
+
 pub(crate) fn normalize_chat_url(input: &str, user_supplied: bool) -> Result<(Url, bool), String> {
     if input.trim().is_empty() {
         return Err("API 地址不能为空。".to_string());
@@ -217,5 +237,32 @@ mod tests {
         .unwrap();
         assert!(!resolved.api_key_required);
         assert!(!resolved.is_local);
+    }
+
+    #[test]
+    fn stored_profiles_reject_unsafe_or_overridden_endpoints() {
+        for base_url in [
+            "http://example.com/v1",
+            "https://user:secret@example.com/v1",
+            "https://example.com/v1?key=secret",
+            "https://example.com/v1#models",
+        ] {
+            assert!(validate_profile_for_storage(&profile(
+                AIProviderKind::OpenAiCompatible,
+                base_url,
+                true,
+            ))
+            .is_err());
+        }
+
+        let mut overridden = profile(AIProviderKind::OpenAi, "https://proxy.example.com/v1", true);
+        assert!(validate_profile_for_storage(&overridden)
+            .unwrap_err()
+            .contains("内置地址"));
+        overridden.base_url = OPENAI_API_BASE.to_string();
+        overridden.api_key_required = false;
+        assert!(validate_profile_for_storage(&overridden)
+            .unwrap_err()
+            .contains("Key 鉴权"));
     }
 }

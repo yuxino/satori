@@ -5,13 +5,13 @@ description = "Satori — a local-first PDF learning workspace"
 edition = "2021"
 
 [features]
-dev-live = []
+dev-live = ["tauri/devtools"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset", "custom-protocol", "devtools"] }
+tauri = { version = "2", features = ["protocol-asset", "custom-protocol"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
