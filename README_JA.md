@@ -24,7 +24,7 @@ PDF の教科書を読むための macOS アプリです。主役は常にペー
 
 macOS 14+ と Apple シリコン搭載 Mac が必要です。[GitHub Releases](https://github.com/yuxino/satori/releases/latest) から最新版をダウンロードしてください。
 
-現在のビルドは Apple の公証を受けていません。初回起動時は Control キーを押しながら Satori をクリックし、**開く**を選んでもう一度確認してください。ソースから実行することもできます。
+現在のビルドは Apple の公証を受けていません。初回起動時は Control キーを押しながら Satori をクリックし、**開く**を選んでもう一度確認してください。ソースから実行するには Node.js 22.13+ と Rust が必要です。
 
 ```bash
 npm install

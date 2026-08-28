@@ -24,7 +24,7 @@
 
 需要 macOS 14+ 和 Apple 芯片 Mac。请从 [GitHub Releases](https://github.com/yuxino/satori/releases/latest) 下载最新版本。
 
-当前版本尚未经过 Apple 公证。首次启动时，请按住 Control 点击 Satori，选择「打开」，再确认一次。也可以从源码运行：
+当前版本尚未经过 Apple 公证。首次启动时，请按住 Control 点击 Satori，选择「打开」，再确认一次。从源码运行需要 Node.js 22.13+ 和 Rust：
 
 ```bash
 npm install

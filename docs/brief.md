@@ -7,7 +7,7 @@ Build a local-first Mac reading workspace that helps the learner understand diff
 ## Current product
 
 - Open local text, scanned, or mixed PDFs without copying them into the repository or cloud storage.
-- Render pages with PDF.js and restore each book's page, zoom, spread mode, and recovered outline.
+- Render pages with PDF.js and restore each book's page, zoom, spread mode, and recovered outline. For a scanned book without a directory, send front pages for outline recovery only after the learner chooses the disclosed directory action.
 - Use the visible page or a selected region as ephemeral visual evidence for an explanation.
 - Keep the bookshelf, reading activity, and per-book Q&A history in local Application Support storage.
 - Configure multiple named visual AI services while keeping every API key in macOS Keychain.

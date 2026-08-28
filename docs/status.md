@@ -9,7 +9,7 @@ Satori is a local-first macOS PDF learning workspace. Reading stays central: the
 ## Current implementation
 
 - Stack: Tauri 2, Vite, TypeScript, PDF.js, Rust, and local JSON persistence. The removed Swift app is available only at tag `legacy-swift`.
-- Reader: single/spread layouts, per-book page and zoom restoration, outline navigation, text and scanned-page rendering, and VLM-based outline recovery.
+- Reader: single/spread layouts, per-book page and zoom restoration, outline navigation, text and scanned-page rendering, and explicitly triggered VLM outline recovery for scanned books.
 - Home: a restrained monochrome editorial layout containing the current book, 52-week activity grid, bookshelf, and recent Q&A. Book covers are sharp typographic covers rather than PDF thumbnails; labels describe questions and answers without claiming the learner understood them.
 - Brand treatment: in-page product-name decoration has been removed so the reading content stays primary. The app name appears as `Satori` only where system context requires it; the home settings entry now uses a quieter, clearer labeled icon.
 - Updates: the app checks GitHub Releases once after launch and offers a manual recheck in the settings header. A new stable version adds a quiet dot to the home settings button and opens only the official Releases page; Satori does not claim to install the current ZIP release in place.
@@ -17,7 +17,7 @@ Satori is a local-first macOS PDF learning workspace. Reading stays central: the
 - History: completed Q&A is stored locally per book, can reopen the source page, and sends only bounded recent text for follow-ups.
 - AI services: multiple named Model Studio, OpenAI, or custom OpenAI-compatible visual profiles. The active profile is explicit and never silently replaced.
 - Credentials: API keys live only in macOS Keychain and are bound to profile, normalized endpoint, and auth scope. The renderer receives existence status, never secret data.
-- Safety: Rust resolves persisted profiles for AI commands, rejects insecure custom endpoints, disables redirects, sends `store: false` remotely, and does not read a key when auth is disabled.
+- Safety: Rust resolves persisted profiles for AI commands, rejects insecure custom endpoints, disables redirects, sends `store: false` remotely, and does not read a key when auth is disabled. PDF.js is pinned to the patched 6.2.108 release, and model-generated links are limited to credential-free HTTP(S) destinations.
 
 ## Version and installation
 
@@ -27,9 +27,9 @@ Satori is a local-first macOS PDF learning workspace. Reading stays central: the
 
 ## Verification baseline
 
-- Frontend: strict TypeScript unused-symbol check and Vite production build pass.
+- Frontend: six focused Node tests, strict TypeScript unused-symbol checks, the Vite production build, and a production dependency audit pass. PDF.js loads as a separate reader-only chunk instead of delaying the home screen.
 - Rust: 29 tests pass; `cargo fmt --check` and Clippy with warnings denied pass.
-- Real app: the stable signed development shell opens the home and settings screens, reports `v3.3.1` as current, rechecks successfully, and keeps the update control intact at the 720×520 minimum window size without SecurityAgent/XARA activity.
+- Real app: the stable signed development shell opens the home, reader, directory, and settings screens; reports `v3.3.1` as current; and remains usable at the 720×520 minimum window size without SecurityAgent/XARA activity.
 
 ## Repository hygiene
 
@@ -46,6 +46,9 @@ Satori is a local-first macOS PDF learning workspace. Reading stays central: the
 - A self-signed identity has no Apple Team ID. Native rebuilds may require one authorization per saved profile on its first explicit AI use; startup and status inspection must remain interaction-free.
 - AI IPC accepts profile IDs only. Rust loads the trusted profile and verifies the credential scope before sending a request.
 - Fixed-name PDF.js WASM decoders belong in `public/`; Vite-hashed imports break JBIG2/JPEG2000/ICC decoding.
+- Opening a PDF must never trigger scanned-outline recovery. The directory action must disclose that front pages will be sent to the active AI service and wait for an explicit click.
+- Switching books invalidates any in-flight explanation. Late chunks and completed answers must never appear in, or be saved against, a different book.
+- Removing a book must use separate accessible controls and an explicit destructive confirmation that names the local reading data and Q&A being removed.
 - Update checks use only the fixed GitHub API endpoint and the build version; download actions may open only the exact official Releases URL. Do not imply in-place installation until signed updater artifacts and a durable release pipeline exist.
 - Store corruption or a newer schema must surface an error, never reset to a default provider or overwrite data.
 - Do not restore plaintext API-key files, allow-all Keychain ACLs, renderer secrets, automatic AI requests, or legacy Swift packaging resources.

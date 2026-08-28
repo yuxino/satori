@@ -1,6 +1,6 @@
 // PDF.js 封装：加载文档、渲染页面、导出页面为 JPEG。
 import * as pdfjsLib from "pdfjs-dist";
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 
 // 现代 pdfjs-dist 的 worker 通过同源 URL 加载；在 Vite 下直接 import。
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -23,11 +23,13 @@ interface OutlineItem {
 
 export class PDFDocument {
   private doc: PDFDocumentProxy;
+  private loadingTask: PDFDocumentLoadingTask;
   /// 页面尺寸缓存（scale=1），连续滚动时避免反复异步取尺寸。
   private sizeCache = new Map<number, { width: number; height: number }>();
 
-  private constructor(doc: PDFDocumentProxy) {
+  private constructor(doc: PDFDocumentProxy, loadingTask: PDFDocumentLoadingTask) {
     this.doc = doc;
+    this.loadingTask = loadingTask;
   }
 
   static async load(url: string, onProgress?: (loaded: number, total: number) => void): Promise<PDFDocument> {
@@ -43,7 +45,7 @@ export class PDFDocument {
       onProgress?.(p.loaded, p.total);
     };
     const doc = await loadingTask.promise;
-    return new PDFDocument(doc);
+    return new PDFDocument(doc, loadingTask);
   }
 
   get pageCount(): number {
@@ -203,6 +205,6 @@ export class PDFDocument {
   }
 
   destroy() {
-    void this.doc.destroy();
+    void this.loadingTask.destroy();
   }
 }

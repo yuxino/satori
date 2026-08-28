@@ -2,6 +2,8 @@
 // 用 DOM API 构建而非 innerHTML，避免注入风险。
 // 支持：标题 / 无序有序列表 / 代码块 / 行内代码 / 粗斜体 / 引用 / 链接 / 段落。
 
+import { safeExternalHref } from "./link-policy";
+
 /** 渲染一段 Markdown 文本，返回可挂载的 DocumentFragment。 */
 export function renderMarkdown(text: string): DocumentFragment {
   const frag = document.createDocumentFragment();
@@ -160,12 +162,17 @@ function appendInline(parent: HTMLElement, text: string): void {
       if (match.index > lastIndex) {
         appendBoldItalic(parent, part.slice(lastIndex, match.index));
       }
-      const a = document.createElement("a");
-      a.textContent = match[1];
-      a.href = match[2];
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      parent.appendChild(a);
+      const href = safeExternalHref(match[2]);
+      if (href) {
+        const a = document.createElement("a");
+        a.textContent = match[1];
+        a.href = href;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        parent.appendChild(a);
+      } else {
+        parent.appendChild(document.createTextNode(match[1]));
+      }
       lastIndex = match.index + match[0].length;
     }
     if (!hasLink) {

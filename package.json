@@ -3,9 +3,13 @@
   "private": true,
   "version": "3.3.1",
   "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "app": "./scripts/dev-app.sh",
     "dev": "vite",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
     "build": "tsc && vite build",
     "tauri": "tauri"
   },
@@ -13,7 +17,7 @@
     "@tauri-apps/api": "^2.9.0",
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-opener": "^2.5.4",
-    "pdfjs-dist": "^5.4.150"
+    "pdfjs-dist": "6.2.108"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.9.0",

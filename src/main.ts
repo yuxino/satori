@@ -46,9 +46,10 @@ import {
   type Settings,
   type Store,
 } from "./api";
-import { PDFDocument } from "./pdf";
+import type { PDFDocument } from "./pdf";
 import { ScrollReader, type RegionSelection } from "./reader";
 import { renderMarkdown } from "./markdown";
+import { RequestGate } from "./request-gate";
 import { openAISettings } from "./settings";
 import {
   getAppUpdateSnapshot,
@@ -76,8 +77,35 @@ let currentPage = 1;
 /// 用户缩放倍数：1 = 页面宽度铺满窗口，可 ⌘+/⌘- 调整。
 let zoomFactor = 1;
 let history: HistoryTurn[] = [];
-let streaming = false;
+const questionGate = new RequestGate();
 let appUpdateState: AppUpdateSnapshot = getAppUpdateSnapshot();
+
+interface QuestionContext {
+  token: number;
+  bookId: string;
+  page: number;
+  doc: PDFDocument;
+}
+
+function beginQuestionContext(page = currentPage): QuestionContext | null {
+  if (!currentBook || !currentDoc) return null;
+  const token = questionGate.begin();
+  if (token === null) return null;
+  return {
+    token,
+    bookId: currentBook.id,
+    page,
+    doc: currentDoc,
+  };
+}
+
+function questionContextIsCurrent(context: QuestionContext): boolean {
+  return (
+    questionGate.isCurrent(context.token) &&
+    currentDoc === context.doc &&
+    currentBook?.id === context.bookId
+  );
+}
 
 subscribeToAppUpdates((state) => {
   appUpdateState = state;
@@ -668,6 +696,7 @@ async function openBook(book: BookRecord) {
     hideHome();
     return;
   }
+  questionGate.invalidate();
   showLoading("正在打开书…");
   hideHome();
   openingBook = true;
@@ -696,6 +725,7 @@ async function openBook(book: BookRecord) {
     window.clearTimeout(thumbVirtualTimer);
     hideLoading();
 
+    const { PDFDocument } = await import("./pdf");
     currentDoc = await PDFDocument.load(url, (loaded, total) => {
       if (total > 0) updateLoading(`正在打开书… ${Math.round((loaded / total) * 100)}%`);
     });
@@ -708,7 +738,7 @@ async function openBook(book: BookRecord) {
     // 恢复这本书自己的缩放倍数；没记过就是 1（适合宽度）。
     // 每本书记住各自的缩放，切书时不会互相串。
     zoomFactor = clampZoom(resolved.zoom ?? 1);
-    readerSurface.innerHTML = "";
+    readerSurface.replaceChildren();
     bottomBar.style.display = "flex";
     reader = new ScrollReader(readerSurface, currentDoc, {
       onPageChange: (page) => {
@@ -729,22 +759,24 @@ async function openBook(book: BookRecord) {
     renderBottomBar();
     showReopenCue(resolved);
     buildTOC();
-    // 扫描书无内置目录时自动识别。延迟到开书高峰（首屏渲染 + 缩略图预热）之后，
-    // 避免 3x 高清目录页渲染与首屏抢资源导致卡顿。
-    window.setTimeout(() => {
-      void maybeExtractScannedOutline();
-    }, 1500);
     // 更新书籍列表（路径可能被修正）。
     store.books = store.books.map((b) => (b.id === resolved.id ? resolved : b));
     await persist();
   } catch (err) {
     hideLoading();
-    readerSurface.innerHTML = `
-      <div id="empty-state">
-        <div class="hint">打不开这本书：${String(err)}</div>
-        <button class="open-book">换一本</button>
-      </div>`;
-    readerSurface.querySelector(".open-book")!.addEventListener("click", () => void pickAndOpenBook());
+    readerSurface.replaceChildren();
+    const empty = document.createElement("div");
+    empty.id = "empty-state";
+    const hint = document.createElement("div");
+    hint.className = "hint";
+    hint.textContent = `打不开这本书：${String(err)}`;
+    const openAnother = document.createElement("button");
+    openAnother.type = "button";
+    openAnother.className = "open-book";
+    openAnother.textContent = "换一本";
+    openAnother.addEventListener("click", () => void pickAndOpenBook());
+    empty.append(hint, openAnother);
+    readerSurface.appendChild(empty);
   } finally {
     openingBook = false;
   }
@@ -814,6 +846,8 @@ let effectiveOutline: OutlineEntry[] = [];
 
 function buildTOC() {
   tocDrawer.innerHTML = "";
+  const renderedBook = currentBook;
+  const renderedDoc = currentDoc;
 
   // PDF 目录（章节快速跳转）。
   const tocHeader = document.createElement("div");
@@ -831,14 +865,23 @@ function buildTOC() {
   tocClose.addEventListener("click", () => tocDrawer.classList.remove("open"));
   tocHeader.append(tocHeading, tocClose);
   tocDrawer.appendChild(tocHeader);
+  const tocContent = document.createElement("div");
+  tocContent.className = "toc-content";
+  tocDrawer.appendChild(tocContent);
+
+  const isCurrentTOC = () =>
+    tocContent.isConnected &&
+    currentDoc === renderedDoc &&
+    (currentBook?.id ?? null) === (renderedBook?.id ?? null);
 
   const renderOutline = (outline: OutlineEntry[], sourceNote: string) => {
-    if (!tocDrawer.isConnected) return;
+    if (!isCurrentTOC()) return;
+    tocContent.replaceChildren();
     if (outline.length === 0) {
       const empty = document.createElement("div");
       empty.className = "toc-item depth-2";
       empty.textContent = sourceNote || "这本书还没有目录。";
-      tocDrawer.appendChild(empty);
+      tocContent.appendChild(empty);
       return;
     }
     for (const item of outline) {
@@ -854,37 +897,76 @@ function buildTOC() {
           void reader.onScroll();
         }
       });
-      tocDrawer.appendChild(el);
+      tocContent.appendChild(el);
     }
   };
 
-  if (currentDoc) {
-    void currentDoc.getOutline().then((native) => {
-      if (native.length > 0) {
-        // PDF 自带大纲优先。同样清洗前置内容（封面/前言/考试大纲/参考答案…），
-        // 与扫描目录识别保持一致。
-        const cleaned = cleanOutline(native.map((n) => ({ title: n.title, page: n.page, depth: n.depth })));
-        effectiveOutline = cleaned;
-        renderOutline(cleaned, "");
+  const renderOutlineRecovery = (book: BookRecord, errorMessage: string | null) => {
+    if (!isCurrentTOC()) return;
+    const recovering = outlineRecovering.has(book.id);
+    tocContent.replaceChildren();
+
+    const empty = document.createElement("section");
+    empty.className = "toc-recovery";
+    const title = document.createElement("strong");
+    title.textContent = errorMessage ? "目录识别没有完成" : "这本书没有内置目录";
+    const description = document.createElement("p");
+    description.id = "toc-recovery-disclosure";
+    description.textContent = errorMessage
+      ? errorMessage
+      : "需要时，可以把书前几页发送到当前 AI 服务来识别章节。打开书本身不会发送内容。";
+    const action = document.createElement("button");
+    action.type = "button";
+    action.textContent = recovering ? "正在识别…" : errorMessage ? "重新识别" : "识别目录";
+    action.disabled = recovering;
+    action.setAttribute("aria-describedby", description.id);
+    action.addEventListener("click", () => void recoverScannedOutline());
+    empty.append(title, description, action);
+    tocContent.appendChild(empty);
+  };
+
+  if (renderedDoc && renderedBook) {
+    void renderedDoc.getOutline()
+      .then((native) => {
+        if (!isCurrentTOC()) return;
+        if (native.length > 0) {
+          // PDF 自带大纲优先。同样清洗前置内容（封面/前言/考试大纲/参考答案…），
+          // 与扫描目录识别保持一致。
+          const cleaned = cleanOutline(native.map((n) => ({ title: n.title, page: n.page, depth: n.depth })));
+          effectiveOutline = cleaned;
+          renderOutline(cleaned, "");
+          scheduleBottomBarUpdate();
+          return;
+        }
+        // 无内置大纲：用持久化的扫描恢复目录（若有）。
+        effectiveOutline = renderedBook.outline;
+        if (renderedBook.outline.length > 0) {
+          renderOutline(renderedBook.outline, "");
+        } else {
+          const errHint = sessionStorage.getItem(`outline-err-${renderedBook.id}`);
+          renderOutlineRecovery(renderedBook, errHint);
+        }
         scheduleBottomBarUpdate();
-        return;
-      }
-      // 无内置大纲：用持久化的扫描恢复目录（若有）。
-      const errHint = currentBook ? sessionStorage.getItem(`outline-err-${currentBook.id}`) : null;
-      const fallback = errHint ? `目录识别失败：${errHint}` : "这本书没有目录（打开时会尝试自动识别）。";
-      effectiveOutline = currentBook?.outline ?? [];
-      renderOutline(currentBook?.outline ?? [], fallback);
-      scheduleBottomBarUpdate();
-    });
+      })
+      .catch((error) => {
+        if (!isCurrentTOC()) return;
+        effectiveOutline = renderedBook.outline;
+        if (renderedBook.outline.length > 0) {
+          renderOutline(renderedBook.outline, "");
+        } else {
+          renderOutlineRecovery(renderedBook, `无法读取 PDF 内置目录：${String(error)}`);
+        }
+        scheduleBottomBarUpdate();
+      });
   } else {
     effectiveOutline = [];
     renderOutline(currentBook?.outline ?? [], "打开一本书后这里会显示目录。");
   }
 }
 
-// ---- 扫描书目录恢复（自动） ----
-/// 本次会话已尝试过目录恢复的书（避免失败后每次打开都重试烧 API）。
-const outlineAttempted = new Set<string>();
+// ---- 扫描书目录恢复（明确触发） ----
+/// 正在恢复目录的书。单书 single-flight，失败后允许用户主动重试。
+const outlineRecovering = new Set<string>();
 
 /// 判断标题是否为「前置/考试说明类」条目（封面、前言、大纲、考核目标、
 /// 题型举例、参考答案、附录、参考文献、后记 等），这些不该出现在章节目录里。
@@ -909,48 +991,54 @@ function cleanOutline(entries: OutlineEntry[]): OutlineEntry[] {
   return filtered.length > 0 ? filtered : entries;
 }
 
-/// 打开书时调用：PDF 无内置大纲且没有持久化目录时，
-/// 用 Qwen 读目录页提取章节，再定位第一章算出偏移，映射成 PDF 页码。
-async function maybeExtractScannedOutline() {
+/// 用户在目录抽屉明确点击后调用：用当前 AI 服务读取目录候选页，
+/// 再定位第一章算出偏移并映射成 PDF 页码。
+async function recoverScannedOutline() {
   const profile = usableActiveProfile();
-  if (!currentDoc || !profile) return;
-  if (!currentBook) return;
-  // 捕获本次处理的书身份：延迟调用期间可能已切书，检测到变化立即放弃。
+  if (!profile) {
+    openSettings("请先选择一个已配置的 AI 服务，再识别这本书的目录。");
+    return;
+  }
+  if (!currentDoc || !currentBook) return;
+  // 捕获本次处理的书身份；识别期间切书后立即放弃结果。
   const bookId = currentBook.id;
   const doc = currentDoc;
   // 已有目录（内置或之前恢复过）就不再处理。
   if (currentBook.outline.length > 0) return;
-  // 本会话已试过且失败，不再重试（避免每次打开都花两次 API）。
-  if (outlineAttempted.has(bookId)) return;
-  outlineAttempted.add(bookId);
+  if (outlineRecovering.has(bookId)) return;
+  outlineRecovering.add(bookId);
+  sessionStorage.removeItem(`outline-err-${bookId}`);
+  buildTOC();
 
-  const native = await doc.getOutline();
-  if (native.length > 0) return;
-  // 提取大纲期间用户切书了：放弃。
-  if (currentDoc !== doc || currentBook?.id !== bookId) return;
-
-  const pageCount = doc.pageCount;
-  // 目录通常在书前部；取第 3-6 页（跳过封面/书名页/前 1-2 页）。
-  // 4 页 + 1.3x 是请求大小与覆盖面的折中：太多/太大导致百炼视觉处理超时。
-  const frontFrom = 3;
-  const frontTo = Math.min(pageCount, 6);
-  if (frontTo <= frontFrom) return;
-
-  // 目录识别的渲染阶段需要独占 PDF.js worker；暂停缩略图预热，
-  // 否则整书预热排队挤占渲染，识别会慢几十秒甚至超时。
-  preheatPaused = true;
   try {
+    const native = await doc.getOutline().catch(() => []);
+    if (native.length > 0) return;
+    if (currentDoc !== doc || currentBook?.id !== bookId) return;
+
+    const pageCount = doc.pageCount;
+    // 目录通常在书前部；取第 3-6 页（跳过封面/书名页/前 1-2 页）。
+    // 4 页 + 1.3x 是请求大小与覆盖面的折中。
+    const frontFrom = 3;
+    const frontTo = Math.min(pageCount, 6);
+    if (frontTo <= frontFrom) throw new Error("页数太少，无法从书前内容识别目录。");
+
+    // 目录识别的渲染阶段需要独占 PDF.js worker；暂停缩略图预热。
+    preheatPaused = true;
     // 1) 渲染目录候选页 → Qwen 提取目录（印刷页码）。
-    const pages = await exportEvidence([...Array(frontTo - frontFrom + 1)].map((_, i) => frontFrom + i), 1.3);
+    const pages = await exportEvidence(
+      doc,
+      [...Array(frontTo - frontFrom + 1)].map((_, i) => frontFrom + i),
+      1.3,
+    );
     if (currentDoc !== doc || currentBook?.id !== bookId) return;
     const entries = await extractOutline(profile.id, { pages });
-    if (entries.length === 0) return;
+    if (entries.length === 0) throw new Error("没有从书前几页找到可用的章节目录。");
     if (currentDoc !== doc || currentBook?.id !== bookId) return;
 
     // 清洗目录：去前置/考试说明条目（封面/前言/考试大纲/考核目标/题型举例/
     // 参考答案 等），与内置目录的清洗规则一致。
     const bodyEntries = cleanOutline(entries);
-    if (bodyEntries.length === 0) return;
+    if (bodyEntries.length === 0) throw new Error("识别结果里没有可用的章节条目。");
 
     // 2) 找第一章：优先选标题带「第X章」的 depth=0 条目（取最小印刷页），
     // 避免把未过滤的前置项（如「软件工程自学考试大纲」）当第一章。
@@ -964,12 +1052,13 @@ async function maybeExtractScannedOutline() {
     const probeFrom = Math.min(Math.max(20, 1), pageCount);
     const probeTo = Math.min(pageCount, Math.max(probeFrom + 1, 45));
     const probePages = await exportEvidence(
+      doc,
       [...Array(Math.max(1, Math.ceil((probeTo - probeFrom + 1) / 2)))].map((_, i) => probeFrom + i * 2),
       1.3,
     );
     if (currentDoc !== doc || currentBook?.id !== bookId) return;
     const foundPdfPage = await findPageByTitle(profile.id, firstChapter.title, probePages);
-    if (foundPdfPage === 0) return; // 定位失败，放弃（保留无目录状态）。
+    if (foundPdfPage === 0) throw new Error("找到了目录，但没有定位到第一章所在的 PDF 页。");
     if (currentDoc !== doc || currentBook?.id !== bookId) return;
 
     // 偏移 = 第一章实际 PDF 页 - 第一章印刷页。
@@ -979,13 +1068,12 @@ async function maybeExtractScannedOutline() {
     const mapped: OutlineEntry[] = bodyEntries
       .map((e) => ({ title: e.title, depth: e.depth, page: e.page + offset }))
       .filter((e) => e.page >= 1 && e.page <= pageCount);
-    if (mapped.length === 0) return;
+    if (mapped.length === 0) throw new Error("识别到的章节页码不在这本 PDF 的范围内。");
 
     currentBook.outline = mapped;
     store.books = store.books.map((b) => (b.id === currentBook!.id ? currentBook! : b));
     await persist();
-    // 目录抽屉开着的话刷新。
-    if (tocDrawer.classList.contains("open")) buildTOC();
+    sessionStorage.removeItem(`outline-err-${bookId}`);
   } catch (err) {
     // 恢复失败：记录原因（目录抽屉可显示），保持无目录状态不打扰阅读。
     try {
@@ -996,6 +1084,8 @@ async function maybeExtractScannedOutline() {
   } finally {
     // 识别结束（成功/失败/放弃）都恢复缩略图预热。
     preheatPaused = false;
+    outlineRecovering.delete(bookId);
+    if (currentDoc === doc && currentBook?.id === bookId) buildTOC();
   }
 }
 
@@ -1026,24 +1116,25 @@ async function askRegionQuestion(region: RegionSelection) {
     openSettings("请先选择一个已配置的 AI 服务，再解释这处内容。");
     return;
   }
-  if (streaming) return;
+  const context = beginQuestionContext(region.page);
+  if (!context) return;
 
-  // 框选区域截图为最高优先证据；整页图用红框标出选中位置，
-  // 让模型一眼看到选的是哪块（否则它会说「图片里没有框选区域」）。
-  const regionJPEG = await currentDoc.exportRegionAsJPEG(region.page, region.rect);
-  const pageJPEG = await currentDoc.exportPageAsJPEG(region.page, 1.5, region.rect);
   const question = "我在整页图里用红色框标出了选中的区域，解释一下红框里这块内容。如果看不清就直说，不要猜。";
-
+  const storedQuestion = `${question}（框选区域）`;
   history.push({ role: "user", content: `${question}（框选第 ${region.page} 页区域）` });
-
   openTeacherSheet(question);
   const answerNode = teacherSheet.querySelector(".turn.answer") as HTMLDivElement;
   answerNode.classList.add("streaming");
   showTyping(answerNode);
-  streaming = true;
   let fullText = "";
 
   try {
+    // 框选区域截图为最高优先证据；整页图用红框标出选中位置，
+    // 让模型一眼看到选的是哪块（否则它会说「图片里没有框选区域」）。
+    const regionJPEG = await context.doc.exportRegionAsJPEG(region.page, region.rect);
+    const pageJPEG = await context.doc.exportPageAsJPEG(region.page, 1.5, region.rect);
+    if (!questionContextIsCurrent(context)) return;
+
     fullText = await askVisual(
       profile.id,
       {
@@ -1055,33 +1146,36 @@ async function askRegionQuestion(region: RegionSelection) {
         history: history.slice(-6, -1),
       },
       (chunk) => {
+        if (!questionContextIsCurrent(context)) return;
         fullText += chunk;
         setAnswerContent(answerNode, fullText);
         const sc = teacherSheet.querySelector(".qa-scroll");
         if (sc) sc.scrollTop = sc.scrollHeight;
       },
     );
+    if (!questionContextIsCurrent(context)) return;
+    setAnswerContent(answerNode, fullText);
     history.push({ role: "assistant", content: fullText });
     answerNode.classList.remove("streaming");
     appendActions(answerNode);
     if (sheetQA) sheetQA.answer = fullText;
-    await saveQA(`${question}（框选区域）`, fullText);
+    await saveQA(context.bookId, context.page, storedQuestion, fullText);
   } catch (err) {
+    if (!questionContextIsCurrent(context)) return;
     setAnswerContent(answerNode, `出错了：${String(err)}`);
     answerNode.classList.remove("streaming");
   } finally {
-    streaming = false;
+    questionGate.finish(context.token);
   }
 }
 
 /// 决定一次提问带哪些页的图作为证据。规则基于自然语言触发，
 /// 读者不需要学会说「跨页」——表达「还是不懂/接上文/下一页」即可。
-function evidencePages(question: string): number[] {
-  if (!currentDoc) return [currentPage];
-  const last = currentDoc.pageCount;
+function evidencePages(question: string, page: number, pageCount: number): number[] {
+  const last = pageCount;
   const q = question;
   const pages = new Set<number>();
-  pages.add(currentPage);
+  pages.add(page);
 
   const wantsBefore =
     /接上文|前面|上一页|前文|刚才|上文|衔接|有什么关系|连起来/.test(q);
@@ -1090,22 +1184,25 @@ function evidencePages(question: string): number[] {
   const confused =
     /还是不懂|换个说法|更简单|看不懂|没懂|不明白|换角度|例子/.test(q);
 
-  if (wantsBefore && currentPage > 1) pages.add(currentPage - 1);
-  if (wantsAfter && currentPage < last) pages.add(currentPage + 1);
+  if (wantsBefore && page > 1) pages.add(page - 1);
+  if (wantsAfter && page < last) pages.add(page + 1);
   if (confused && !wantsBefore && !wantsAfter) {
-    if (currentPage > 1) pages.add(currentPage - 1);
-    if (currentPage < last) pages.add(currentPage + 1);
+    if (page > 1) pages.add(page - 1);
+    if (page < last) pages.add(page + 1);
   }
 
   return [...pages].sort((a, b) => a - b);
 }
 
 /// 把若干页渲染成 JPEG 数组，供 Rust 端作为多图证据。
-async function exportEvidence(pages: number[], scale = 1.5): Promise<{ page: number; jpeg: string }[]> {
+async function exportEvidence(
+  doc: PDFDocument,
+  pages: number[],
+  scale = 1.5,
+): Promise<{ page: number; jpeg: string }[]> {
   const out: { page: number; jpeg: string }[] = [];
   for (const page of pages) {
-    if (!currentDoc) continue;
-    const jpeg = await currentDoc.exportPageAsJPEG(page, scale);
+    const jpeg = await doc.exportPageAsJPEG(page, scale);
     out.push({ page, jpeg });
   }
   return out;
@@ -1118,21 +1215,22 @@ async function askQuestion(question: string) {
     openSettings("请先选择一个已配置的 AI 服务，再向老师提问。");
     return;
   }
-  if (streaming) return;
+  const context = beginQuestionContext();
+  if (!context) return;
 
-  // 页面图像即证据；跨页内容按自然语言触发自动扩页。
-  const pages = evidencePages(question);
-  const evidence = await exportEvidence(pages);
   history.push({ role: "user", content: question });
-
   openTeacherSheet(question);
   const answerNode = teacherSheet.querySelector(".turn.answer") as HTMLDivElement;
   answerNode.classList.add("streaming");
   showTyping(answerNode);
-  streaming = true;
   let fullText = "";
 
   try {
+    // 页面图像即证据；跨页内容按自然语言触发自动扩页。
+    const pages = evidencePages(question, context.page, context.doc.pageCount);
+    const evidence = await exportEvidence(context.doc, pages);
+    if (!questionContextIsCurrent(context)) return;
+
     fullText = await askVisual(
       profile.id,
       {
@@ -1141,22 +1239,26 @@ async function askQuestion(question: string) {
         history: history.slice(-6, -1),
       },
       (chunk) => {
+        if (!questionContextIsCurrent(context)) return;
         fullText += chunk;
         setAnswerContent(answerNode, fullText);
         const sc = teacherSheet.querySelector(".qa-scroll");
         if (sc) sc.scrollTop = sc.scrollHeight;
       },
     );
+    if (!questionContextIsCurrent(context)) return;
+    setAnswerContent(answerNode, fullText);
     history.push({ role: "assistant", content: fullText });
     answerNode.classList.remove("streaming");
     appendActions(answerNode);
     if (sheetQA) sheetQA.answer = fullText;
-    await saveQA(question, fullText);
+    await saveQA(context.bookId, context.page, question, fullText);
   } catch (err) {
+    if (!questionContextIsCurrent(context)) return;
     setAnswerContent(answerNode, `出错了：${String(err)}`);
     answerNode.classList.remove("streaming");
   } finally {
-    streaming = false;
+    questionGate.finish(context.token);
   }
 }
 
@@ -1234,7 +1336,7 @@ function appendComposer(
   };
   const submit = () => {
     const text = input.value.trim();
-    if (!text || streaming) return;
+    if (!text || questionGate.busy) return;
     input.value = "";
     syncSendState();
     onSubmit(text);
@@ -1465,16 +1567,21 @@ function appendActions(answerNode: HTMLDivElement) {
 
 async function followUp(text: string) {
   const profile = usableActiveProfile();
-  if (!currentDoc || !profile || streaming) {
+  if (!currentDoc || !profile) {
     if (!profile) openSettings("当前 AI 服务尚未配置完成。");
     return;
   }
-  const pages = evidencePages(text);
-  const evidence = await exportEvidence(pages);
+  const context = beginQuestionContext();
+  if (!context) return;
+
   history.push({ role: "user", content: text });
 
   // 在面板里追加一轮
-  const scroll = teacherSheet.querySelector(".qa-scroll")!;
+  const scroll = teacherSheet.querySelector(".qa-scroll") as HTMLDivElement | null;
+  if (!scroll) {
+    questionGate.finish(context.token);
+    return;
+  }
   const q = document.createElement("div");
   q.className = "turn question";
   q.textContent = text;
@@ -1484,10 +1591,13 @@ async function followUp(text: string) {
   showTyping(a);
   scroll.appendChild(a);
   scroll.scrollTop = scroll.scrollHeight;
-  streaming = true;
 
   let fullText = "";
   try {
+    const pages = evidencePages(text, context.page, context.doc.pageCount);
+    const evidence = await exportEvidence(context.doc, pages);
+    if (!questionContextIsCurrent(context)) return;
+
     fullText = await askVisual(
       profile.id,
       {
@@ -1496,21 +1606,25 @@ async function followUp(text: string) {
         history: history.slice(-6, -1),
       },
       (chunk) => {
+        if (!questionContextIsCurrent(context)) return;
         fullText += chunk;
         setAnswerContent(a, fullText);
         scroll.scrollTop = scroll.scrollHeight;
       },
     );
+    if (!questionContextIsCurrent(context)) return;
+    setAnswerContent(a, fullText);
     history.push({ role: "assistant", content: fullText });
     a.classList.remove("streaming");
     appendActions(a);
-    sheetQA = { question: text, answer: fullText, page: currentPage };
-    await saveQA(text, fullText);
+    sheetQA = { question: text, answer: fullText, page: context.page };
+    await saveQA(context.bookId, context.page, text, fullText);
   } catch (err) {
+    if (!questionContextIsCurrent(context)) return;
     setAnswerContent(a, `出错了：${String(err)}`);
     a.classList.remove("streaming");
   } finally {
-    streaming = false;
+    questionGate.finish(context.token);
   }
 }
 
@@ -1531,12 +1645,12 @@ async function persist() {
   await persistOrThrow().catch(() => undefined);
 }
 
-async function saveQA(question: string, answer: string) {
-  if (!currentBook) return;
+async function saveQA(bookId: string, page: number, question: string, answer: string) {
+  if (!store.books.some((book) => book.id === bookId)) return;
   const entry: QAEntry = {
     id: crypto.randomUUID(),
-    book_id: currentBook.id,
-    page: currentPage,
+    book_id: bookId,
+    page,
     question,
     answer,
     ts: Date.now(),
@@ -1575,7 +1689,7 @@ function setupReaderSurface() {
   const DRAG_THRESHOLD = 6;
 
   readerSurface.addEventListener("mousedown", (e) => {
-    if (streaming) return;
+    if (questionGate.busy) return;
     if (e.button !== 0) return;
     // 缩放预览中页面坐标被 transform 扭曲，禁止框选。
     if (reader?.isZoomPreviewing()) return;
@@ -2166,40 +2280,39 @@ function toggleBookMenu() {
   } else {
     for (const book of store.books) {
       const item = document.createElement("div");
-      item.tabIndex = 0;
-      item.setAttribute("role", "button");
       item.className = "book-menu-item";
       item.dataset.bookId = book.id;
+
+      const switchBook = document.createElement("button");
+      switchBook.type = "button";
+      switchBook.className = "book-menu-switch";
+      switchBook.title = book.path;
       const name = document.createElement("span");
       name.className = "book-menu-name";
       name.textContent = book.name;
-      name.title = book.path;
       const info = document.createElement("span");
       info.className = "book-menu-info";
       info.textContent = book.id === currentBook?.id ? "正在读" : `读到第 ${book.last_page} 页`;
+      switchBook.append(name, info);
+      switchBook.addEventListener("click", () => {
+        menu.remove();
+        bookMenuEl = null;
+        if (book.id !== currentBook?.id) void openBook(book);
+      });
 
       // 删除按钮（悬停时出现）。
       const del = document.createElement("button");
+      del.type = "button";
       del.className = "book-menu-del";
-      del.textContent = "删除";
+      del.textContent = "移除";
       del.title = "从书架移除（不删除原文件）";
       del.addEventListener("click", (e) => {
         e.stopPropagation();
         void removeBook(book);
       });
 
-      item.append(name, info, del);
+      item.append(switchBook, del);
       if (book.id === currentBook?.id) item.classList.add("current");
-      item.addEventListener("click", () => {
-        menu.remove();
-        bookMenuEl = null;
-        if (book.id !== currentBook?.id) void openBook(book);
-      });
-      item.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        item.click();
-      });
       menu.appendChild(item);
     }
   }
@@ -2224,10 +2337,58 @@ function toggleBookMenu() {
   }, { once: true });
 }
 
-/// 从书架删除一本书（不删除电脑上的原 PDF 文件），连带清掉它的问答记录。
+function confirmBookRemoval(book: BookRecord, qaCount: number): Promise<boolean> {
+  const dialog = document.createElement("dialog");
+  dialog.className = "book-remove-dialog";
+  dialog.setAttribute("aria-labelledby", "book-remove-title");
+  dialog.setAttribute("aria-describedby", "book-remove-message");
+
+  const title = document.createElement("h2");
+  title.id = "book-remove-title";
+  title.textContent = `从书架移除“${bookName(book.name)}”？`;
+  const message = document.createElement("p");
+  message.id = "book-remove-message";
+  const qaMessage = qaCount > 0 ? `以及 ${qaCount} 条问答记录` : "";
+  message.textContent = `原 PDF 不会被删除，但阅读位置、目录${qaMessage}会从 Satori 清除。`;
+
+  const actions = document.createElement("div");
+  actions.className = "book-remove-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "book-remove-cancel";
+  cancel.textContent = "取消";
+  const confirm = document.createElement("button");
+  confirm.type = "button";
+  confirm.className = "book-remove-confirm";
+  confirm.textContent = "移除";
+  actions.append(cancel, confirm);
+  dialog.append(title, message, actions);
+  document.body.appendChild(dialog);
+
+  return new Promise((resolve) => {
+    const finish = (confirmed: boolean) => {
+      dialog.close();
+      dialog.remove();
+      resolve(confirmed);
+    };
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      finish(false);
+    }, { once: true });
+    cancel.addEventListener("click", () => finish(false), { once: true });
+    confirm.addEventListener("click", () => finish(true), { once: true });
+    dialog.showModal();
+    cancel.focus();
+  });
+}
+
+/// 从书架移除一本书（不删除电脑上的原 PDF 文件），连带清掉它的问答记录。
 async function removeBook(book: BookRecord) {
   bookMenuEl?.remove();
   bookMenuEl = null;
+
+  const qaCount = store.qa.filter((q) => q.book_id === book.id).length;
+  if (!(await confirmBookRemoval(book, qaCount))) return;
 
   // 从书库移除 + 清掉该书问答。
   store.books = store.books.filter((b) => b.id !== book.id);
@@ -2236,6 +2397,7 @@ async function removeBook(book: BookRecord) {
 
   // 删除的是当前书：切换到剩余第一本，或回到空书架。
   if (currentBook?.id === book.id) {
+    questionGate.invalidate();
     currentDoc?.destroy();
     currentDoc = null;
     reader?.clear();

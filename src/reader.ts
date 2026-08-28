@@ -1,7 +1,7 @@
 // 连续滚动阅读器：页面从上到下排列、宽度铺满，懒渲染视口附近的页面，
 // 支持缩放、框选区域、页码映射。这是「书桌」的核心渲染层。
 
-import { PDFDocument } from "./pdf";
+import type { PDFDocument } from "./pdf";
 
 export interface RegionSelection {
   page: number;

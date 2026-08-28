@@ -24,7 +24,7 @@ A macOS app for reading PDF textbooks. The page stays at the center; when a para
 
 Requires macOS 14+ and an Apple silicon Mac. Download the latest build from [GitHub Releases](https://github.com/yuxino/satori/releases/latest).
 
-The current build is not Apple-notarized. On first launch, Control-click Satori, choose **Open**, then confirm once. To run from source instead:
+The current build is not Apple-notarized. On first launch, Control-click Satori, choose **Open**, then confirm once. Building from source requires Node.js 22.13+ and Rust:
 
 ```bash
 npm install
