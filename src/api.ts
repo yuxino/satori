@@ -68,6 +68,12 @@ export interface CredentialStatus {
   saved: boolean;
 }
 
+export interface AppUpdateInfo {
+  current_version: string;
+  latest_version: string;
+  available: boolean;
+}
+
 export interface HistoryTurn {
   role: "user" | "assistant";
   content: string;
@@ -122,6 +128,12 @@ export function saveProfileApiKey(profileId: string, apiKey: string): Promise<vo
 
 export function deleteProfileApiKey(profileId: string): Promise<void> {
   return invoke("delete_profile_api_key", { profileId });
+}
+
+// ---- 应用版本 ----
+
+export function checkForUpdate(): Promise<AppUpdateInfo> {
+  return invoke<AppUpdateInfo>("check_for_update");
 }
 
 // ---- Store ----

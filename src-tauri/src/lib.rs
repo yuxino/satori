@@ -3,6 +3,7 @@ mod provider;
 mod qwen;
 mod store;
 mod thumbs;
+mod update;
 
 use tauri::{Emitter, Manager};
 
@@ -124,6 +125,13 @@ pub struct AppState {
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // Only the explicit, capability-scoped update action uses opener.
+        // Do not intercept every `_blank` link rendered in AI answers.
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .manage(AppState {
             client: reqwest::Client::builder()
                 // API requests must never forward credentials or page images
@@ -200,6 +208,7 @@ pub fn run() {
             qwen::test_ai_profile,
             qwen::extract_outline,
             qwen::find_page_by_title,
+            update::check_for_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

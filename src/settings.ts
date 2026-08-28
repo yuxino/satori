@@ -8,6 +8,14 @@ import {
   type CredentialStatus,
   type Settings,
 } from "./api";
+import {
+  checkForAppUpdate,
+  getAppUpdateSnapshot,
+  openLatestRelease,
+  subscribeToAppUpdates,
+  versionLabel,
+  type AppUpdateSnapshot,
+} from "./update";
 
 interface OpenAISettingsOptions {
   settings: Settings;
@@ -140,10 +148,18 @@ export function openAISettings(options: OpenAISettingsOptions): void {
     return;
   }
 
-  document.querySelector<HTMLElement>('#settings-modal[data-settings-controller="ai"]')?.remove();
-  activeController = new AISettingsController(options, () => {
+  if (activeController) {
+    const staleController = activeController;
     activeController = null;
+    staleController.dispose();
+  }
+  document.querySelector<HTMLElement>('#settings-modal[data-settings-controller="ai"]')?.remove();
+
+  let controller: AISettingsController | null = null;
+  controller = new AISettingsController(options, () => {
+    if (activeController === controller) activeController = null;
   });
+  activeController = controller;
 }
 
 class AISettingsController {
@@ -158,6 +174,9 @@ class AISettingsController {
   private readonly sidebar: HTMLElement;
   private readonly detail: HTMLElement;
   private readonly footer: HTMLElement;
+  private readonly updateVersion: HTMLSpanElement;
+  private readonly updateStatus: HTMLSpanElement;
+  private readonly updateButton: HTMLButtonElement;
   private readonly onDestroyed: () => void;
   private readonly credentialStates = new Map<string, CredentialState>();
   private readonly keyDrafts = new Map<string, string>();
@@ -166,6 +185,10 @@ class AISettingsController {
   private busy: BusyAction | null = null;
   private liveMessage = "";
   private liveTone: StatusTone = "neutral";
+  private updateState: AppUpdateSnapshot = getAppUpdateSnapshot();
+  private updateOpenError = "";
+  private openingRelease = false;
+  private unsubscribeUpdates: (() => void) | null = null;
   private mounted = true;
   private appWasInert = false;
   private appAriaHidden: string | null = null;
@@ -201,10 +224,25 @@ class AISettingsController {
     description.id = "settings-dialog-description";
     heading.append(title, description);
 
+    const headerActions = createElement("div", "settings-header-actions");
+    const updateControl = createElement("div", "settings-update-control");
+    const updateMeta = createElement("div", "settings-update-meta");
+    this.updateVersion = createElement("span", "settings-update-version");
+    this.updateStatus = createElement("span", "settings-update-status");
+    this.updateStatus.setAttribute("role", "status");
+    this.updateStatus.setAttribute("aria-live", "polite");
+    this.updateStatus.setAttribute("aria-atomic", "true");
+    this.updateButton = createButton("settings-update-button", "检查 Satori 更新");
+    this.updateButton.id = "settings-check-update";
+    this.updateButton.addEventListener("click", () => void this.handleUpdateAction());
+    updateMeta.append(this.updateVersion, this.updateStatus);
+    updateControl.append(updateMeta, this.updateButton);
+
     const closeButton = createButton("settings-icon-button", "关闭设置");
     closeButton.innerHTML = `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="m5.5 5.5 9 9M14.5 5.5l-9 9"/></svg>`;
     closeButton.addEventListener("click", () => void this.requestClose());
-    header.append(heading, closeButton);
+    headerActions.append(updateControl, closeButton);
+    header.append(heading, headerActions);
 
     this.messageBanner = createElement("div", "settings-message");
     this.messageBanner.setAttribute("role", "note");
@@ -226,6 +264,11 @@ class AISettingsController {
 
     this.makeBackgroundInert();
     document.body.appendChild(this.overlay);
+    this.unsubscribeUpdates = subscribeToAppUpdates((state) => {
+      this.updateState = state;
+      this.updateOpenError = "";
+      this.renderUpdateControl();
+    });
     this.render(false);
     window.requestAnimationFrame(() => this.focusInitialControl());
     void this.loadCredentialStates();
@@ -233,6 +276,10 @@ class AISettingsController {
 
   isConnected(): boolean {
     return this.mounted && this.overlay.isConnected;
+  }
+
+  dispose(): void {
+    this.destroy(false);
   }
 
   updateOptions(options: OpenAISettingsOptions): void {
@@ -263,6 +310,87 @@ class AISettingsController {
     const message = this.options.message?.trim() ?? "";
     this.messageBanner.textContent = message;
     this.messageBanner.hidden = message.length === 0;
+  }
+
+  private renderUpdateControl(): void {
+    const { phase, currentVersion, latestVersion, errorMessage } = this.updateState;
+    this.updateVersion.textContent = currentVersion ? `Satori ${versionLabel(currentVersion)}` : "Satori";
+    this.updateButton.disabled = phase === "checking" || this.openingRelease;
+    this.updateButton.dataset.state = this.updateOpenError ? "error" : phase;
+    this.updateButton.setAttribute("aria-busy", String(phase === "checking" || this.openingRelease));
+    const updateError = Boolean(this.updateOpenError) || phase === "error";
+    this.updateStatus.setAttribute("role", updateError ? "alert" : "status");
+    this.updateStatus.setAttribute("aria-live", updateError ? "assertive" : "polite");
+
+    if (this.openingRelease) {
+      this.updateStatus.textContent = "正在打开下载页";
+      this.updateButton.textContent = "正在打开…";
+      this.updateButton.title = "正在浏览器中打开 Satori 下载页面";
+      this.updateButton.setAttribute("aria-label", this.updateButton.title);
+      return;
+    }
+
+    if (this.updateOpenError) {
+      this.updateStatus.textContent = "无法打开下载页";
+      this.updateButton.textContent = "重试打开";
+      this.updateButton.title = this.updateOpenError;
+      this.updateButton.setAttribute("aria-label", `重新打开下载页面。${this.updateOpenError}`);
+      return;
+    }
+
+    switch (phase) {
+      case "checking":
+        this.updateStatus.textContent = "正在连接 GitHub";
+        this.updateButton.textContent = "检查中…";
+        this.updateButton.title = "正在检查更新";
+        this.updateButton.setAttribute("aria-label", "正在检查 Satori 更新");
+        break;
+      case "current":
+        this.updateStatus.textContent = "已是最新版";
+        this.updateButton.textContent = "重新检查";
+        this.updateButton.title = "再次检查更新";
+        this.updateButton.setAttribute("aria-label", "Satori 已是最新版，再次检查更新");
+        break;
+      case "available":
+        this.updateStatus.textContent = "发现新版本";
+        this.updateButton.textContent = `查看 ${versionLabel(latestVersion)}`;
+        this.updateButton.title = `在浏览器下载 Satori ${versionLabel(latestVersion)}`;
+        this.updateButton.setAttribute("aria-label", this.updateButton.title);
+        break;
+      case "error":
+        this.updateStatus.textContent = "检查失败";
+        this.updateButton.textContent = "重新检查";
+        this.updateButton.title = errorMessage || "无法检查更新，请重试";
+        this.updateButton.setAttribute("aria-label", `重新检查更新。${this.updateButton.title}`);
+        break;
+      default:
+        this.updateStatus.textContent = "自动检查已开启";
+        this.updateButton.textContent = "检查更新";
+        this.updateButton.title = "立即检查更新";
+        this.updateButton.setAttribute("aria-label", "立即检查 Satori 更新");
+        break;
+    }
+  }
+
+  private async handleUpdateAction(): Promise<void> {
+    if (this.openingRelease) return;
+    if (this.updateState.phase !== "available") {
+      await checkForAppUpdate(true);
+      return;
+    }
+
+    this.openingRelease = true;
+    this.updateOpenError = "";
+    this.renderUpdateControl();
+    try {
+      await openLatestRelease();
+    } catch (error) {
+      if (!this.mounted) return;
+      this.updateOpenError = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.openingRelease = false;
+      if (this.mounted) this.renderUpdateControl();
+    }
   }
 
   private renderSidebar(): void {
@@ -1117,16 +1245,20 @@ class AISettingsController {
     this.destroy();
   }
 
-  private destroy(): void {
+  private destroy(restoreFocus = true): void {
     if (!this.mounted) return;
     this.mounted = false;
+    this.unsubscribeUpdates?.();
+    this.unsubscribeUpdates = null;
     this.keyDrafts.clear();
     this.restoreBackground();
     this.overlay.remove();
     this.onDestroyed();
-    window.requestAnimationFrame(() => {
-      if (this.previousFocus?.isConnected) this.previousFocus.focus({ preventScroll: true });
-    });
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => {
+        if (this.previousFocus?.isConnected) this.previousFocus.focus({ preventScroll: true });
+      });
+    }
   }
 
   private confirmAction(options: ConfirmOptions): Promise<boolean> {

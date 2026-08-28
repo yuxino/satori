@@ -50,6 +50,13 @@ import { PDFDocument } from "./pdf";
 import { ScrollReader, type RegionSelection } from "./reader";
 import { renderMarkdown } from "./markdown";
 import { openAISettings } from "./settings";
+import {
+  getAppUpdateSnapshot,
+  initializeAppUpdateCheck,
+  subscribeToAppUpdates,
+  versionLabel,
+  type AppUpdateSnapshot,
+} from "./update";
 
 // ---- DOM ----
 const readerSurface = document.getElementById("reader-surface") as HTMLDivElement;
@@ -70,6 +77,12 @@ let currentPage = 1;
 let zoomFactor = 1;
 let history: HistoryTurn[] = [];
 let streaming = false;
+let appUpdateState: AppUpdateSnapshot = getAppUpdateSnapshot();
+
+subscribeToAppUpdates((state) => {
+  appUpdateState = state;
+  syncHomeUpdateIndicator();
+});
 
 /// 框选状态。
 let regionOverlay: HTMLDivElement | null = null;
@@ -149,6 +162,7 @@ async function boot() {
   setupAskFab();
   setupSheetDrag();
   setupOutsideClickClose();
+  initializeAppUpdateCheck();
 
   // 阅读面尺寸变化时重新铺满（保留当前页）。用 ResizeObserver 监听
   // 阅读面本身，比 window resize 更可靠——初次加载时窗口事件可能丢失，
@@ -316,6 +330,19 @@ function renderHome() {
 
   wrap.appendChild(homeGrid);
   homeView.appendChild(wrap);
+  syncHomeUpdateIndicator();
+}
+
+function syncHomeUpdateIndicator(): void {
+  const settingsButton = homeView.querySelector<HTMLButtonElement>(".home-settings-action");
+  if (!settingsButton) return;
+  const hasUpdate = appUpdateState.phase === "available" && Boolean(appUpdateState.latestVersion);
+  settingsButton.classList.toggle("update-available", hasUpdate);
+  const label = hasUpdate
+    ? `打开设置，有新版本 ${versionLabel(appUpdateState.latestVersion)}`
+    : "打开设置";
+  settingsButton.setAttribute("aria-label", label);
+  settingsButton.title = hasUpdate ? `Satori ${versionLabel(appUpdateState.latestVersion)} 可用` : "设置";
 }
 
 function bookName(name: string): string {
