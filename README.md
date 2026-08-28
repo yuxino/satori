@@ -24,14 +24,14 @@ A macOS app for reading PDF textbooks. The page stays at the center; when a para
 
 Requires macOS 14+ and an Apple silicon Mac. Download the latest build from [GitHub Releases](https://github.com/yuxino/satori/releases/latest).
 
-The published v3.3.1 build predates the explicit page-transmission controls in the current source. Do not use v3.3.1 with sensitive PDFs. Until a newer release is available, run the current source with Node.js 22.13+, Rust, and a stable macOS code-signing identity (Apple Development or a long-lived self-signed identity):
+Version 3.3.2 includes the explicit page-transmission controls, provider validation, patched PDF.js, and least-privilege app boundaries described below. To run the current source instead, use Node.js 22.13+, Rust, and a stable macOS code-signing identity (Apple Development or a long-lived self-signed identity):
 
 ```bash
 npm install
 npm run app
 ```
 
-The published build is not Apple-notarized. If you still test it, Control-click Satori, choose **Open**, then confirm once.
+The downloadable build uses the project's stable local signature but is not Apple-notarized. On first launch, Control-click Satori, choose **Open**, then confirm once.
 
 Open Settings and add an AI service connection before asking a question.
 

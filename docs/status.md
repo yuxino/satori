@@ -21,15 +21,15 @@ Satori is a local-first macOS PDF learning workspace. Reading stays central: the
 
 ## Version and installation
 
-- Current source version: `3.3.1`. The published `v3.3.1` asset predates the current PDF.js, explicit page-transmission, request-safety, and capability hardening work; it must not be described as containing the current privacy boundary.
-- The published Apple-silicon bundle is locally signed, has no Apple Team ID or hardened-runtime/notarization proof, and is rejected by Gatekeeper assessment. `/Applications/Satori.app` is a separate local build and is not byte-identical to the published ZIP.
-- Future Tauri bundles declare macOS 14 as the minimum system version. The installed and published `v3.3.1` bundle still declares an older minimum and is not retroactively fixed by the source change.
+- Current source and published release version: `3.3.2`. Its Apple-silicon asset contains the patched PDF.js, explicit page-transmission, request-safety, provider-validation, and capability hardening work described here.
+- The downloadable bundle has a stable local signature and hardened-runtime flag, but no Apple Team ID or notarization; Gatekeeper assessment rejects it, so the documented Control-click opening step remains required.
+- The `3.3.2` bundle declares macOS 14 as its minimum system version. The exact built payload was installed at `/Applications/Satori.app` and launched successfully.
 
 ## Verification baseline
 
 - Frontend: 19 Node tests, strict TypeScript unused-symbol checking, and the Vite production build pass; `npm audit` reports no known vulnerabilities. PDF.js loads as a separate reader-only chunk instead of delaying the home screen.
 - Rust: the full test suite passes; `cargo fmt --check`, release and `dev-live` checks, and Clippy with warnings denied pass.
-- Real app: the signed development shell opens the home and settings screens, reports `v3.3.1`, uses the macOS 14 minimum-version metadata, and exits normally. No SecurityAgent/XARA process was triggered during the check.
+- Real app: the locally signed release app reports `v3.3.2`, uses the macOS 14 minimum-version metadata, opens its 1100 × 800 native window from `/Applications/Satori.app`, and remains running without a new crash report.
 
 ## Repository hygiene
 
@@ -55,7 +55,6 @@ Satori is a local-first macOS PDF learning workspace. Reading stays central: the
 
 ## Next work
 
-1. When release work is explicitly authorized, publish a new version from the hardened source so users are no longer directed to the older `v3.3.1` asset; verify the exact ZIP, signature, Gatekeeper boundary, minimum OS, and launch behavior before updating release claims.
-2. Add an explicit “relink moved PDF” flow that preserves the existing book ID and learning history; missing stored paths currently fail closed and require the learner to choose the file again.
-3. Validate one real page question with Model Studio, OpenAI, and a local OpenAI-compatible visual service, then address extreme-page thumbnail and initial page-sizing memory costs from representative PDFs.
-4. Install an Apple Development identity with a Team ID to eliminate the remaining native-rebuild authorization limitation.
+1. Add an explicit “relink moved PDF” flow that preserves the existing book ID and learning history; missing stored paths currently fail closed and require the learner to choose the file again.
+2. Validate one real page question with Model Studio, OpenAI, and a local OpenAI-compatible visual service, then address extreme-page thumbnail and initial page-sizing memory costs from representative PDFs.
+3. Install an Apple Development identity with a Team ID to eliminate the remaining native-rebuild authorization limitation.
