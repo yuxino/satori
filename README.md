@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="Resources/Assets/satori-icon.png" width="112" alt="satori">
+  <img src="src-tauri/icons/128x128@2x.png" width="112" alt="satori">
   <h1>satori</h1>
   <p>Read PDF textbooks. Ask only when something does not click.</p>
   <p>

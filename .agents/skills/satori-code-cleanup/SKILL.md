@@ -13,8 +13,8 @@ description: 清理 Satori 的死代码、无效代码、未使用 import/变量
 
 ## Satori 代码结构（清理前先了解）
 
-- 前端 `src/`：`main.ts`（全部 UI 逻辑，单文件较大）、`reader.ts`（滚动阅读器）、`pdf.ts`（PDF.js 封装）、`markdown.ts`（回答渲染）、`api.ts`（Tauri IPC 封装）。
-- Rust `src-tauri/src/`：`lib.rs`（命令注册/菜单）、`qwen.rs`（百炼流式客户端）、`keychain.rs`、`store.rs`。
+- 前端 `src/`：`main.ts`（主要工作区）、`settings.ts`（设置）、`update.ts`（版本更新）、`reader.ts`（滚动阅读器）、`pdf.ts`（PDF.js 封装）、`markdown.ts`（回答渲染）、`api.ts`（Tauri IPC 封装），以及各类策略模块。
+- Rust `src-tauri/src/`：`lib.rs`（命令注册/菜单）、`qwen.rs`（多 provider 流式客户端）、`provider.rs`、`keychain.rs`、`store.rs`、`thumbs.rs`、`update.rs`。
 - 样式 `src/styles.css`：组件样式按注释分区。
 
 ## 清理对象（按常见度排序）
@@ -30,7 +30,7 @@ description: 清理 Satori 的死代码、无效代码、未使用 import/变量
 
 ## 工作流
 
-1. **先搜索再删**：对每个疑似死代码，用 `grep` 全局搜索引用（`.ts`、`.rs`、`.css`、`index.html`、配置文件），确认无引用才删。注意区分"定义处"和"使用处"。
+1. **先搜索再删**：对每个疑似死代码，用 `rg` 全局搜索引用（`.ts`、`.rs`、`.css`、`index.html`、配置文件），确认无引用才删。注意区分"定义处"和"使用处"。
 2. **连带清理**：删除一个功能时，把它专属的辅助函数、常量、类型、DOM 元素、样式一起删，不要只删调用点。特别是 HTML 元素删除后，JS 里对它的引用必须同步删（否则运行时 null 崩溃）。
 3. **检查交叉文件**：`main.ts` 引用的函数可能定义在 `reader.ts`/`pdf.ts`；Rust 命令在 `lib.rs` 注册、前端在 `api.ts` 封装——删任一端要看另一端。
 4. **删完必验**：`npx tsc --noEmit` + `npx vite build`（前端）；`cargo check`（Rust）。改动样式后再确认相关类无人引用。

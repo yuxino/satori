@@ -7,21 +7,22 @@ description: 处理 satori 的界面语言。当前 satori 为纯中文单语（
 
 ## 当前状态（如实说明）
 
-satori **目前是纯中文单语**：所有用户可见文案硬编码在 `src/main.ts`（按钮、提示、面板、设置弹窗）与 Rust 端（`qwen.rs` 的老师讲法提示词、`keychain.rs` 的错误消息）。**没有 i18n 结构、没有语言切换**。
+satori **目前是纯中文单语**：用户可见文案分布在 `src/main.ts`、`settings.ts`、`reader.ts`、`pdf.ts` 等前端模块，以及 Rust 端返回给界面的错误消息；`qwen.rs` 还包含发给模型的中文指令。**没有 i18n 结构、没有语言切换**。
 
 因此本 skill 在 satori 的用途分两档：
 
-1. **现在**：改文案时，只改 `src/main.ts` / Rust 端对应字符串即可，注意保持中文表达一致（参考产品用语：书、老师、回看、问这一页、框选理解）。
+1. **现在**：改文案时，先用 `rg` 找到前端或 Rust 端的实际定义，再修改对应字符串；注意保持中文表达一致（参考产品用语：书、老师、回看、问这一页、框选理解）。
 2. **将来加 i18n 时**：按下文路径抽离，避免临时堆砌。
 
 ## 加 i18n 时的路径（未来工作）
 
 ### 文案分布（先摸清）
 
-- 前端 `src/main.ts`：所有 UI 字符串直接内联（按钮文字、placeholder、提示、设置面板、书菜单、错误文案）。
-- 前端 `src/reader.ts` / `src/pdf.ts`：基本无用户文案（纯逻辑）。
+- 前端 `src/main.ts`：主要工作区、提问流程和书菜单文案。
+- 前端 `src/settings.ts` / `src/update.ts`：设置和版本更新文案。
+- 前端 `src/reader.ts` / `src/pdf.ts`：阅读器状态、PDF 加载和错误文案。
 - Rust `src-tauri/src/qwen.rs`：`TEACHER_SYSTEM` 提示词（中文，发给模型，**不是界面文案**，勿 i18n）。
-- Rust `src-tauri/src/keychain.rs` / `store.rs`：错误消息（中文，返给前端展示）。
+- Rust `src-tauri/src/keychain.rs` / `store.rs` / `thumbs.rs` / `provider.rs` / `update.rs`：错误或状态消息（中文，可能返给前端展示）。
 - `index.html`：标题。
 
 ### 建议结构（参照 mimi 的教训）

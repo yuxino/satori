@@ -22,7 +22,7 @@ npm run app
 ```
 
 - 会自动停止旧 dev 实例并构建前端；只有 Rust、Cargo/Tauri 配置、图标、启动脚本或签名身份变化时，才重建并签名 `src-tauri/target/release/satori-dev.app`。
-- 首次或改动原生代码时构建较慢（约 1 分钟）；只有前端变化时会直接复用签名壳。
+- 首次或改动原生代码时需要重建，耗时取决于当前工具链与缓存；只有前端变化时会直接复用签名壳。
 - 改前端后仍重跑 `npm run app`，让 Vite 更新 `dist/` 并重开页面；原生 CDHash 不变，不会因此重新触发 Keychain 授权。
 - 可用 `SATORI_CODESIGN_IDENTITY` 明确指定带 Team ID 的 Apple 签名身份；发现多个 `Apple Development` 身份时脚本会要求显式选择。若机器只有本地自签证书，Rust/配置/签名变化后，每个已保存连接在首次主动使用 AI 时仍可能需要一次 macOS 授权；安装 Apple Development 身份后可跨原生重建稳定授权。
 

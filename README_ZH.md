@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="Resources/Assets/satori-icon.png" width="112" alt="satori">
+  <img src="src-tauri/icons/128x128@2x.png" width="112" alt="satori">
   <h1>satori</h1>
   <p>读 PDF 教材，卡住时再问一句。</p>
   <p>
