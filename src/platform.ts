@@ -3,6 +3,10 @@ export interface PrimaryModifierState {
   ctrlKey: boolean;
 }
 
+export interface WheelModifierState {
+  ctrlKey: boolean;
+}
+
 export type DesktopPlatform = "macos" | "windows" | "other";
 
 export function desktopPlatformFromNavigator(platform: string): DesktopPlatform {
@@ -28,6 +32,11 @@ export function hasPrimaryModifier(
   platform: DesktopPlatform = currentDesktopPlatform(),
 ): boolean {
   return platform === "macos" ? event.metaKey : event.ctrlKey;
+}
+
+/** Ctrl+wheel belongs exclusively to zoom and must never reach page flipping. */
+export function shouldHandlePageFlipWheel(event: WheelModifierState): boolean {
+  return !event.ctrlKey;
 }
 
 export type ReleaseUpdatePhase = "idle" | "checking" | "current" | "available" | "release-only" | "error";

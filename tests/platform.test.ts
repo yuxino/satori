@@ -5,6 +5,7 @@ import {
   desktopPlatformFromNavigator,
   fileNameFromPath,
   hasPrimaryModifier,
+  shouldHandlePageFlipWheel,
 } from "../src/platform.ts";
 
 test("extracts PDF display names from POSIX and Windows paths", () => {
@@ -26,4 +27,9 @@ test("uses only Command on macOS and only Control on Windows", () => {
   assert.equal(hasPrimaryModifier({ metaKey: false, ctrlKey: true }, "windows"), true);
   assert.equal(hasPrimaryModifier({ metaKey: true, ctrlKey: false }, "windows"), false);
   assert.equal(hasPrimaryModifier({ metaKey: false, ctrlKey: false }, "windows"), false);
+});
+
+test("reserves Ctrl+wheel for zoom instead of page flipping", () => {
+  assert.equal(shouldHandlePageFlipWheel({ ctrlKey: true }), false);
+  assert.equal(shouldHandlePageFlipWheel({ ctrlKey: false }), true);
 });

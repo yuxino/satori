@@ -166,6 +166,11 @@ export function inspectPdfFile(path: string): Promise<PdfFileInfo> {
   return invoke<PdfFileInfo>("inspect_pdf_file", { path });
 }
 
+/** Exit only after the renderer has flushed its latest Store snapshot. */
+export function completeAppExit(): Promise<void> {
+  return invoke("complete_app_exit");
+}
+
 // ---- 缩略图磁盘缓存 ----
 
 export function loadThumb(path: string, page: number): Promise<string | null> {

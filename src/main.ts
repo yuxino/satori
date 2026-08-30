@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 // 菜单「设置…」触发打开设置面板。
 void listen("open-settings", () => {
@@ -30,6 +31,7 @@ function showFatalError(message: string) {
 
 import {
   askVisual,
+  completeAppExit,
   credentialStatus,
   emptyStore,
   extractOutline,
@@ -51,14 +53,20 @@ import {
 import type { PDFDocument } from "./pdf";
 import { ScrollReader, type RegionSelection } from "./reader";
 import { renderMarkdown } from "./markdown";
+import { pageTransitionDelta } from "./activity";
 import { requestedEvidencePages } from "./evidence-policy";
 import { outlineEvidencePlan } from "./outline-evidence-policy";
 import { RequestGate } from "./request-gate";
-import { fileNameFromPath, hasPrimaryModifier } from "./platform";
+import {
+  fileNameFromPath,
+  hasPrimaryModifier,
+  shouldHandlePageFlipWheel,
+} from "./platform";
 import { fileSizeLabel, pdfOpenErrorMessage } from "./pdf-open-policy";
 import { decidePdfDrop } from "./pdf-drop";
 import { actionableConnectionError } from "./connection-error";
 import { openAISettings } from "./settings";
+import { StorePersistence } from "./store-persistence";
 import {
   getAppUpdateSnapshot,
   initializeAppUpdateCheck,
@@ -76,6 +84,7 @@ const homeView = document.getElementById("home-view") as HTMLDivElement;
 
 // ---- 状态 ----
 let store: Store = emptyStore();
+let storeLoaded = false;
 let activeCredentialSaved = false;
 let credentialRefreshGeneration = 0;
 let currentBook: BookRecord | null = null;
@@ -125,6 +134,7 @@ subscribeToAppUpdates((state) => {
 let regionOverlay: HTMLDivElement | null = null;
 let regionStart: { x: number; y: number } | null = null;
 let regionActive = false;
+let wheelCommitTimer: number | undefined;
 
 // ---- 学习活动统计（总览热力格子图的数据） ----
 
@@ -202,8 +212,10 @@ async function activeProfileForAI(missingMessage: string): Promise<AIProfile | n
 
 // ---- 启动 ----
 async function boot() {
+  await setupExitPersistence();
   // 数据损坏或格式较新时必须明确失败，不能构造默认 provider 后继续写入。
   store = await loadStore();
+  storeLoaded = true;
   let recoveredInterruptedOpen = false;
   store.books = store.books.map((book) => {
     if (!book.opening) return book;
@@ -876,8 +888,9 @@ async function openBook(book: BookRecord) {
     bottomBar.style.display = "flex";
     reader = new ScrollReader(readerSurface, currentDoc, {
       onPageChange: (page) => {
+        const previousPage = currentPage;
         currentPage = page;
-        markPageViewed();
+        if (pageTransitionDelta(previousPage, page) > 0) markPageViewed();
         schedulePersistPosition();
         scheduleBottomBarUpdate();
       },
@@ -1783,20 +1796,58 @@ async function followUp(text: string) {
 }
 
 // ---- 持久化 ----
-let persistQueue: Promise<void> = Promise.resolve();
+const storePersistence = new StorePersistence(
+  () => structuredClone(store),
+  saveStore,
+  {
+    setTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs),
+    clearTimeout: (id) => window.clearTimeout(id),
+  },
+);
 
 /** 串行保存完整 Store，避免较早的快照晚到后覆盖刚改好的 AI 连接。 */
 function persistOrThrow(): Promise<void> {
-  const snapshot = structuredClone(store);
-  const next = persistQueue
-    .catch(() => undefined)
-    .then(() => saveStore(snapshot));
-  persistQueue = next;
-  return next;
+  return storePersistence.persist();
 }
 
 async function persist() {
   await persistOrThrow().catch(() => undefined);
+}
+
+/** 正常关闭前取消所有延迟，并把当前阅读状态作为最后一个快照写盘。 */
+async function flushPendingPersistence(): Promise<void> {
+  if (!storeLoaded) {
+    await completeAppExit();
+    return;
+  }
+  window.clearTimeout(wheelCommitTimer);
+  wheelCommitTimer = undefined;
+  checkpointCurrentReadingState();
+  await storePersistence.flush(completeAppExit);
+}
+
+let exitRequest: Promise<void> | null = null;
+function requestAppExit(): Promise<void> {
+  if (exitRequest) return exitRequest;
+  questionGate.invalidate();
+  exitRequest = (async () => {
+    try {
+      await flushPendingPersistence();
+    } catch (error) {
+      storePersistence.resume();
+      exitRequest = null;
+      showFatalError(`退出前无法保存阅读进度：${String(error)}`);
+    }
+  })();
+  return exitRequest;
+}
+
+async function setupExitPersistence(): Promise<void> {
+  await getCurrentWindow().onCloseRequested((event) => {
+    // 必须在任何 await 前阻止默认销毁，给最后一次 Store 写入留出时间。
+    event.preventDefault();
+    void requestAppExit();
+  });
 }
 
 async function saveQA(bookId: string, page: number, question: string, answer: string) {
@@ -1828,6 +1879,7 @@ function setupReaderSurface() {
   readerSurface.addEventListener(
     "wheel",
     (e) => {
+      if (!shouldHandlePageFlipWheel(e)) return;
       if (!reader || !reader.pageFitsViewport()) return; // 高页：允许原生滚动
       e.preventDefault();
       if (Math.abs(e.deltaY) < 15) return;
@@ -1946,7 +1998,6 @@ function setupReaderSurface() {
 
   // 兜底：Ctrl+滚轮缩放（普通鼠标也适用）。连续滚轮只做预览，
   // 停止滚动约 180ms 后提交真实缩放。
-  let wheelCommitTimer: number | undefined;
   readerSurface.addEventListener(
     "wheel",
     (e) => {
@@ -1961,6 +2012,7 @@ function setupReaderSurface() {
         updateBottomBarZoom();
         window.clearTimeout(wheelCommitTimer);
         wheelCommitTimer = window.setTimeout(() => {
+          wheelCommitTimer = undefined;
           if (reader) {
             void reader.commitZoom(zoomFactor);
             updateBottomBarZoom();
@@ -2115,13 +2167,9 @@ async function applyZoom() {
 }
 
 /// 记住当前书自己的缩放倍数，并防抖写盘。
-let zoomPersistTimer: number | undefined;
 function persistZoom() {
-  if (!store) return;
-  // 缩放记到当前书（每本书记住各自的），防抖写盘。
-  if (currentBook) currentBook.zoom = zoomFactor;
-  window.clearTimeout(zoomPersistTimer);
-  zoomPersistTimer = window.setTimeout(() => void persist(), 400);
+  checkpointCurrentReadingState();
+  storePersistence.schedule("zoom", 400);
 }
 
 // ---- 底部工具栏（原生阅读器风格） ----
@@ -2774,23 +2822,27 @@ async function renderThumb(page: number): Promise<void> {
   }
 }
 
-function persistReadingPosition() {
+function checkpointCurrentReadingState() {
   if (!currentBook) return;
   currentBook.last_page = currentPage;
+  currentBook.zoom = zoomFactor;
   store.books = store.books.map((b) => (b.id === currentBook!.id ? currentBook! : b));
-  // 把本轮翻过的页数记进当天的活动量，随这次持久化一起落盘。
+  // 把本轮翻过的页数记进当天的活动量，随下次持久化一起落盘。
   if (todayPagesPending > 0) {
     bumpActivity("pages", todayPagesPending);
     todayPagesPending = 0;
   }
+}
+
+function persistReadingPosition() {
+  checkpointCurrentReadingState();
   void persist();
 }
 
 /// 滚动触发时防抖保存阅读位置。
-let persistTimer: number | undefined;
 function schedulePersistPosition() {
-  window.clearTimeout(persistTimer);
-  persistTimer = window.setTimeout(persistReadingPosition, 800);
+  checkpointCurrentReadingState();
+  storePersistence.schedule("reading-position", 800);
 }
 
 // ---- 设置 ----

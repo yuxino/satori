@@ -133,8 +133,9 @@ jobs:
           if ($installers.Count -ne 1) {
             throw "Expected exactly one NSIS installer in $nsisDirectory; found $($installers.Count)."
           }
-          if ($installers[0].FullName -ne $installer) {
-            throw "Unexpected NSIS installer: $($installers[0].FullName); expected $installer."
+          $expectedInstallerName = [System.IO.Path]::GetFileName($installer)
+          if ($installers[0].Name -cne $expectedInstallerName) {
+            throw "Unexpected NSIS installer: $($installers[0].Name); expected $expectedInstallerName."
           }
 
           $extractRoot = Join-Path $env:RUNNER_TEMP "satori-nsis-${{ matrix.name }}"

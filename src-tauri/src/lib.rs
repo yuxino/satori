@@ -10,6 +10,21 @@ mod update;
 
 use tauri::{Emitter, Manager};
 
+#[derive(Debug, PartialEq, Eq)]
+enum AppMenuAction {
+    OpenSettings,
+    CloseWindow,
+    Ignore,
+}
+
+fn app_menu_action(id: &str) -> AppMenuAction {
+    match id {
+        "settings" => AppMenuAction::OpenSettings,
+        "quit" => AppMenuAction::CloseWindow,
+        _ => AppMenuAction::Ignore,
+    }
+}
+
 #[cfg(any(feature = "dev-live", test))]
 fn dev_asset_relative_path(uri_path: &str) -> Option<std::path::PathBuf> {
     use std::path::{Component, Path, PathBuf};
@@ -148,6 +163,11 @@ fn build_http_client(direct: bool) -> reqwest::Client {
     builder.build().expect("failed to build http client")
 }
 
+#[tauri::command]
+fn complete_app_exit(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -200,23 +220,32 @@ pub fn run() {
 
             Ok(())
         })
-        .on_menu_event(|app, event| match event.id().as_ref() {
+        .on_menu_event(|app, event| {
             #[cfg(feature = "dev-live")]
-            "toggle-devtools" => {
+            if event.id().as_ref() == "toggle-devtools" {
                 // 手动打开 WebView 调试工具（用户决定何时查看，不自动打开）。
                 if let Some(window) = app.get_webview_window("main") {
                     window.open_devtools();
                 }
+                return;
             }
-            "settings" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.emit("open-settings", ());
+
+            match app_menu_action(event.id().as_ref()) {
+                AppMenuAction::OpenSettings => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.emit("open-settings", ());
+                    }
                 }
+                AppMenuAction::CloseWindow => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.close();
+                    } else {
+                        // No renderer means there is no pending WebView state to flush.
+                        app.exit(0);
+                    }
+                }
+                AppMenuAction::Ignore => {}
             }
-            "quit" => {
-                app.exit(0);
-            }
-            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             keychain::credential_status,
@@ -226,6 +255,7 @@ pub fn run() {
             store::save_store,
             store::resolve_book_path,
             pdf_file::inspect_pdf_file,
+            complete_app_exit,
             thumbs::load_thumb,
             thumbs::save_thumb,
             qwen::ask_visual,
@@ -240,7 +270,9 @@ pub fn run() {
 
 #[cfg(test)]
 mod dev_asset_tests {
-    use super::{build_http_client, dev_asset_relative_path, AppState};
+    use super::{
+        app_menu_action, build_http_client, dev_asset_relative_path, AppMenuAction, AppState,
+    };
     use std::path::PathBuf;
 
     #[test]
@@ -273,5 +305,12 @@ mod dev_asset_tests {
         };
         assert!(std::ptr::eq(state.ai_client(false), &state.client));
         assert!(std::ptr::eq(state.ai_client(true), &state.direct_client));
+    }
+
+    #[test]
+    fn quit_menu_closes_the_window_instead_of_exiting_immediately() {
+        assert_eq!(app_menu_action("quit"), AppMenuAction::CloseWindow);
+        assert_eq!(app_menu_action("settings"), AppMenuAction::OpenSettings);
+        assert_eq!(app_menu_action("unknown"), AppMenuAction::Ignore);
     }
 }
