@@ -8,7 +8,42 @@ mod store;
 mod thumbs;
 mod update;
 
+use fs2::FileExt;
 use tauri::{Emitter, Manager};
+
+struct InstanceLock {
+    _file: std::fs::File,
+}
+
+fn acquire_exclusive_lock(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(path)?;
+    FileExt::try_lock_exclusive(&file)?;
+    Ok(file)
+}
+
+fn acquire_single_instance_startup_gate() -> std::io::Result<std::fs::File> {
+    let path = std::env::temp_dir().join("com.yuxino.satori-single-instance-startup.lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(path)?;
+    FileExt::lock_exclusive(&file)?;
+    Ok(file)
+}
+
+fn acquire_instance_lock(app: &tauri::AppHandle) -> Result<std::fs::File, String> {
+    let data_dir = platform_paths::non_secret_data_dir(app)?;
+    std::fs::create_dir_all(&data_dir).map_err(|error| format!("无法创建应用数据目录：{error}"))?;
+    acquire_exclusive_lock(&data_dir.join("instance.lock"))
+        .map_err(|error| format!("无法获取应用单实例锁：{error}"))
+}
 
 #[derive(Debug, PartialEq, Eq)]
 enum AppMenuAction {
@@ -163,13 +198,58 @@ fn build_http_client(direct: bool) -> reqwest::Client {
     builder.build().expect("failed to build http client")
 }
 
+trait ActivatableWindow {
+    fn restore_for_activation(&self);
+    fn show_for_activation(&self);
+    fn focus_for_activation(&self);
+}
+
+impl<R: tauri::Runtime> ActivatableWindow for tauri::WebviewWindow<R> {
+    fn restore_for_activation(&self) {
+        let _ = self.unminimize();
+    }
+
+    fn show_for_activation(&self) {
+        let _ = self.show();
+    }
+
+    fn focus_for_activation(&self) {
+        let _ = self.set_focus();
+    }
+}
+
+fn activate_window(window: &impl ActivatableWindow) {
+    window.restore_for_activation();
+    window.show_for_activation();
+    window.focus_for_activation();
+}
+
+fn activate_existing_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    #[cfg(target_os = "macos")]
+    let _ = app.show();
+    if let Some(window) = app.get_webview_window("main") {
+        activate_window(&window);
+    }
+}
+
 #[tauri::command]
 fn complete_app_exit(app: tauri::AppHandle) {
     app.exit(0);
 }
 
 pub fn run() {
+    // The official plugin creates its Windows mutex before its activation
+    // window. Serialize that short setup interval so a concurrent launch
+    // cannot slip through the gap and become a second Store writer.
+    let startup_gate = acquire_single_instance_startup_gate().ok();
     let builder = tauri::Builder::default()
+        // This must stay first: a secondary process must exit before any
+        // plugin or renderer can load and later overwrite the shared Store.
+        .plugin(tauri_plugin_single_instance::init(
+            |app, _arguments, _working_directory| {
+                activate_existing_main_window(app);
+            },
+        ))
         .plugin(tauri_plugin_dialog::init())
         // Only the explicit, capability-scoped update action uses opener.
         // Do not intercept every `_blank` link rendered in AI answers.
@@ -192,8 +272,30 @@ pub fn run() {
         .register_uri_scheme_protocol("tauri", |_context, request| dev_asset_response(request));
 
     builder
-        .setup(|app| {
+        .setup(move |app| {
             use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
+
+            // Keep this data lock for the process lifetime. It is the
+            // fail-closed backstop if a platform activation mechanism fails.
+            let instance_lock = acquire_instance_lock(app.handle());
+
+            // Plugin initialization, including the activation window, is now
+            // complete. Release the startup gate only after the lifetime lock
+            // attempt so no concurrent process can become a Store writer.
+            if let Some(file) = startup_gate.as_ref() {
+                let _ = FileExt::unlock(file);
+            }
+
+            match instance_lock {
+                Ok(file) => {
+                    app.manage(InstanceLock { _file: file });
+                }
+                Err(error) => {
+                    debug_log(app.handle(), &format!("single instance rejected: {error}"));
+                    app.handle().exit(0);
+                    return Ok(());
+                }
+            }
 
             let app_menu = SubmenuBuilder::new(app, "Satori");
             #[cfg(feature = "dev-live")]
@@ -271,9 +373,38 @@ pub fn run() {
 #[cfg(test)]
 mod dev_asset_tests {
     use super::{
-        app_menu_action, build_http_client, dev_asset_relative_path, AppMenuAction, AppState,
+        acquire_exclusive_lock, activate_window, app_menu_action, build_http_client,
+        dev_asset_relative_path, ActivatableWindow, AppMenuAction, AppState,
     };
+    use fs2::FileExt;
+    use std::cell::RefCell;
     use std::path::PathBuf;
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum ActivationAction {
+        Restore,
+        Show,
+        Focus,
+    }
+
+    #[derive(Default)]
+    struct RecordingWindow {
+        actions: RefCell<Vec<ActivationAction>>,
+    }
+
+    impl ActivatableWindow for RecordingWindow {
+        fn restore_for_activation(&self) {
+            self.actions.borrow_mut().push(ActivationAction::Restore);
+        }
+
+        fn show_for_activation(&self) {
+            self.actions.borrow_mut().push(ActivationAction::Show);
+        }
+
+        fn focus_for_activation(&self) {
+            self.actions.borrow_mut().push(ActivationAction::Focus);
+        }
+    }
 
     #[test]
     fn dev_asset_root_resolves_to_index() {
@@ -312,5 +443,45 @@ mod dev_asset_tests {
         assert_eq!(app_menu_action("quit"), AppMenuAction::CloseWindow);
         assert_eq!(app_menu_action("settings"), AppMenuAction::OpenSettings);
         assert_eq!(app_menu_action("unknown"), AppMenuAction::Ignore);
+    }
+
+    #[test]
+    fn secondary_launch_restores_shows_and_focuses_the_existing_window() {
+        let window = RecordingWindow::default();
+
+        activate_window(&window);
+
+        assert_eq!(
+            *window.actions.borrow(),
+            [
+                ActivationAction::Restore,
+                ActivationAction::Show,
+                ActivationAction::Focus,
+            ]
+        );
+    }
+
+    #[test]
+    fn process_lock_rejects_a_competing_store_writer() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("the test clock must be after the Unix epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "satori-instance-lock-test-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).expect("test lock directory must be creatable");
+        let path = directory.join("instance.lock");
+
+        let first = acquire_exclusive_lock(&path).expect("the first writer must acquire the lock");
+        assert!(
+            acquire_exclusive_lock(&path).is_err(),
+            "a second writer must fail closed while the first process owns the lock"
+        );
+
+        FileExt::unlock(&first).expect("the test lock must be releasable");
+        drop(first);
+        std::fs::remove_dir_all(directory).expect("the test lock directory must be removable");
     }
 }
