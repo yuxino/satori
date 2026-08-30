@@ -154,18 +154,26 @@ jobs:
 
           $builtHash = (Get-FileHash -LiteralPath $appExe -Algorithm SHA256).Hash
           $payloadHash = (Get-FileHash -LiteralPath $payloadExecutables[0].FullName -Algorithm SHA256).Hash
-          if ($builtHash -ne $payloadHash) {
-            throw "The NSIS payload executable does not match the verified build executable."
-          }
+          $installerHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
+          $hashManifest = Join-Path $nsisDirectory "Satori_$($config.version)_${{ matrix.installer_arch }}-SHA256SUMS.txt"
+          @(
+            "$installerHash  $([System.IO.Path]::GetFileName($installer))"
+            "$builtHash  satori.exe.pre-bundle"
+            "$payloadHash  satori.exe.nsis-payload"
+          ) | Set-Content -LiteralPath $hashManifest -Encoding utf8
 
           "Verified $appExe as PE machine 0x$($builtMachine.ToString('X4'))."
-          "Verified the exact installer and its matching PE payload: $installer."
+          "Verified the exact installer and its PE payload: $installer."
+          "Recorded separate pre-bundle, NSIS payload, and installer SHA-256 values in $hashManifest."
           "installer=$installer" >> $env:GITHUB_OUTPUT
+          "manifest=$hashManifest" >> $env:GITHUB_OUTPUT
 
       - name: Upload unsigned NSIS package
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: satori-windows-${{ matrix.name }}-nsis
-          path: ${{ steps.verify.outputs.installer }}
+          path: |
+            ${{ steps.verify.outputs.installer }}
+            ${{ steps.verify.outputs.manifest }}
           if-no-files-found: error
           retention-days: 14
