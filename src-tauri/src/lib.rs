@@ -45,6 +45,30 @@ fn acquire_instance_lock(app: &tauri::AppHandle) -> Result<std::fs::File, String
         .map_err(|error| format!("无法获取应用单实例锁：{error}"))
 }
 
+fn exit_before_renderer(app: &tauri::AppHandle, error: &str) -> ! {
+    debug_log(app, &format!("single instance rejected: {error}"));
+    app.cleanup_before_exit();
+    std::process::exit(0);
+}
+
+fn instance_lock_plugin(startup_gate: std::fs::File) -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri::plugin::Builder::new("instance-lock")
+        .setup(move |app, _api| {
+            let instance_lock = match acquire_instance_lock(app) {
+                Ok(file) => file,
+                Err(error) => exit_before_renderer(app, &error),
+            };
+            app.manage(InstanceLock {
+                _file: instance_lock,
+            });
+            if let Err(error) = FileExt::unlock(&startup_gate) {
+                exit_before_renderer(app, &format!("无法释放应用启动锁：{error}"));
+            }
+            Ok(())
+        })
+        .build()
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum AppMenuAction {
     OpenSettings,
@@ -241,7 +265,13 @@ pub fn run() {
     // The official plugin creates its Windows mutex before its activation
     // window. Serialize that short setup interval so a concurrent launch
     // cannot slip through the gap and become a second Store writer.
-    let startup_gate = acquire_single_instance_startup_gate().ok();
+    let startup_gate = match acquire_single_instance_startup_gate() {
+        Ok(file) => file,
+        Err(error) => {
+            eprintln!("Satori could not acquire its startup lock: {error}");
+            return;
+        }
+    };
     let builder = tauri::Builder::default()
         // This must stay first: a secondary process must exit before any
         // plugin or renderer can load and later overwrite the shared Store.
@@ -250,6 +280,9 @@ pub fn run() {
                 activate_existing_main_window(app);
             },
         ))
+        // Acquire the process-lifetime data lock before Tauri creates the
+        // configured WebView. This plugin must stay ahead of dialog/opener.
+        .plugin(instance_lock_plugin(startup_gate))
         .plugin(tauri_plugin_dialog::init())
         // Only the explicit, capability-scoped update action uses opener.
         // Do not intercept every `_blank` link rendered in AI answers.
@@ -272,30 +305,8 @@ pub fn run() {
         .register_uri_scheme_protocol("tauri", |_context, request| dev_asset_response(request));
 
     builder
-        .setup(move |app| {
+        .setup(|app| {
             use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
-
-            // Keep this data lock for the process lifetime. It is the
-            // fail-closed backstop if a platform activation mechanism fails.
-            let instance_lock = acquire_instance_lock(app.handle());
-
-            // Plugin initialization, including the activation window, is now
-            // complete. Release the startup gate only after the lifetime lock
-            // attempt so no concurrent process can become a Store writer.
-            if let Some(file) = startup_gate.as_ref() {
-                let _ = FileExt::unlock(file);
-            }
-
-            match instance_lock {
-                Ok(file) => {
-                    app.manage(InstanceLock { _file: file });
-                }
-                Err(error) => {
-                    debug_log(app.handle(), &format!("single instance rejected: {error}"));
-                    app.handle().exit(0);
-                    return Ok(());
-                }
-            }
 
             let app_menu = SubmenuBuilder::new(app, "Satori");
             #[cfg(feature = "dev-live")]
