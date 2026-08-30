@@ -188,7 +188,10 @@ jobs:
             throw "The current-user uninstall entry is not named Satori."
           }
 
-          $installedExe = Get-ChildItem -LiteralPath $uninstallKey.InstallLocation -Recurse -Filter "satori.exe" -File
+          $installedExe = @(
+            Get-ChildItem -LiteralPath $uninstallKey.InstallLocation -Recurse -Filter "satori.exe" |
+              Where-Object { -not $_.PSIsContainer }
+          )
           if ($installedExe.Count -ne 1) {
             throw "Expected one installed satori.exe; found $($installedExe.Count)."
           }
@@ -198,12 +201,18 @@ jobs:
           }
 
           $startMenuRoot = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
-          $startLinks = @(Get-ChildItem -LiteralPath $startMenuRoot -Recurse -Filter "Satori.lnk" -File)
+          $startLinks = @(
+            Get-ChildItem -LiteralPath $startMenuRoot -Recurse -Filter "Satori.lnk" |
+              Where-Object { -not $_.PSIsContainer }
+          )
           if ($startLinks.Count -ne 1) {
             throw "Expected one Start menu shortcut named Satori; found $($startLinks.Count)."
           }
           $desktopRoot = [Environment]::GetFolderPath("Desktop")
-          $desktopLinks = @(Get-ChildItem -LiteralPath $desktopRoot -Filter "Satori.lnk" -File)
+          $desktopLinks = @(
+            Get-ChildItem -LiteralPath $desktopRoot -Filter "Satori.lnk" |
+              Where-Object { -not $_.PSIsContainer }
+          )
           if ($desktopLinks.Count -ne 1) {
             throw "Expected one desktop shortcut named Satori; found $($desktopLinks.Count)."
           }
