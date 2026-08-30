@@ -80,8 +80,9 @@ jobs:
         run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --release --target ${{ matrix.target }} -- -D warnings
 
       - name: Build unsigned NSIS package
+        shell: pwsh
         run: >-
-          npm run tauri -- build
+          .\node_modules\.bin\tauri.cmd build
           --config src-tauri/tauri.windows.conf.json
           --target ${{ matrix.target }}
           --bundles nsis
