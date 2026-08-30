@@ -10,7 +10,7 @@
 
 `Satori` 来自日语「悟り」——理解、看清事物本质的瞬间。
 
-一个用来理解 PDF 教材的本地优先应用。当前源码面向 macOS 和 Windows 11：打开本地 PDF，书页始终留在视野中央；卡住时，再问当前页或框选区域。Windows 原生验收仍待完成。
+一个在 macOS 和 Windows 11 上理解 PDF 教材的本地优先应用。打开本地 PDF，书页始终留在视野中央；卡住时，再问当前页或框选区域。
 
 ## 功能
 
@@ -22,7 +22,7 @@
 
 ## 下载
 
-当前公开下载仍只有 macOS 版本，需要 macOS 14+ 和 Apple 芯片 Mac。请从 [GitHub Releases](https://github.com/yuxino/satori/releases/latest) 下载 ZIP，解压后把 Satori 拖入「应用程序」。
+3.4.0 版可从 [GitHub Releases](https://github.com/yuxino/satori/releases/latest) 下载，支持 Apple 芯片 Mac 上的 macOS 14+，以及 x64 或 ARM64 的 Windows 11。macOS 请下载 ZIP，解压后把 Satori 拖入「应用程序」；Windows 请下载与处理器架构匹配的 NSIS 安装包。
 
 当前源码面向 macOS 和 Windows 11。请准备 Node.js 22.13+、Rust 和对应平台的构建工具；macOS 开发还需要稳定的代码签名身份（Apple Development 或长期自签身份）。安装依赖后，在 macOS 运行 `npm run app`，在 Windows 运行 `npm run tauri -- dev`：
 
@@ -36,7 +36,7 @@ npm run tauri -- dev
 
 当前公开的 macOS 下载包使用本地代码签名，但没有 Apple Team ID，也未经过 Apple 公证。首次启动时，请按住 Control 点击 Satori，选择「打开」，再确认一次。更新需要从官方 Releases 页面手动下载并替换。
 
-手动 Windows 工作流会生成未签名的 x64 和 ARM64 NSIS 开发包。这些开发包目前没有发布到 GitHub Releases，也不是经过签名的 Windows 下载版本。
+Windows x64 和 ARM64 NSIS 安装包均未签名，并按当前用户安装，因此 Windows 会把发布者显示为未知。ARM64 应用已在 Windows 11 25H2 完成原生安装和交互检查；原生卸载与 x64 手动交互检查仍待完成。发布前，两个架构都会通过托管构建、打包、安装和卸载验证。
 
 应用界面目前只有简体中文。无需配置 AI 也能阅读；如需提问或识别扫描 PDF 缺失的目录，请在设置中添加一个兼容 OpenAI Chat Completions 且能接收图片的模型。
 

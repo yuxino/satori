@@ -2,7 +2,7 @@
 
 ## 范围
 
-本轮只处理 Satori 自身的 Windows 兼容性，不再诊断虚拟机共享目录的复制故障。Host 负责代码、自动测试、Windows x64/ARM64 CI 和 unsigned current-user NSIS；唯一 UTM 中的安装、拖放、输入和截图由用户逐步完成。不得发布 GitHub Release，也不得在日志、截图或对话中记录 API Key 明文。
+原兼容性轮次只处理 Satori 自身，不诊断虚拟机共享目录的复制故障，也不发布 GitHub Release。Host 负责代码、自动测试、Windows x64/ARM64 CI 和 unsigned current-user NSIS；UTM 中的安装、拖放、输入和截图在独占时段完成。后续独立的 3.4.0 发布指令授权把验收后的安装包公开，但不改变不得在日志、截图或对话中记录 API Key 明文的边界。
 
 ## 修复前证据
 
@@ -37,8 +37,14 @@
 
 ## 自动验证记录
 
-完成提交后在这里补录最终 main SHA、GitHub Actions run、x64 NSIS 文件路径和 SHA-256。CI 只上传 14 天 artifact，不创建 Release。
+- 原生候选提交：`b4bc922555f138eed45e4a23e667d1bd755949e8`。
+- GitHub Actions：run `33309980178`，x64 与 ARM64 均通过前端测试/构建、Rust test/check/Clippy、release build、精确安装包名、7-Zip 解包、唯一 payload、PE machine、current-user 安装身份、快捷方式与卸载检查。
+- x64 NSIS：`Satori_3.3.2_x64-setup.exe`，SHA-256 `bc2259f644fd09e599119b99a4be7d0d31a6952a29a6b73063fc7e40f878eddd`。
+- ARM64 NSIS：`Satori_3.3.2_arm64-setup.exe`，SHA-256 `c2fed32525e664fa5da89265925575c388a1ed078c367b69eaebfee08fde8d49`。
+- CI 仍只上传短期 artifact，不创建或修改 Release。3.4.0 发布由主机在精确 SHA 的新一轮工作流和 SHA-256 复核后单独完成。
 
 ## UTM 原生验收记录
 
-等待新的 x64 候选包生成后再开始；每轮只给用户一个点击或输入动作。需要保留：安装前旧图标/旧行为截图（如已有）、安装后的桌面与开始菜单图标、拖入 PDF 时的覆盖层、低性能加载阶段、成功首屏或可恢复错误，以及无明文 Key 的应用日志。Host 自动测试和 CI 不能替代这些 Windows 交互证据。
+Windows 11 25H2 ARM64 UTM run `307e21ee-ce24-4a2e-96db-8a7da4d872c8` 安装并启动了上述精确 ARM64 候选。安全的三页合成 PDF 完成了打开、1→2/3 翻页、缩放、双页与最大化布局、框选、任务栏最小化/恢复、正常关闭和 Alt+F4；页码和两条逐书问答在两次重启后仍存在。
+
+普通书页问题与框选问题都得到了真实回答。验收只使用已有的安全凭据状态和无个人信息的合成 PDF，没有读取、显示、记录或截图 API Key 值。原生卸载仍待完成；x64 只有 GitHub 托管环境的构建、安装和卸载证据，没有手动交互验收。3.4.0 相对该原生候选只修改版本与文档元数据，因此发布包不能冒充一次新的原生安装结果。

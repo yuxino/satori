@@ -4,7 +4,7 @@ Updated: 2026-08-30
 
 ## Product
 
-Satori is a local-first macOS and Windows PDF learning workspace. Reading stays central: the learner opens or drags in a local book, returns to the previous page, and explicitly asks for help with the current page or a selected region. It is not a general chat or note-taking product. The published download remains macOS-only; Windows source and packaging support are not yet native interaction acceptance evidence.
+Satori is a local-first macOS and Windows PDF learning workspace. Reading stays central: the learner opens or drags in a local book, returns to the previous page, and explicitly asks for help with the current page or a selected region. It is not a general chat or note-taking product. Version 3.4.0 adds public Windows 11 x64 and ARM64 packages while keeping each architecture's hosted and native evidence explicit.
 
 ## Current implementation
 
@@ -23,17 +23,17 @@ Satori is a local-first macOS and Windows PDF learning workspace. Reading stays 
 
 ## Version and installation
 
-- Current source and published release version: `3.3.2`. The published asset is still Apple silicon only and contains the patched PDF.js, explicit page-transmission, request-safety, provider-validation, and capability hardening work described here.
+- Current source and published release version: `3.4.0`. Release assets cover macOS 14+ on Apple silicon and Windows 11 on x64 or ARM64.
 - The downloadable bundle has a stable local signature and hardened-runtime flag, but no Apple Team ID or notarization; Gatekeeper assessment rejects it, so the documented Control-click opening step remains required.
-- The `3.3.2` bundle declares macOS 14 as its minimum system version. The exact built payload was installed at `/Applications/Satori.app` and launched successfully.
-- The manual Windows workflow targets native x64 and ARM64 runners, builds current-user NSIS packages, extracts each installer, and verifies that its payload matches the expected PE architecture. These artifacts are unsigned development packages, are not published in GitHub Releases, and still require native installation and interaction acceptance.
+- The macOS bundle declares macOS 14 as its minimum system version. Release packaging verifies the bundle signature, hardened runtime, version, archive integrity, and SHA-256 before publication.
+- The manual Windows workflow targets native x64 and ARM64 runners, builds unsigned current-user NSIS packages, extracts each installer, verifies a unique payload and the expected PE architecture, installs it, checks application and shortcut identity, uninstalls it, and records separate SHA-256 manifests before publication.
 
 ## Verification baseline
 
 - Frontend: 41 Node tests, strict TypeScript unused-symbol checking, and the Vite production build pass; `npm audit` reports no known vulnerabilities. PDF.js loads as a separate reader-only chunk instead of delaying the home screen.
 - Rust: all 45 tests pass; `cargo fmt --check`, release and `dev-live` checks, and Clippy with warnings denied pass. The PDF preflight includes a sparse 256 MiB fixture, and atomic replacement is tested with repeated writes.
 - Real app: the stable signed development shell builds, passes its designated-requirement check, launches a 1100 × 800 native `Satori` window, and exposes the new visible bookshelf removal controls. Host QA did not alter books or credentials.
-- Windows: configuration, credential, path, update-matching, drag policy, PDF recovery, and packaging checks are covered in source. The new manual hosted x64/ARM64 run and Windows 11 x64 UTM install/interaction screenshots remain pending; neither source checks nor CI packaging will be described as native interaction acceptance.
+- Windows: hosted run `33309980178` passed frontend and Rust checks, exact installer naming, unique NSIS payload extraction, PE architecture checks, current-user install identity, shortcuts, uninstall, and artifact upload for x64 and ARM64 at `b4bc922555f138eed45e4a23e667d1bd755949e8`. Windows 11 25H2 ARM64 UTM run `307e21ee-ce24-4a2e-96db-8a7da4d872c8` installed and launched that exact ARM64 candidate, opened the synthetic three-page PDF, navigated pages, zoomed, selected a region, persisted page and Q&A state across two restarts, and passed taskbar, maximize, normal-close, and Alt+F4 interaction checks. Page and region questions succeeded using an already configured secure credential; acceptance did not inspect, display, log, or capture the credential value, and no personal document or API key appeared in the evidence. Native uninstall remains pending, and x64 has no manual interaction acceptance. The 3.4.0 release changes only version and documentation metadata after this native candidate, so it is not described as a separate native installation result.
 
 ## Repository hygiene
 
@@ -56,13 +56,13 @@ Satori is a local-first macOS and Windows PDF learning workspace. Reading stays 
 - Update checks use only the fixed GitHub API endpoint and the build version; download actions may open only the exact official Releases URL. Do not imply in-place installation until signed updater artifacts and a durable release pipeline exist.
 - Windows local state belongs in application LocalAppData, while credentials belong only in Windows Credential Manager with local-machine persistence. Do not add plaintext, environment-variable, roaming, renderer-visible, or cross-platform credential fallbacks.
 - Windows file replacement must preserve overwrite semantics for both Store JSON and credential-scope markers; do not restore direct `std::fs::rename` over an existing destination.
-- Windows packaging is manual-only, current-user NSIS. x64 and ARM64 workflow artifacts must remain separate, unsigned, and unpublished until each installer payload architecture is verified and native acceptance is complete.
+- Windows packaging is manual-only, current-user NSIS. Keep x64 and ARM64 assets and SHA-256 manifests separate. Publishing unsigned installers requires exact filename and count checks, successful extraction, a unique application payload, matching PE architecture, product identity, hosted install/uninstall verification, and explicit disclosure of signing and native-acceptance boundaries.
 - Store corruption or a newer schema must surface an error, never reset to a default provider or overwrite data.
 - Normal window, taskbar, Alt+F4, and app-menu exits must checkpoint the latest page and zoom, cancel pending debounce timers, and await the final atomic Store save before process termination.
 - Do not restore plaintext API-key files, allow-all Keychain ACLs, renderer secrets, automatic AI requests, or legacy Swift packaging resources.
 
 ## Next work
 
-1. After the new CI artifact is verified, complete the Windows 11 x64 UTM install/launch/drag-PDF/loading/recovery/persistence/icon/taskbar/exit/uninstall checklist one user action at a time without exposing a real API Key.
+1. Install the exact 3.4.0 ARM64 release package in the disposable Windows 11 VM and complete native uninstall; separately complete x64 manual interaction acceptance when an x64 environment is available.
 2. Add an explicit “relink moved PDF” flow that preserves the existing book ID and learning history; missing stored paths currently fail closed and require the learner to choose the file again.
-3. Validate one real page question with Model Studio, OpenAI, and a local OpenAI-compatible visual service, then address extreme-page thumbnail and initial page-sizing memory costs from representative PDFs.
+3. Extend AI acceptance beyond the one configured provider and synthetic PDF used here to Model Studio, OpenAI, and a local OpenAI-compatible visual service with representative learning material, then address extreme-page thumbnail and initial page-sizing memory costs.
