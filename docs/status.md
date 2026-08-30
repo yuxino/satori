@@ -4,20 +4,21 @@ Updated: 2026-08-30
 
 ## Product
 
-Satori is a local-first macOS and Windows PDF learning workspace. Reading stays central: the learner opens a local book, returns to the previous page, and explicitly asks for help with the current page or a selected region. It is not a general chat or note-taking product. The published download remains macOS-only; Windows source and packaging support are not yet native acceptance evidence.
+Satori is a local-first macOS and Windows PDF learning workspace. Reading stays central: the learner opens or drags in a local book, returns to the previous page, and explicitly asks for help with the current page or a selected region. It is not a general chat or note-taking product. The published download remains macOS-only; Windows source and packaging support are not yet native interaction acceptance evidence.
 
 ## Current implementation
 
 - Stack: Tauri 2, Vite, TypeScript, PDF.js, Rust, and local JSON persistence. The removed Swift app is available only at tag `legacy-swift`.
-- Platforms: the base Tauri configuration keeps the macOS `.app` target. A Windows-only overlay adds current-user NSIS packaging for x64 and ARM64, with local state under application LocalAppData and a separate multi-resolution ICO.
-- Reader: single/spread layouts, per-book page and zoom restoration, outline navigation, text and scanned-page rendering, and explicitly triggered VLM outline recovery for scanned books.
-- Home: a restrained monochrome editorial layout containing the current book, 52-week activity grid, bookshelf, and recent Q&A. Book covers are sharp typographic covers rather than PDF thumbnails; labels describe questions and answers without claiming the learner understood them.
+- Platforms: the base Tauri configuration keeps the macOS `.app` target. A Windows-only overlay adds current-user NSIS packaging for x64 and ARM64, with local state under application LocalAppData and a transparent multi-resolution ICO shared by the app, installer, and uninstaller. CI installs each candidate and checks exact `Satori` identity in executable metadata, HKCU uninstall data, Start menu, and Desktop shortcuts before uninstalling it.
+- Reader: single/spread layouts, per-book page and zoom restoration, outline navigation, text and scanned-page rendering, and explicitly triggered VLM outline recovery for scanned books. Initial opening now preflights PDF completeness, shows byte/page/render progress, supports cancellation and stall recovery, batches page metadata, bounds canvas memory, and records interrupted opens as retryable bookshelf errors.
+- Home: a restrained monochrome editorial layout containing the current book, 52-week activity grid, bookshelf, and recent Q&A. Each bookshelf row has a visible removal action whose confirmation states that the disk PDF is preserved. Book covers are sharp typographic covers rather than PDF thumbnails; labels describe questions and answers without claiming the learner understood them.
 - Brand treatment: in-page product-name decoration has been removed so the reading content stays primary. The app name appears as `Satori` only where system context requires it; the home settings entry now uses a quieter, clearer labeled icon.
 - Updates: the app checks GitHub Releases once after launch and offers a manual recheck in the settings header. A newer stable Release adds a quiet dot to the home settings button; settings distinguish a matching platform package from a Release that has no applicable installer and open only the official Releases page. Satori does not claim to install an update in place.
-- Teacher: opening the page-side entry has no AI or secure-credential-store side effects. A request starts only after an explicit question, page explanation, region action, or outline-recognition action whose page range is disclosed first; page images are ephemeral.
+- Import: the native window accepts one dropped PDF at a time and shares the same import, preflight, progress, cancellation, recovery, and persistence path as the file picker.
+- Teacher: startup, importing, reading, and library management have no AI or secure-credential-store side effects. Credential checking begins only after an explicit question, page explanation, region action, or outline-recognition action whose page range is disclosed first; missing configuration opens settings, request failures have actionable Windows/provider guidance and explicit retry, and page images are ephemeral.
 - History: completed Q&A is stored locally per book, can reopen the source page, and sends only bounded recent text for follow-ups.
 - AI services: multiple named Model Studio, OpenAI, or custom OpenAI-compatible visual profiles. The active profile is explicit and never silently replaced.
-- Credentials: API keys live only in macOS Keychain or the current Windows user's Credential Manager with non-roaming `CRED_PERSIST_LOCAL_MACHINE` persistence. They remain bound to profile, normalized endpoint, and auth scope; the renderer receives existence status, never secret data.
+- Credentials: API keys live only in macOS Keychain or the current Windows user's Credential Manager with non-roaming `CRED_PERSIST_LOCAL_MACHINE` persistence. They remain bound to profile, normalized endpoint, and auth scope; the renderer receives existence status, never secret data. Windows Store and credential-scope sidecars now use native overwrite-capable atomic replacement, so repeated saves do not fail after the first file exists.
 - Safety: Rust resolves persisted profiles for AI commands, rejects insecure or overridden endpoints again before every save, disables redirects, sends `store: false` remotely, and does not read a key when auth is disabled. Normal questions send only the current page; adjacent pages require an explicit previous/next-page request. PDF.js is pinned to the patched 6.2.108 release; reopening a missing book fails closed instead of guessing a same-named path, and Tauri capabilities are least privilege.
 
 ## Version and installation
@@ -29,10 +30,10 @@ Satori is a local-first macOS and Windows PDF learning workspace. Reading stays 
 
 ## Verification baseline
 
-- Frontend: 24 Node tests, strict TypeScript unused-symbol checking, and the Vite production build pass; `npm audit` reports no known vulnerabilities. PDF.js loads as a separate reader-only chunk instead of delaying the home screen.
-- Rust: the full test suite passes; `cargo fmt --check`, release and `dev-live` checks, and Clippy with warnings denied pass.
-- Real app: the locally signed release app reports `v3.3.2`, uses the macOS 14 minimum-version metadata, opens its 1100 × 800 native window from `/Applications/Satori.app`, and remains running without a new crash report.
-- Windows: configuration, credential, path, update-matching, and packaging checks are covered in source. Manual hosted x64/ARM64 build evidence is retained with the delivered artifacts; Windows 11 ARM64 install/launch/UI/uninstall acceptance remains pending until the reserved native slot is available.
+- Frontend: 35 Node tests, strict TypeScript unused-symbol checking, and the Vite production build pass; `npm audit` reports no known vulnerabilities. PDF.js loads as a separate reader-only chunk instead of delaying the home screen.
+- Rust: all 44 tests pass; `cargo fmt --check`, release check, and Clippy with warnings denied pass. The PDF preflight includes a sparse 256 MiB fixture, and atomic replacement is tested with repeated writes.
+- Real app: the stable signed development shell builds, passes its designated-requirement check, launches a 1100 × 800 native `Satori` window, and exposes the new visible bookshelf removal controls. Host QA did not alter books or credentials.
+- Windows: configuration, credential, path, update-matching, drag policy, PDF recovery, and packaging checks are covered in source. The new manual hosted x64/ARM64 run and Windows 11 x64 UTM install/interaction screenshots remain pending; neither source checks nor CI packaging will be described as native interaction acceptance.
 
 ## Repository hygiene
 
@@ -54,12 +55,13 @@ Satori is a local-first macOS and Windows PDF learning workspace. Reading stays 
 - Removing a book must use separate accessible controls and an explicit destructive confirmation that names the local reading data and Q&A being removed.
 - Update checks use only the fixed GitHub API endpoint and the build version; download actions may open only the exact official Releases URL. Do not imply in-place installation until signed updater artifacts and a durable release pipeline exist.
 - Windows local state belongs in application LocalAppData, while credentials belong only in Windows Credential Manager with local-machine persistence. Do not add plaintext, environment-variable, roaming, renderer-visible, or cross-platform credential fallbacks.
+- Windows file replacement must preserve overwrite semantics for both Store JSON and credential-scope markers; do not restore direct `std::fs::rename` over an existing destination.
 - Windows packaging is manual-only, current-user NSIS. x64 and ARM64 workflow artifacts must remain separate, unsigned, and unpublished until each installer payload architecture is verified and native acceptance is complete.
 - Store corruption or a newer schema must surface an error, never reset to a default provider or overwrite data.
 - Do not restore plaintext API-key files, allow-all Keychain ACLs, renderer secrets, automatic AI requests, or legacy Swift packaging resources.
 
 ## Next work
 
-1. Use the verified ARM64 development artifact to complete the Windows 11 ARM64 install/launch/PDF/interaction/persistence/taskbar/exit/uninstall checklist without a real API Key.
+1. After the new CI artifact is verified, complete the Windows 11 x64 UTM install/launch/drag-PDF/loading/recovery/persistence/icon/taskbar/exit/uninstall checklist one user action at a time without exposing a real API Key.
 2. Add an explicit “relink moved PDF” flow that preserves the existing book ID and learning history; missing stored paths currently fail closed and require the learner to choose the file again.
 3. Validate one real page question with Model Studio, OpenAI, and a local OpenAI-compatible visual service, then address extreme-page thumbnail and initial page-sizing memory costs from representative PDFs.

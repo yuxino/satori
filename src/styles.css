@@ -152,6 +152,23 @@ body {
   animation: spin 0.8s linear infinite;
 }
 
+#loading-overlay .loading-cancel {
+  margin-left: 8px;
+  padding: 5px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--sheet);
+  color: var(--ink-soft);
+  cursor: pointer;
+  font: 12px/1 var(--sans);
+}
+
+#loading-overlay .loading-cancel:hover,
+#loading-overlay .loading-cancel:focus-visible {
+  border-color: var(--ink-soft);
+  color: var(--ink);
+}
+
 #fatal-error {
   position: absolute;
   inset: 0;
@@ -166,6 +183,26 @@ body {
   text-align: left;
   white-space: pre-wrap;
 }
+
+.pdf-drop-overlay {
+  position: fixed;
+  inset: 18px;
+  z-index: 120;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  border: 2px dashed var(--ink-soft);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--sheet) 94%, transparent);
+  color: var(--ink);
+  text-align: center;
+  pointer-events: none;
+}
+
+.pdf-drop-overlay strong { font: 600 20px/1.2 var(--serif); }
+.pdf-drop-overlay span { color: var(--ink-faint); font: 12px/1.4 var(--sans); }
+.pdf-drop-overlay.error { border-color: #9a3128; }
+.pdf-drop-overlay.error strong { color: #9a3128; }
 
 @keyframes spin {
   to {
@@ -659,12 +696,22 @@ body {
 .home-book {
   width: 100%;
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+
+.home-book-open {
+  min-width: 0;
+  display: grid;
   grid-template-columns: 38px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
   padding: 10px 4px;
   border: 0;
-  border-bottom: 1px solid var(--line);
   background: transparent;
   color: var(--ink);
   text-align: left;
@@ -673,9 +720,25 @@ body {
   transition: padding 0.16s ease, color 0.16s ease;
 }
 
-.home-book:hover {
+.home-book-open:hover {
   padding-left: 8px;
   color: var(--accent);
+}
+
+.home-book-remove {
+  padding: 6px 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  font: 11px/1 var(--sans);
+}
+
+.home-book-remove:hover,
+.home-book-remove:focus-visible {
+  background: var(--paper-deep);
+  color: var(--ink);
 }
 
 .home-book-cover {
@@ -723,6 +786,7 @@ body {
   margin-top: 5px;
   color: var(--ink-faint);
   font-size: 11px;
+  line-height: 1.45;
 }
 
 .home-book-hint {

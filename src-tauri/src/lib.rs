@@ -1,4 +1,6 @@
+mod atomic_file;
 mod keychain;
+mod pdf_file;
 mod platform_paths;
 mod provider;
 mod qwen;
@@ -140,6 +142,7 @@ fn build_http_client(direct: bool) -> reqwest::Client {
         // API requests must never forward credentials or page images to a
         // redirect target. Users configure the final endpoint.
         .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(std::time::Duration::from_secs(20))
         .timeout(std::time::Duration::from_secs(120));
     let builder = if direct { builder.no_proxy() } else { builder };
     builder.build().expect("failed to build http client")
@@ -222,6 +225,7 @@ pub fn run() {
             store::load_store,
             store::save_store,
             store::resolve_book_path,
+            pdf_file::inspect_pdf_file,
             thumbs::load_thumb,
             thumbs::save_thumb,
             qwen::ask_visual,

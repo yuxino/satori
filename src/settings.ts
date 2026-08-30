@@ -8,6 +8,7 @@ import {
   type CredentialStatus,
   type Settings,
 } from "./api";
+import { actionableConnectionError, formatUnknownError as formatError } from "./connection-error";
 import {
   checkForAppUpdate,
   getAppUpdateSnapshot,
@@ -1531,30 +1532,4 @@ function modelExplanationText(profile: AIProfile): string {
   if (match) return `${match.label} · ${match.explanation}`;
   if (profile.provider === "open_ai_compatible") return "填写服务端提供且支持图片输入的模型 ID。";
   return "可以选择建议模型，也可以填写其他支持图片输入的模型 ID。";
-}
-
-function formatError(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) return error.message.trim();
-  if (typeof error === "string" && error.trim()) return error.trim();
-  try {
-    const serialized = JSON.stringify(error);
-    return serialized && serialized !== "{}" ? serialized : "未知错误";
-  } catch {
-    return "未知错误";
-  }
-}
-
-function actionableConnectionError(error: unknown): string {
-  const message = formatError(error);
-  const lower = message.toLowerCase();
-  if (lower.includes("401") || lower.includes("unauthorized") || lower.includes("api key")) {
-    return "鉴权失败。请检查 API Key 是否正确，并确认它属于当前服务。";
-  }
-  if (lower.includes("404") || lower.includes("model") && lower.includes("not")) {
-    return "找不到 API 地址或模型。请核对服务地址和模型 ID。";
-  }
-  if (lower.includes("timeout") || lower.includes("timed out") || message.includes("超时")) {
-    return "连接超时。请检查网络、服务地址，或稍后重试。";
-  }
-  return message;
 }

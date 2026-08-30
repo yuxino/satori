@@ -4,7 +4,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::AppHandle;
@@ -33,6 +32,12 @@ pub struct BookRecord {
     /// 总页数（打开时记录，供总览页显示进度）。None = 尚未打开过。
     #[serde(rename = "pageCount", alias = "page_count")]
     pub page_count: Option<usize>,
+    /// Set before PDF.js starts and cleared after success/failure. If the
+    /// process exits mid-open, the next launch turns it into a recoverable
+    /// failure instead of trying to resume a poisoned reader state.
+    pub opening: bool,
+    /// Safe, user-facing last-open failure. Never contains PDF contents.
+    pub open_error: Option<String>,
 }
 
 /// 某一天的学习活动量（总览热力格子图用）。
@@ -73,6 +78,8 @@ impl Default for BookRecord {
             zoom: None,
             spread: false,
             page_count: None,
+            opening: false,
+            open_error: None,
         }
     }
 }
@@ -374,20 +381,8 @@ pub fn save_store(app: AppHandle, mut store: Store) -> Result<(), String> {
 
 fn write_store_atomically(path: &std::path::Path, contents: &[u8]) -> Result<(), String> {
     let temporary = path.with_extension("json.tmp");
-    let result = (|| {
-        let mut file =
-            fs::File::create(&temporary).map_err(|e| format!("创建临时存储失败：{e}"))?;
-        file.write_all(contents)
-            .map_err(|e| format!("写入临时存储失败：{e}"))?;
-        file.sync_all()
-            .map_err(|e| format!("同步临时存储失败：{e}"))?;
-        fs::rename(&temporary, path).map_err(|e| format!("替换存储失败：{e}"))
-    })();
-
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    result
+    crate::atomic_file::write_atomically(path, &temporary, contents)
+        .map_err(|error| format!("替换存储失败：{error}"))
 }
 
 /// 已保存的书只能使用 Store 中记录的精确路径；文件移动后必须由用户

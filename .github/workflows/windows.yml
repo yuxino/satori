@@ -117,6 +117,9 @@ jobs:
           }
 
           $config = Get-Content "src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json
+          if ($config.productName -cne "Satori" -or $config.app.windows[0].title -cne "Satori") {
+            throw "Windows product and window title must both be exactly Satori."
+          }
           $releaseRoot = Join-Path $env:GITHUB_WORKSPACE "src-tauri\target\${{ matrix.target }}\release"
           $appExe = Join-Path $releaseRoot "satori.exe"
           $installer = Join-Path $releaseRoot "bundle\nsis\Satori_$($config.version)_${{ matrix.installer_arch }}-setup.exe"
@@ -167,6 +170,63 @@ jobs:
           "Recorded separate pre-bundle, NSIS payload, and installer SHA-256 values in $hashManifest."
           "installer=$installer" >> $env:GITHUB_OUTPUT
           "manifest=$hashManifest" >> $env:GITHUB_OUTPUT
+
+      - name: Install and verify current-user identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = "${{ steps.verify.outputs.installer }}"
+          $install = Start-Process -FilePath $installer -ArgumentList "/S" -PassThru -Wait
+          if ($install.ExitCode -ne 0) {
+            throw "Silent current-user install failed with exit code $($install.ExitCode)."
+          }
+
+          $uninstallKey = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" |
+            Where-Object { $_.DisplayName -ceq "Satori" } |
+            Select-Object -First 1
+          if ($null -eq $uninstallKey) {
+            throw "The current-user uninstall entry is not named Satori."
+          }
+
+          $installedExe = Get-ChildItem -LiteralPath $uninstallKey.InstallLocation -Recurse -Filter "satori.exe" -File
+          if ($installedExe.Count -ne 1) {
+            throw "Expected one installed satori.exe; found $($installedExe.Count)."
+          }
+          $versionInfo = $installedExe[0].VersionInfo
+          if ($versionInfo.ProductName -cne "Satori" -or $versionInfo.FileDescription -cne "Satori") {
+            throw "Installed executable metadata is not consistently named Satori."
+          }
+
+          $startMenuRoot = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+          $startLinks = @(Get-ChildItem -LiteralPath $startMenuRoot -Recurse -Filter "Satori.lnk" -File)
+          if ($startLinks.Count -ne 1) {
+            throw "Expected one Start menu shortcut named Satori; found $($startLinks.Count)."
+          }
+          $desktopRoot = [Environment]::GetFolderPath("Desktop")
+          $desktopLinks = @(Get-ChildItem -LiteralPath $desktopRoot -Filter "Satori.lnk" -File)
+          if ($desktopLinks.Count -ne 1) {
+            throw "Expected one desktop shortcut named Satori; found $($desktopLinks.Count)."
+          }
+
+          $shell = New-Object -ComObject WScript.Shell
+          foreach ($linkPath in @($startLinks[0].FullName, $desktopLinks[0].FullName)) {
+            $shortcut = $shell.CreateShortcut($linkPath)
+            if ([System.IO.Path]::GetFullPath($shortcut.TargetPath) -ne $installedExe[0].FullName) {
+              throw "Shortcut does not target the installed Satori executable: $linkPath"
+            }
+          }
+
+          $uninstallCommand = [string]$uninstallKey.UninstallString
+          $uninstaller = if ($uninstallCommand.StartsWith('"')) {
+            [regex]::Match($uninstallCommand, '^"([^"]+)"').Groups[1].Value
+          } else {
+            $uninstallCommand.Split(' ')[0]
+          }
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList "/S" -PassThru -Wait
+          if ($uninstall.ExitCode -ne 0) {
+            throw "Silent uninstall failed with exit code $($uninstall.ExitCode)."
+          }
+          "Verified current-user install, executable metadata, uninstall entry, Start menu shortcut, desktop shortcut, and uninstall for Satori."
 
       - name: Upload unsigned NSIS package
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

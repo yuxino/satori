@@ -3,6 +3,7 @@ import "./styles.css";
 import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 
 // 菜单「设置…」触发打开设置面板。
 void listen("open-settings", () => {
@@ -33,6 +34,7 @@ import {
   emptyStore,
   extractOutline,
   findPageByTitle,
+  inspectPdfFile,
   loadStore,
   resolveBookPath,
   saveStore,
@@ -53,6 +55,9 @@ import { requestedEvidencePages } from "./evidence-policy";
 import { outlineEvidencePlan } from "./outline-evidence-policy";
 import { RequestGate } from "./request-gate";
 import { fileNameFromPath, hasPrimaryModifier } from "./platform";
+import { fileSizeLabel, pdfOpenErrorMessage } from "./pdf-open-policy";
+import { decidePdfDrop } from "./pdf-drop";
+import { actionableConnectionError } from "./connection-error";
 import { openAISettings } from "./settings";
 import {
   getAppUpdateSnapshot,
@@ -82,6 +87,7 @@ let zoomFactor = 1;
 let history: HistoryTurn[] = [];
 const questionGate = new RequestGate();
 let appUpdateState: AppUpdateSnapshot = getAppUpdateSnapshot();
+let activeOpenAbort: AbortController | null = null;
 
 interface QuestionContext {
   token: number;
@@ -170,11 +176,27 @@ async function refreshActiveCredentialStatus(): Promise<void> {
   }
 }
 
-/** 当前连接是否足以发起请求；不会静默回退到别的服务。 */
-function usableActiveProfile(): AIProfile | null {
+/**
+ * Resolve credentials only after an explicit AI action. Ordinary startup,
+ * importing, reading, and library management never touch secure storage.
+ */
+async function activeProfileForAI(missingMessage: string): Promise<AIProfile | null> {
   const profile = activeProfile();
-  if (!profile || !profile.name.trim() || !profile.model_id.trim() || !profile.base_url.trim()) return null;
-  if (profile.api_key_required && !activeCredentialSaved) return null;
+  if (!profile || !profile.name.trim() || !profile.model_id.trim() || !profile.base_url.trim()) {
+    openSettings(missingMessage);
+    return null;
+  }
+  if (!profile.api_key_required) return profile;
+  try {
+    activeCredentialSaved = (await credentialStatus(profile.id)).saved;
+  } catch (error) {
+    openSettings(`无法读取系统安全凭据：${String(error)}。请在设置中重试。`);
+    return null;
+  }
+  if (!activeCredentialSaved) {
+    openSettings(missingMessage);
+    return null;
+  }
   return profile;
 }
 
@@ -182,17 +204,25 @@ function usableActiveProfile(): AIProfile | null {
 async function boot() {
   // 数据损坏或格式较新时必须明确失败，不能构造默认 provider 后继续写入。
   store = await loadStore();
-  await refreshActiveCredentialStatus();
-
-  if (store.books.length > 0 && !usableActiveProfile()) {
-    // 有书但没有可用连接：先请用户完成 AI 服务配置。
-    openSettings("先完成一个 AI 服务连接，老师才能读取书页。");
+  let recoveredInterruptedOpen = false;
+  store.books = store.books.map((book) => {
+    if (!book.opening) return book;
+    recoveredInterruptedOpen = true;
+    return {
+      ...book,
+      opening: false,
+      open_error: "上次打开在完成前中断了。Satori 已跳过自动恢复，你可以重试或从书架移除。",
+    };
+  });
+  if (recoveredInterruptedOpen) {
+    await persistOrThrow();
   }
   showHome();
   setupReaderSurface();
   setupAskFab();
   setupSheetDrag();
   setupOutsideClickClose();
+  await setupNativePdfDrop().catch(() => undefined);
   initializeAppUpdateCheck();
 
   // 阅读面尺寸变化时重新铺满（保留当前页）。用 ResizeObserver 监听
@@ -426,14 +456,14 @@ function buildContinueStage(book: BookRecord): HTMLElement {
   copy.className = "home-continue-copy";
   const eyebrow = document.createElement("span");
   eyebrow.className = "home-eyebrow";
-  eyebrow.textContent = currentBook?.id === book.id ? "书页还在原处" : "接着读";
+  eyebrow.textContent = book.open_error ? "上次打开没有完成" : currentBook?.id === book.id ? "书页还在原处" : "接着读";
   const title = document.createElement("h2");
   title.textContent = bookName(book.name);
   const progress = bookProgress(book);
   const meta = document.createElement("p");
   meta.className = "home-continue-meta";
   const qCount = store.qa.filter((entry) => entry.book_id === book.id).length;
-  meta.textContent = `${progress.detail} · 问过 ${qCount} 次`;
+  meta.textContent = book.open_error ?? `${progress.detail} · 问过 ${qCount} 次`;
   const bar = document.createElement("div");
   bar.className = "home-continue-progress";
   bar.setAttribute("aria-label", `阅读进度 ${progress.percent}%`);
@@ -442,7 +472,7 @@ function buildContinueStage(book: BookRecord): HTMLElement {
   bar.appendChild(fill);
   const button = document.createElement("button");
   button.className = "home-primary-action";
-  button.textContent = currentBook?.id === book.id ? "回到书页" : "继续阅读";
+  button.textContent = book.open_error ? "重新打开" : currentBook?.id === book.id ? "回到书页" : "继续阅读";
   button.addEventListener("click", () => void openBook(book));
   copy.append(eyebrow, title, meta);
 
@@ -602,10 +632,13 @@ function activityLevel(score: number): number {
   return 4;
 }
 
-function buildBookCard(book: BookRecord): HTMLButtonElement {
-  const card = document.createElement("button");
-  card.type = "button";
+function buildBookCard(book: BookRecord): HTMLDivElement {
+  const card = document.createElement("div");
   card.className = "home-book";
+
+  const openButton = document.createElement("button");
+  openButton.type = "button";
+  openButton.className = "home-book-open";
 
   const cover = document.createElement("div");
   cover.className = "home-book-cover";
@@ -622,15 +655,22 @@ function buildBookCard(book: BookRecord): HTMLButtonElement {
   meta.className = "home-book-meta";
   const qCount = store.qa.filter((q) => q.book_id === book.id).length;
   const progress = bookProgress(book);
-  meta.textContent = `${progress.detail} · ${qCount} 次提问`;
+  meta.textContent = book.open_error ?? `${progress.detail} · ${qCount} 次提问`;
   body.append(name, meta);
 
   const hint = document.createElement("span");
   hint.className = "home-book-hint";
-  hint.textContent = book.id === currentBook?.id ? "正在读" : `${progress.percent}%`;
+  hint.textContent = book.open_error ? "重试" : book.id === currentBook?.id ? "正在读" : `${progress.percent}%`;
 
-  card.append(cover, body, hint);
-  card.addEventListener("click", () => void openBook(book));
+  openButton.append(cover, body, hint);
+  openButton.addEventListener("click", () => void openBook(book));
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "home-book-remove";
+  remove.textContent = "移除";
+  remove.title = "只从 Satori 书架移除，不删除原 PDF";
+  remove.addEventListener("click", () => void removeBook(book));
+  card.append(openButton, remove);
   return card;
 }
 
@@ -683,10 +723,19 @@ async function pickAndOpenBook() {
     filters: [{ name: "PDF", extensions: ["pdf"] }],
   });
   if (typeof selected !== "string") return;
+  await importAndOpenBook(selected);
+}
+
+async function importAndOpenBook(path: string) {
+  const existing = store.books.find((book) => book.path === path);
+  if (existing) {
+    await openBook(existing);
+    return;
+  }
   const book: BookRecord = {
     id: crypto.randomUUID(),
-    name: fileNameFromPath(selected),
-    path: selected,
+    name: fileNameFromPath(path),
+    path,
     last_page: 1,
     added_at: Date.now(),
     outline: [],
@@ -696,6 +745,62 @@ async function pickAndOpenBook() {
   await openBook(book);
 }
 
+let dropOverlay: HTMLDivElement | null = null;
+
+function showPdfDropOverlay(message: string, error = false) {
+  dropOverlay?.remove();
+  const overlay = document.createElement("div");
+  overlay.className = `pdf-drop-overlay${error ? " error" : ""}`;
+  const title = document.createElement("strong");
+  title.textContent = message;
+  const hint = document.createElement("span");
+  hint.textContent = error ? "请调整后再试" : "松开鼠标即可打开";
+  overlay.append(title, hint);
+  document.body.appendChild(overlay);
+  dropOverlay = overlay;
+}
+
+function hidePdfDropOverlay(delay = 0) {
+  const overlay = dropOverlay;
+  if (!overlay) return;
+  window.setTimeout(() => {
+    if (dropOverlay === overlay) dropOverlay = null;
+    overlay.remove();
+  }, delay);
+}
+
+async function setupNativePdfDrop() {
+  await getCurrentWebview().onDragDropEvent((event) => {
+    if (openingBook) {
+      if (event.payload.type === "enter" || event.payload.type === "drop") {
+        showPdfDropOverlay("正在打开另一份 PDF，请先等待或取消。", true);
+        if (event.payload.type === "drop") hidePdfDropOverlay(1600);
+      } else if (event.payload.type === "leave") {
+        hidePdfDropOverlay();
+      }
+      return;
+    }
+    if (event.payload.type === "enter") {
+      const decision = decidePdfDrop(event.payload.paths);
+      showPdfDropOverlay(decision.accepted ? "打开这份 PDF" : decision.message, !decision.accepted);
+      return;
+    }
+    if (event.payload.type === "leave") {
+      hidePdfDropOverlay();
+      return;
+    }
+    if (event.payload.type !== "drop") return;
+    const decision = decidePdfDrop(event.payload.paths);
+    if (!decision.accepted) {
+      showPdfDropOverlay(decision.message, true);
+      hidePdfDropOverlay(1600);
+      return;
+    }
+    hidePdfDropOverlay();
+    void importAndOpenBook(decision.path);
+  });
+}
+
 // ---- 打开书 ----
 async function openBook(book: BookRecord) {
   // 点的就是当前这本书：只关掉首页回到原位，不重载。
@@ -703,20 +808,47 @@ async function openBook(book: BookRecord) {
     hideHome();
     return;
   }
+  if (openingBook) return;
   questionGate.invalidate();
-  showLoading("正在打开书…");
+  const abort = new AbortController();
+  activeOpenAbort = abort;
+  showLoading("正在检查 PDF…", () => abort.abort());
   hideHome();
   openingBook = true;
+  let pendingDoc: PDFDocument | null = null;
+  let replacedReader = false;
+  let resolved: BookRecord = { ...book };
   try {
-    const resolved = await resolveBookPath(book);
-    currentBook = resolved;
-    const url = convertFileSrc(resolved.path);
+    resolved = await resolveBookPath(book);
+    const info = await inspectPdfFile(resolved.path);
+    if (abort.signal.aborted) throw Object.assign(new Error("已取消打开 PDF。"), { name: "PDFLoadCancelledError" });
+    resolved.opening = true;
+    delete resolved.open_error;
+    store.books = store.books.map((item) => (item.id === resolved.id ? resolved : item));
+    await persistOrThrow();
 
-    // 换书前清理旧状态：销毁旧文档释放 worker/内存、重置对话历史、
-    // 收起面板与菜单，避免跨书串扰。
+    const url = convertFileSrc(resolved.path);
+    updateLoading(info.large ? `正在打开大文件（${fileSizeLabel(info.size_bytes)}）…` : "正在打开书…");
+    const { PDFDocument } = await import("./pdf");
+    pendingDoc = await PDFDocument.load(url, {
+      signal: abort.signal,
+      stallTimeoutMs: 120_000,
+      onProgress: (loaded, total) => {
+        if (total > 0) {
+          const size = info.large ? ` · ${fileSizeLabel(info.size_bytes)}` : "";
+          updateLoading(`正在打开书… ${Math.round((loaded / total) * 100)}%${size}`);
+        }
+      },
+    });
+
+    // PDF 本身已完成解析，再切换阅读器。失败前保留旧书，避免坏文件
+    // 把一个原本可用的阅读会话一起拖垮。
     reader?.clear();
-    currentDoc?.destroy();
-    currentDoc = null;
+    void currentDoc?.destroy();
+    replacedReader = true;
+    currentBook = resolved;
+    currentDoc = pendingDoc;
+    pendingDoc = null;
     reader = null;
     history = [];
     sheetQA = null;
@@ -724,18 +856,14 @@ async function openBook(book: BookRecord) {
     tocDrawer.classList.remove("open");
     bookMenuEl?.remove();
     bookMenuEl = null;
-    // 重置缩略图渲染状态，避免旧书的 busy/预热标志卡住新书。
     thumbnailBusy = false;
     thumbnailQueued = false;
     preheating = false;
     preheatPaused = false;
     window.clearTimeout(thumbVirtualTimer);
-    hideLoading();
+    readerSurface.replaceChildren();
+    showLoading("正在准备页面…", () => abort.abort());
 
-    const { PDFDocument } = await import("./pdf");
-    currentDoc = await PDFDocument.load(url, (loaded, total) => {
-      if (total > 0) updateLoading(`正在打开书… ${Math.round((loaded / total) * 100)}%`);
-    });
     // 记录总页数（首页进度条用）。
     if (resolved.pageCount !== currentDoc.pageCount) {
       resolved.pageCount = currentDoc.pageCount;
@@ -745,7 +873,6 @@ async function openBook(book: BookRecord) {
     // 恢复这本书自己的缩放倍数；没记过就是 1（适合窗口）。
     // 每本书记住各自的缩放，切书时不会互相串。
     zoomFactor = clampZoom(resolved.zoom ?? 1);
-    readerSurface.replaceChildren();
     bottomBar.style.display = "flex";
     reader = new ScrollReader(readerSurface, currentDoc, {
       onPageChange: (page) => {
@@ -760,45 +887,63 @@ async function openBook(book: BookRecord) {
     });
     // 打开时直接应用这本书的缩放与布局（单页/双页），
     // 避免先按 100% 渲染再跳变。
-    await reader.open(currentPage, zoomFactor, resolved.spread === true);
+    await reader.open(currentPage, zoomFactor, resolved.spread === true, {
+      signal: abort.signal,
+      onStage: updateLoading,
+    });
     ensureScrollListener();
     hideLoading();
     renderBottomBar();
     showReopenCue(resolved);
     buildTOC();
     // 更新书籍列表（路径可能被修正）。
+    resolved.opening = false;
+    delete resolved.open_error;
     store.books = store.books.map((b) => (b.id === resolved.id ? resolved : b));
-    await persist();
+    await persistOrThrow();
   } catch (err) {
+    void pendingDoc?.destroy();
+    const message = pdfOpenErrorMessage(err);
+    resolved.opening = false;
+    resolved.open_error = message;
+    store.books = store.books.map((item) => (item.id === resolved.id ? resolved : item));
+    await persist().catch(() => undefined);
     hideLoading();
-    readerSurface.replaceChildren();
-    const empty = document.createElement("div");
-    empty.id = "empty-state";
-    const hint = document.createElement("div");
-    hint.className = "hint";
-    hint.textContent = `打不开这本书：${String(err)}`;
-    const openAnother = document.createElement("button");
-    openAnother.type = "button";
-    openAnother.className = "open-book";
-    openAnother.textContent = "换一本";
-    openAnother.addEventListener("click", () => void pickAndOpenBook());
-    empty.append(hint, openAnother);
-    readerSurface.appendChild(empty);
+    if (replacedReader) {
+      reader?.clear();
+      void currentDoc?.destroy();
+      reader = null;
+      currentDoc = null;
+      currentBook = null;
+      readerSurface.replaceChildren();
+      bottomBar.style.display = "none";
+    }
+    showHome();
   } finally {
     openingBook = false;
+    if (activeOpenAbort === abort) activeOpenAbort = null;
   }
 }
 
 // ---- 加载提示（打开大书时不白屏） ----
-function showLoading(message: string) {
+function showLoading(message: string, onCancel?: () => void) {
   hideLoading();
   const overlay = document.createElement("div");
   overlay.id = "loading-overlay";
   const spinner = document.createElement("span");
   spinner.className = "spinner";
   const text = document.createElement("span");
+  text.className = "loading-message";
   text.textContent = message;
   overlay.append(spinner, text);
+  if (onCancel) {
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "loading-cancel";
+    cancel.textContent = "取消";
+    cancel.addEventListener("click", onCancel, { once: true });
+    overlay.appendChild(cancel);
+  }
   readerSurface.appendChild(overlay);
 }
 
@@ -806,9 +951,8 @@ function showLoading(message: string) {
 function updateLoading(text: string) {
   const overlay = readerSurface.querySelector("#loading-overlay") as HTMLElement | null;
   if (!overlay) return;
-  const t = overlay.querySelector("span:last-child") as HTMLElement | null;
-  if (t) t.textContent = text;
-  else overlay.textContent = text;
+  const message = overlay.querySelector<HTMLElement>(".loading-message");
+  if (message) message.textContent = text;
 }
 
 function hideLoading() {
@@ -1022,11 +1166,8 @@ function cleanOutline(entries: OutlineEntry[]): OutlineEntry[] {
 /// 用户在目录抽屉明确点击后调用：用当前 AI 服务读取目录候选页，
 /// 再定位第一章算出偏移并映射成 PDF 页码。
 async function recoverScannedOutline() {
-  const profile = usableActiveProfile();
-  if (!profile) {
-    openSettings("请先选择一个已配置的 AI 服务，再识别这本书的目录。");
-    return;
-  }
+  const profile = await activeProfileForAI("请先配置当前 AI 服务，再识别目录。");
+  if (!profile) return;
   if (!currentDoc || !currentBook) return;
   // 捕获本次处理的书身份；识别期间切书后立即放弃结果。
   const bookId = currentBook.id;
@@ -1135,11 +1276,9 @@ async function askPageQuestion() {
 
 // ---- 提问：框选区域（扫描版也能用） ----
 async function askRegionQuestion(region: RegionSelection) {
-  const profile = usableActiveProfile();
-  if (!currentDoc || !profile) {
-    openSettings("请先选择一个已配置的 AI 服务，再解释这处内容。");
-    return;
-  }
+  if (!currentDoc) return;
+  const profile = await activeProfileForAI("请先选择一个已配置的 AI 服务，再解释这处内容。");
+  if (!profile) return;
   const context = beginQuestionContext(region.page);
   if (!context) return;
 
@@ -1186,7 +1325,8 @@ async function askRegionQuestion(region: RegionSelection) {
     await saveQA(context.bookId, context.page, storedQuestion, fullText);
   } catch (err) {
     if (!questionContextIsCurrent(context)) return;
-    setAnswerContent(answerNode, `出错了：${String(err)}`);
+    if (history[history.length - 1]?.role === "user") history.pop();
+    showRetryableAIError(answerNode, err, () => void askRegionQuestion(region));
     answerNode.classList.remove("streaming");
   } finally {
     questionGate.finish(context.token);
@@ -1210,11 +1350,9 @@ async function exportEvidence(
 
 // ---- 核心提问闭环 ----
 async function askQuestion(question: string) {
-  const profile = usableActiveProfile();
-  if (!currentDoc || !profile) {
-    openSettings("请先选择一个已配置的 AI 服务，再向老师提问。");
-    return;
-  }
+  if (!currentDoc) return;
+  const profile = await activeProfileForAI("请先选择一个已配置的 AI 服务，再向老师提问。");
+  if (!profile) return;
   const context = beginQuestionContext();
   if (!context) return;
 
@@ -1255,7 +1393,8 @@ async function askQuestion(question: string) {
     await saveQA(context.bookId, context.page, question, fullText);
   } catch (err) {
     if (!questionContextIsCurrent(context)) return;
-    setAnswerContent(answerNode, `出错了：${String(err)}`);
+    if (history[history.length - 1]?.role === "user") history.pop();
+    showRetryableAIError(answerNode, err, () => void askQuestion(question));
     answerNode.classList.remove("streaming");
   } finally {
     questionGate.finish(context.token);
@@ -1278,6 +1417,22 @@ function setAnswerContent(el: HTMLElement, text: string) {
 /// 流式回答开始前的「正在讲…」动画占位；首个内容块到达时被替换。
 function showTyping(el: HTMLElement) {
   el.innerHTML = '<span class="typing">正在讲…<i></i><i></i><i></i></span>';
+}
+
+function showRetryableAIError(answerNode: HTMLDivElement, error: unknown, retry: () => void) {
+  setAnswerContent(answerNode, `出错了：${actionableConnectionError(error)}`);
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const retryButton = document.createElement("button");
+  retryButton.type = "button";
+  retryButton.textContent = "重试";
+  retryButton.addEventListener("click", retry, { once: true });
+  const settingsButton = document.createElement("button");
+  settingsButton.type = "button";
+  settingsButton.textContent = "打开 AI 设置";
+  settingsButton.addEventListener("click", () => openSettings("检查当前服务、模型和 Key 后，可以回来重试。"));
+  actions.append(retryButton, settingsButton);
+  answerNode.appendChild(actions);
 }
 
 function closeTeacherSheet() {
@@ -1566,11 +1721,9 @@ function appendActions(answerNode: HTMLDivElement) {
 }
 
 async function followUp(text: string) {
-  const profile = usableActiveProfile();
-  if (!currentDoc || !profile) {
-    if (!profile) openSettings("当前 AI 服务尚未配置完成。");
-    return;
-  }
+  if (!currentDoc) return;
+  const profile = await activeProfileForAI("当前 AI 服务尚未配置完成。请先保存 Key，再重试这次提问。");
+  if (!profile) return;
   const context = beginQuestionContext();
   if (!context) return;
 
@@ -1621,7 +1774,8 @@ async function followUp(text: string) {
     await saveQA(context.bookId, context.page, text, fullText);
   } catch (err) {
     if (!questionContextIsCurrent(context)) return;
-    setAnswerContent(a, `出错了：${String(err)}`);
+    if (history[history.length - 1]?.role === "user") history.pop();
+    showRetryableAIError(a, err, () => void followUp(text));
     a.classList.remove("streaming");
   } finally {
     questionGate.finish(context.token);

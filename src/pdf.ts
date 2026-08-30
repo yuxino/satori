@@ -4,7 +4,7 @@ import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 
 // 现代 pdfjs-dist 的 worker 通过同源 URL 加载；在 Vite 下直接 import。
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { awaitPDFDocument } from "./pdf-loading";
+import { monitorPDFDocument } from "./pdf-loading";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -33,7 +33,14 @@ export class PDFDocument {
     this.loadingTask = loadingTask;
   }
 
-  static async load(url: string, onProgress?: (loaded: number, total: number) => void): Promise<PDFDocument> {
+  static async load(
+    url: string,
+    options: {
+      onProgress?: (loaded: number, total: number) => void;
+      signal?: AbortSignal;
+      stallTimeoutMs?: number;
+    } = {},
+  ): Promise<PDFDocument> {
     const loadingTask = pdfjsLib.getDocument({
       url,
       useSystemFonts: true,
@@ -41,11 +48,16 @@ export class PDFDocument {
       // 否则 JBIG2/CCITT/JPEG2000 扫描页无法解码（空白页）。
       wasmUrl,
     });
+    const monitored = monitorPDFDocument(loadingTask, {
+      signal: options.signal,
+      stallTimeoutMs: options.stallTimeoutMs,
+    });
     // onProgress 是 DocumentInitParameters 的加载进度回调。
     loadingTask.onProgress = (p: { loaded: number; total: number }) => {
-      onProgress?.(p.loaded, p.total);
+      monitored.heartbeat();
+      options.onProgress?.(p.loaded, p.total);
     };
-    const doc = await awaitPDFDocument(loadingTask);
+    const doc = await monitored.promise;
     return new PDFDocument(doc, loadingTask);
   }
 
@@ -67,15 +79,32 @@ export class PDFDocument {
     return size;
   }
 
-  /// 批量预热页面尺寸（连续滚动布局需要提前知道总高度）。
-  async prefetchSizes(from: number, to: number): Promise<void> {
-    const batch: Promise<void>[] = [];
-    for (let p = Math.max(1, from); p <= Math.min(this.doc.numPages, to); p++) {
-      if (!this.sizeCache.has(p)) {
-        batch.push(this.pageSize(p).then(() => undefined));
+  /// 分批读取页面尺寸。限制并发并在批次间让出事件循环，避免大书一次
+  /// 创建成百上千个 PDF.js 任务把 WebView 内存和消息队列压满。
+  async pageSizes(
+    from: number,
+    to: number,
+    options: { signal?: AbortSignal; onProgress?: (completed: number, total: number) => void } = {},
+  ): Promise<Array<{ width: number; height: number }>> {
+    const first = Math.max(1, from);
+    const last = Math.min(this.doc.numPages, to);
+    const total = Math.max(0, last - first + 1);
+    const sizes: Array<{ width: number; height: number }> = [];
+    const batchSize = 8;
+    for (let start = first; start <= last; start += batchSize) {
+      if (options.signal?.aborted) {
+        const error = new Error("已取消打开 PDF。");
+        error.name = "PDFLoadCancelledError";
+        throw error;
       }
+      const end = Math.min(last, start + batchSize - 1);
+      sizes.push(...await Promise.all(
+        Array.from({ length: end - start + 1 }, (_unused, index) => this.pageSize(start + index)),
+      ));
+      options.onProgress?.(sizes.length, total);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
-    await Promise.all(batch);
+    return sizes;
   }
 
   /// 读取 PDF 大纲（目录），扁平化为带层级和页码的列表。
@@ -114,14 +143,32 @@ export class PDFDocument {
     return result;
   }
 
-  async renderPageToCanvas(pageNumber: number, scale: number): Promise<HTMLCanvasElement> {
+  async renderPageToCanvas(
+    pageNumber: number,
+    scale: number,
+    signal?: AbortSignal,
+  ): Promise<HTMLCanvasElement> {
     const page = await this.doc.getPage(pageNumber);
     const viewport = page.getViewport({ scale });
     const canvas = document.createElement("canvas");
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
     const ctx = canvas.getContext("2d")!;
-    await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+    const renderTask = page.render({ canvas, canvasContext: ctx, viewport });
+    const onAbort = () => renderTask.cancel();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      await renderTask.promise;
+    } catch (error) {
+      if (signal?.aborted) {
+        const cancelled = new Error("已取消打开 PDF。");
+        cancelled.name = "PDFLoadCancelledError";
+        throw cancelled;
+      }
+      throw error;
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
+    }
     return canvas;
   }
 
@@ -205,7 +252,9 @@ export class PDFDocument {
     return canvas.toDataURL("image/jpeg", 0.82).split(",")[1];
   }
 
-  destroy() {
-    void this.loadingTask.destroy();
+  destroy(): Promise<void> {
+    this.sizeCache.clear();
+    this.outlineCache = null;
+    return this.loadingTask.destroy();
   }
 }

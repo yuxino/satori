@@ -791,11 +791,8 @@ fn write_credential_scope_marker(
     let encoded =
         serde_json::to_vec(&marker).map_err(|error| format!("无法编码凭据范围标记：{error}"))?;
     let temporary = path.with_extension(format!("tmp-{}", marker.generation));
-    fs::write(&temporary, encoded).map_err(|error| format!("无法写入凭据范围标记：{error}"))?;
-    if let Err(error) = fs::rename(&temporary, &path) {
-        let _ = fs::remove_file(&temporary);
-        return Err(format!("无法更新凭据范围标记：{error}"));
-    }
+    crate::atomic_file::write_atomically(&path, &temporary, &encoded)
+        .map_err(|error| format!("无法更新凭据范围标记：{error}"))?;
     Ok(marker)
 }
 

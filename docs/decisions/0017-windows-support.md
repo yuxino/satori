@@ -16,6 +16,10 @@ Satori 原先只面向 macOS：本地状态写入 Application Support，API Key 
 4. Windows 工作流只允许手动触发。它在 GitHub 托管的 `windows-2025` x64 与 `windows-11-arm` ARM64 runner 上分别执行前端测试/构建、锁文件约束下的 Rust 测试/检查/Clippy，以及 unsigned NSIS 打包。所有外部 Actions 使用完整提交 SHA；工作流只上传短期构建 artifact，不创建或修改 GitHub Release。
 5. 工作流必须验证 runner 架构、唯一且名称精确的安装器，并解包 NSIS，确认其中的 `satori.exe` 与已检查的构建二进制 SHA-256 相同。x64 payload 的 PE Machine 必须为 `0x8664`，ARM64 payload 必须为 `0xAA64`。NSIS 的 ARM64 安装器外壳本身仍是通过 Windows 模拟层运行的 x86 程序；原生架构承诺只针对安装器内的 Satori 应用。
 6. 更新检查按当前平台匹配 Release asset。没有匹配的 Windows 安装器时，Windows 端不能声称有可下载更新，但仍可打开固定的官方 Releases 页面。当前已发布的 Release 仍只有 macOS 下载；Windows 工作流 artifact 不等同于公开发布。
+7. Windows 上本地 JSON 与凭据作用域标记的原子更新必须使用能覆盖已有目标的原生替换语义。不能直接依赖 `std::fs::rename(temp, target)`，因为它在 Windows 上不会覆盖已有文件；普通阅读进度保存和同一配置的第二次 Key 保存都必须可重复成功。
+8. 打开 PDF 前只读取头尾小范围来拒绝非 PDF、未复制完成和读取失败的文件，不按总文件大小拒绝有效 PDF。PDF.js 加载、页面尺寸读取和首屏渲染必须提供阶段与进度，支持取消和停滞超时，并限制页面尺寸并发、邻页画布数量与单画布像素预算。进程若在打开过程中退出，下次启动只显示可重试错误，不自动恢复该文件。
+9. 桌面拖放使用 Tauri 原生文件拖放事件，不从浏览器 `File` 对象复制或持久化 PDF。一次只接收一个扩展名为 `.pdf` 的本地路径，并与文件选择器共用同一导入、预检、恢复和持久化流程。
+10. Windows 的窗口、安装项、卸载项、开始菜单和桌面快捷方式统一显示 `Satori`。安装器与卸载器使用带透明背景的多尺寸 ICO；CI 在当前用户范围静默安装后检查这些名称、快捷方式目标和卸载，再上传未签名 artifact。
 
 ## 影响
 

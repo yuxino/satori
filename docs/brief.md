@@ -6,12 +6,13 @@ Build a local-first macOS and Windows reading workspace that helps the learner u
 
 ## Current product
 
-- Open local text, scanned, or mixed PDFs without copying them into the repository or cloud storage.
+- Open or drag in local text, scanned, or mixed PDFs without copying them into the repository or cloud storage.
 - Render pages with PDF.js and restore each book's page, zoom, spread mode, and recovered outline. For a scanned book without a directory, send only the bounded page sets disclosed by the directory action after the learner chooses it.
 - Use the visible page or a selected region as ephemeral visual evidence for an explanation.
 - Keep the bookshelf, reading activity, and per-book Q&A history in Application Support on macOS or application LocalAppData on Windows.
 - Configure multiple named visual AI services while keeping every API key in macOS Keychain or Windows Credential Manager.
 - Keep the teacher entry side-effect free: opening it does not read a key, render evidence, or contact a provider.
+- Keep startup, importing, reading, and library management fully usable without configuring an AI service; ask for configuration only after an explicit AI action.
 
 ## Non-goals for the MVP
 

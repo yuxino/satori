@@ -15,6 +15,10 @@ export interface BookRecord {
   spread?: boolean;
   /** 总页数（打开时记录，供总览页显示进度）。 */
   pageCount?: number;
+  /** 打开事务尚未完成；下次启动会转为可恢复错误。 */
+  opening?: boolean;
+  /** 最近一次打开失败的安全提示，不包含 PDF 内容。 */
+  open_error?: string;
 }
 
 /** 某一天的学习活动量（总览热力格子图用）。 */
@@ -66,6 +70,11 @@ export interface Store {
 
 export interface CredentialStatus {
   saved: boolean;
+}
+
+export interface PdfFileInfo {
+  size_bytes: number;
+  large: boolean;
 }
 
 export interface AppUpdateInfo {
@@ -151,6 +160,10 @@ export function saveStore(store: Store): Promise<void> {
 
 export function resolveBookPath(book: BookRecord): Promise<BookRecord> {
   return invoke<BookRecord>("resolve_book_path", { book });
+}
+
+export function inspectPdfFile(path: string): Promise<PdfFileInfo> {
+  return invoke<PdfFileInfo>("inspect_pdf_file", { path });
 }
 
 // ---- 缩略图磁盘缓存 ----
