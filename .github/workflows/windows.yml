@@ -188,8 +188,9 @@ jobs:
             throw "The current-user uninstall entry is not named Satori."
           }
 
+          $installLocation = ([string] $uninstallKey.InstallLocation).Trim('"')
           $installedExe = @(
-            Get-ChildItem -LiteralPath $uninstallKey.InstallLocation -Recurse -Filter "satori.exe" |
+            Get-ChildItem -LiteralPath $installLocation -Recurse -Filter "satori.exe" |
               Where-Object { -not $_.PSIsContainer }
           )
           if ($installedExe.Count -ne 1) {
