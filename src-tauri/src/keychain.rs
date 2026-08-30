@@ -604,8 +604,8 @@ fn decode_windows_credential_blob(blob: &[u8]) -> Result<String, String> {
         return Err("Windows 凭据条目编码无效，请移除后重新保存。".to_string());
     }
     let mut encoded = Zeroizing::new(Vec::with_capacity(blob.len() / 2));
-    for pair in blob.chunks_exact(2) {
-        encoded.push(u16::from_le_bytes([pair[0], pair[1]]));
+    for index in (0..blob.len()).step_by(2) {
+        encoded.push(u16::from_le_bytes([blob[index], blob[index + 1]]));
     }
     String::from_utf16(&encoded)
         .map_err(|_| "Windows 凭据条目编码无效，请移除后重新保存。".to_string())
