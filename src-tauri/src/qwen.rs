@@ -1,8 +1,8 @@
 //! Provider-neutral OpenAI-compatible visual client.
 //!
 //! Satori sends page images only for an explicit learning request. Provider
-//! profiles contain no secret: credentials are resolved from macOS Keychain
-//! immediately before the request is sent.
+//! profiles contain no secret: credentials are resolved from the operating
+//! system's secure credential store immediately before the request is sent.
 
 #[cfg(test)]
 use crate::provider::normalize_chat_url;
@@ -214,7 +214,7 @@ fn normalized_history_role(role: &str) -> &'static str {
 async fn read_api_key(
     app: &tauri::AppHandle,
     profile: &ResolvedProfile,
-    allow_keychain_interaction: bool,
+    allow_credential_interaction: bool,
 ) -> Result<Option<String>, String> {
     if !profile.api_key_required {
         return Ok(None);
@@ -227,7 +227,7 @@ async fn read_api_key(
             &app,
             &profile_id,
             &expected_scope,
-            allow_keychain_interaction,
+            allow_credential_interaction,
         )
     })
     .await
@@ -246,9 +246,9 @@ async fn send_chat_request(
     app: &tauri::AppHandle,
     profile: &ResolvedProfile,
     body: &ChatRequest,
-    allow_keychain_interaction: bool,
+    allow_credential_interaction: bool,
 ) -> Result<Response, String> {
-    let api_key = read_api_key(app, profile, allow_keychain_interaction).await?;
+    let api_key = read_api_key(app, profile, allow_credential_interaction).await?;
     let mut request = client.post(profile.chat_url.clone()).json(body);
     if let Some(api_key) = api_key.as_deref() {
         request = request.bearer_auth(api_key);

@@ -21,8 +21,9 @@
   --shadow-card: 0 8px 30px rgba(24, 30, 34, 0.12);
   --shadow-pop: 0 14px 48px rgba(0, 0, 0, 0.2);
   --radius-card: 14px;
-  --serif: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
-  --sans: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+  --serif: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", "SimSun", serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Helvetica Neue", sans-serif;
+  --mono: "SF Mono", "Menlo", "Cascadia Mono", "Consolas", monospace;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -971,7 +972,7 @@ body {
 
 #teacher-sheet .turn.answer pre code,
 #teacher-sheet .turn.answer code.inline-code {
-  font-family: "SF Mono", "Menlo", monospace;
+  font-family: var(--mono);
   font-size: 12px;
 }
 
@@ -1301,7 +1302,7 @@ body {
   background: color-mix(in srgb, var(--accent) 84%, black);
 }
 
-/* ---- AI 服务设置：macOS 偏好设置式 master-detail ---- */
+/* ---- AI 服务设置：原生偏好设置式 master-detail ---- */
 
 #settings-modal.settings-modal {
   --settings-surface: #fdfdfc;

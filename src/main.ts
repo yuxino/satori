@@ -52,6 +52,7 @@ import { renderMarkdown } from "./markdown";
 import { requestedEvidencePages } from "./evidence-policy";
 import { outlineEvidencePlan } from "./outline-evidence-policy";
 import { RequestGate } from "./request-gate";
+import { fileNameFromPath, hasPrimaryModifier } from "./platform";
 import { openAISettings } from "./settings";
 import {
   getAppUpdateSnapshot,
@@ -76,7 +77,7 @@ let currentBook: BookRecord | null = null;
 let currentDoc: PDFDocument | null = null;
 let reader: ScrollReader | null = null;
 let currentPage = 1;
-/// 用户缩放倍数：1 = 页面或展开适合窗口，可 ⌘+/⌘- 调整。
+/// 用户缩放倍数：1 = 页面或展开适合窗口，可用主修饰键 +/- 调整。
 let zoomFactor = 1;
 let history: HistoryTurn[] = [];
 const questionGate = new RequestGate();
@@ -366,13 +367,17 @@ function renderHome() {
 function syncHomeUpdateIndicator(): void {
   const settingsButton = homeView.querySelector<HTMLButtonElement>(".home-settings-action");
   if (!settingsButton) return;
-  const hasUpdate = appUpdateState.phase === "available" && Boolean(appUpdateState.latestVersion);
-  settingsButton.classList.toggle("update-available", hasUpdate);
-  const label = hasUpdate
-    ? `打开设置，有新版本 ${versionLabel(appUpdateState.latestVersion)}`
-    : "打开设置";
+  const hasDownload = appUpdateState.phase === "available" && Boolean(appUpdateState.latestVersion);
+  const hasReleaseOnly = appUpdateState.phase === "release-only" && Boolean(appUpdateState.latestVersion);
+  const hasNewRelease = hasDownload || hasReleaseOnly;
+  settingsButton.classList.toggle("update-available", hasNewRelease);
+  const label = hasDownload
+    ? `打开设置，Satori ${versionLabel(appUpdateState.latestVersion)} 可下载`
+    : hasReleaseOnly
+      ? `打开设置，Satori ${versionLabel(appUpdateState.latestVersion)} 已发布，当前系统暂无适用安装包`
+      : "打开设置";
   settingsButton.setAttribute("aria-label", label);
-  settingsButton.title = hasUpdate ? `Satori ${versionLabel(appUpdateState.latestVersion)} 可用` : "设置";
+  settingsButton.title = hasNewRelease ? label.replace("打开设置，", "") : "设置";
 }
 
 function bookName(name: string): string {
@@ -490,7 +495,7 @@ function buildEmptyDesk(): HTMLElement {
   const title = document.createElement("h2");
   title.textContent = "带一本正在读的书进来。";
   const body = document.createElement("p");
-  body.textContent = "阅读位置会留在这台 Mac 上，真正卡住时再请老师一起弄懂这一页。";
+  body.textContent = "阅读位置会留在这台电脑上，真正卡住时再请老师一起弄懂这一页。";
   const button = document.createElement("button");
   button.className = "home-primary-action";
   button.textContent = "打开 PDF…";
@@ -680,7 +685,7 @@ async function pickAndOpenBook() {
   if (typeof selected !== "string") return;
   const book: BookRecord = {
     id: crypto.randomUUID(),
-    name: selected.split("/").pop() ?? selected,
+    name: fileNameFromPath(selected),
     path: selected,
     last_page: 1,
     added_at: Date.now(),
@@ -1492,7 +1497,7 @@ function openTeacherSheet(question: string) {
 }
 
 /// 打开老师入口但不发起网络请求。用户发送问题或明确选择
-/// “讲讲这一页”之后，才会读取 Keychain 并调用模型。
+/// “讲讲这一页”之后，才会读取系统安全凭据并调用模型。
 function openTeacherPrompt() {
   if (!currentDoc) return;
   history = [];
@@ -1899,8 +1904,9 @@ document.addEventListener("keydown", (e) => {
     activeTag === "TEXTAREA" ||
     activeTag === "SELECT" ||
     Boolean((document.activeElement as HTMLElement | null)?.isContentEditable);
+  const primaryModifier = hasPrimaryModifier(e);
   if (document.getElementById("settings-modal")) {
-    if (e.metaKey && e.key === ",") e.preventDefault();
+    if (primaryModifier && e.key === ",") e.preventDefault();
     return;
   }
   if (e.key === "Escape") {
@@ -1912,26 +1918,26 @@ document.addEventListener("keydown", (e) => {
     closeTeacherSheet();
     tocDrawer.classList.remove("open");
   }
-  if (e.metaKey && e.key === "t") {
+  if (primaryModifier && e.key === "t") {
     tocDrawer.classList.toggle("open");
   }
-  if (e.metaKey && e.key === ",") {
+  if (primaryModifier && e.key === ",") {
     openSettings();
   }
-  // 缩放：⌘+/⌘- 调整，⌘0 回到铺满宽度。
-  if (e.metaKey && (e.key === "=" || e.key === "+")) {
+  // 缩放：Command（macOS）或 Control（Windows）配合 +/-，0 回到铺满宽度。
+  if (primaryModifier && (e.key === "=" || e.key === "+")) {
     e.preventDefault();
     zoomFactor = Math.min(3, zoomFactor + 0.15);
     void applyZoom();
     return;
   }
-  if (e.metaKey && e.key === "-") {
+  if (primaryModifier && e.key === "-") {
     e.preventDefault();
     zoomFactor = Math.max(0.5, zoomFactor - 0.15);
     void applyZoom();
     return;
   }
-  if (e.metaKey && e.key === "0") {
+  if (primaryModifier && e.key === "0") {
     e.preventDefault();
     zoomFactor = 1;
     void applyZoom();
@@ -1939,10 +1945,10 @@ document.addEventListener("keydown", (e) => {
   }
   if (typing) return; // 输入中：不响应全局翻页/缩放
   if (homeView.classList.contains("open")) return; // 首页打开时不翻隐藏的阅读器
-  if (!e.metaKey && (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === "PageDown")) {
+  if (!primaryModifier && (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === "PageDown")) {
     reader?.flipPage(1);
   }
-  if (!e.metaKey && (e.key === "ArrowLeft" || e.key === "ArrowUp" || e.key === "PageUp")) {
+  if (!primaryModifier && (e.key === "ArrowLeft" || e.key === "ArrowUp" || e.key === "PageUp")) {
     reader?.flipPage(-1);
   }
 });
@@ -1964,7 +1970,7 @@ function persistZoom() {
   zoomPersistTimer = window.setTimeout(() => void persist(), 400);
 }
 
-// ---- 底部工具栏（macOS 原生阅读器风格） ----
+// ---- 底部工具栏（原生阅读器风格） ----
 
 const THUMB_COUNT = 25; // 当前页前后各渲染多少缩略图（首次覆盖更广）
 const THUMB_WIDTH = 34;

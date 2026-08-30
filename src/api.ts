@@ -71,6 +71,9 @@ export interface CredentialStatus {
 export interface AppUpdateInfo {
   current_version: string;
   latest_version: string;
+  /** A newer stable GitHub Release exists, regardless of its assets. */
+  release_available: boolean;
+  /** The newer Release contains an installer for this OS and CPU architecture. */
   available: boolean;
 }
 

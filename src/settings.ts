@@ -16,6 +16,7 @@ import {
   versionLabel,
   type AppUpdateSnapshot,
 } from "./update";
+import { updatePresentation } from "./platform";
 import { apiBaseURLError, isValidAPIBaseURL } from "./provider-url-policy";
 
 interface OpenAISettingsOptions {
@@ -220,7 +221,7 @@ class AISettingsController {
     const description = createElement(
       "p",
       "settings-description",
-      "在这台 Mac 上管理 AI 服务。密钥只保存在 macOS 钥匙串。",
+      "在这台电脑上管理 AI 服务。密钥只保存在系统安全凭据存储中。",
     );
     description.id = "settings-dialog-description";
     heading.append(title, description);
@@ -324,18 +325,18 @@ class AISettingsController {
     this.updateStatus.setAttribute("aria-live", updateError ? "assertive" : "polite");
 
     if (this.openingRelease) {
-      this.updateStatus.textContent = "正在打开下载页";
+      this.updateStatus.textContent = "正在打开版本页";
       this.updateButton.textContent = "正在打开…";
-      this.updateButton.title = "正在浏览器中打开 Satori 下载页面";
+      this.updateButton.title = "正在浏览器中打开 Satori 官方 Releases";
       this.updateButton.setAttribute("aria-label", this.updateButton.title);
       return;
     }
 
     if (this.updateOpenError) {
-      this.updateStatus.textContent = "无法打开下载页";
+      this.updateStatus.textContent = "无法打开版本页";
       this.updateButton.textContent = "重试打开";
       this.updateButton.title = this.updateOpenError;
-      this.updateButton.setAttribute("aria-label", `重新打开下载页面。${this.updateOpenError}`);
+      this.updateButton.setAttribute("aria-label", `重新打开官方 Releases。${this.updateOpenError}`);
       return;
     }
 
@@ -353,11 +354,15 @@ class AISettingsController {
         this.updateButton.setAttribute("aria-label", "Satori 已是最新版，再次检查更新");
         break;
       case "available":
-        this.updateStatus.textContent = "发现新版本";
-        this.updateButton.textContent = `查看 ${versionLabel(latestVersion)}`;
-        this.updateButton.title = `在浏览器下载 Satori ${versionLabel(latestVersion)}`;
+      case "release-only": {
+        const presentation = updatePresentation({ phase, latestVersion });
+        if (!presentation) break;
+        this.updateStatus.textContent = presentation.status;
+        this.updateButton.textContent = presentation.action;
+        this.updateButton.title = presentation.title;
         this.updateButton.setAttribute("aria-label", this.updateButton.title);
         break;
+      }
       case "error":
         this.updateStatus.textContent = "检查失败";
         this.updateButton.textContent = "重新检查";
@@ -375,7 +380,7 @@ class AISettingsController {
 
   private async handleUpdateAction(): Promise<void> {
     if (this.openingRelease) return;
-    if (this.updateState.phase !== "available") {
+    if (this.updateState.phase !== "available" && this.updateState.phase !== "release-only") {
       await checkForAppUpdate(true);
       return;
     }
@@ -784,14 +789,14 @@ class AISettingsController {
 
     const hint = createElement("p", "settings-credential-help");
     if (!profile.api_key_required) {
-      hint.textContent = "此连接不会发送 Authorization 请求头；若钥匙串里已有 Key，可单独移除。";
+      hint.textContent = "此连接不会发送 Authorization 请求头；若安全凭据存储中已有 Key，可单独移除。";
     } else if (state.phase === "error") {
-      hint.textContent = state.message ?? "无法读取钥匙串状态。你仍可以输入新的 Key 后重试保存。";
+      hint.textContent = state.message ?? "无法读取安全凭据状态。你仍可以输入新的 Key 后重试保存。";
       hint.classList.add("error");
     } else if (state.saved) {
       hint.textContent = "输入新的 Key 并保存即可替换；留空不会改变已保存的 Key。";
     } else {
-      hint.textContent = "Key 将按连接独立保存到 macOS 钥匙串，不会写入项目或设置文件。";
+      hint.textContent = "Key 将按连接独立保存到系统安全凭据存储，不会写入项目或设置文件。";
     }
 
     panel.append(header, keyRow, hint);
@@ -806,7 +811,7 @@ class AISettingsController {
     if (test) return { tone: test.tone, label: test.label };
     const credential = this.credentialState(profile.id);
     if (credential.phase === "loading") return { tone: "loading", label: "检查中" };
-    if (credential.phase === "error") return { tone: "error", label: "钥匙串错误" };
+    if (credential.phase === "error") return { tone: "error", label: "凭据存储错误" };
     if (!profile.api_key_required) return { tone: "neutral", label: "无需 Key" };
     return credential.saved ? { tone: "success", label: "已保存 Key" } : { tone: "warning", label: "缺少 Key" };
   }
@@ -846,7 +851,7 @@ class AISettingsController {
           this.credentialStates.set(profile.id, {
             phase: "error",
             saved: false,
-            message: `无法读取钥匙串：${formatError(error)}`,
+            message: `无法读取安全凭据：${formatError(error)}`,
           });
         }
         this.render(true);
@@ -1036,7 +1041,7 @@ class AISettingsController {
     }
     const confirmed = await this.confirmAction({
       title: `删除“${profile.name || "未命名连接"}”？`,
-      message: "将删除这条本地连接及其钥匙串密钥，不会删除书籍、阅读位置或问答记录。",
+      message: "将删除这条本地连接及其安全存储密钥，不会删除书籍、阅读位置或问答记录。",
       confirmLabel: "删除连接",
       danger: true,
     });
@@ -1088,7 +1093,7 @@ class AISettingsController {
     if (!confirmed) return;
 
     this.busy = "credential";
-    this.announce("正在从 macOS 钥匙串移除密钥…", "loading");
+    this.announce("正在从系统安全凭据存储移除密钥…", "loading");
     this.render(true);
     try {
       await deleteProfileApiKey(profile.id);
@@ -1096,7 +1101,7 @@ class AISettingsController {
       this.credentialStates.set(profile.id, { phase: "ready", saved: false });
       this.testStates.delete(profile.id);
       this.notifyChange(this.baseline);
-      this.announce("API Key 已从 macOS 钥匙串移除。", "success");
+      this.announce("API Key 已从系统安全凭据存储移除。", "success");
     } catch (error) {
       this.announce(`移除密钥失败：${formatError(error)}`, "error");
     } finally {
@@ -1117,9 +1122,9 @@ class AISettingsController {
         this.credentialStates.set(profile.id, {
           phase: "error",
           saved: false,
-          message: `无法读取钥匙串：${formatError(error)}`,
+          message: `无法读取安全凭据：${formatError(error)}`,
         });
-        this.announce(`无法读取钥匙串：${formatError(error)}`, "error");
+        this.announce(`无法读取安全凭据：${formatError(error)}`, "error");
         this.render(true);
         return false;
       }
@@ -1516,8 +1521,8 @@ function credentialLabel(profile: AIProfile, state: CredentialState): string {
 
 function keyPlaceholder(profile: AIProfile, state: CredentialState): string {
   if (!profile.api_key_required) return "此连接不使用 API Key";
-  if (state.phase === "loading") return "正在检查钥匙串…";
-  if (state.saved) return "已保存 · 首次使用时由 macOS 验证授权 · 输入新 Key 可替换";
+  if (state.phase === "loading") return "正在检查安全凭据…";
+  if (state.saved) return "已保存 · 使用时从系统安全凭据存储读取 · 输入新 Key 可替换";
   return "粘贴 API Key";
 }
 

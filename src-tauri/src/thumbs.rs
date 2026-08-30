@@ -1,16 +1,13 @@
 //! 缩略图磁盘缓存：渲染一次存盘，之后打开秒出（不再逐页解码）。
-//! 按「文件路径 + 页码」存小 JPEG 到 Application Support/thumbs/。
+//! 按「文件路径 + 页码」存小 JPEG 到平台本地应用数据目录的 thumbs/。
 //! 只做本地缓存，不含原始 PDF 内容之外的信息。
 
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 fn thumbs_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let base = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("无法定位应用数据目录：{e}"))?;
+    let base = crate::platform_paths::non_secret_data_dir(app)?;
     let dir = base.join("thumbs");
     fs::create_dir_all(&dir).map_err(|e| format!("创建缩略图目录失败：{e}"))?;
     Ok(dir)

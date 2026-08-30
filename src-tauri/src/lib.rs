@@ -1,4 +1,5 @@
 mod keychain;
+mod platform_paths;
 mod provider;
 mod qwen;
 mod store;
@@ -100,10 +101,11 @@ fn dev_asset_response(request: tauri::http::Request<Vec<u8>>) -> tauri::http::Re
 }
 
 /// 临时调试日志：追加到 App 数据目录的 debug.log（release 下 stdout 不可见）。
-pub fn debug_log(msg: &str) {
+pub fn debug_log(app: &tauri::AppHandle, msg: &str) {
     use std::io::Write;
-    if let Ok(dir) = std::env::var("HOME") {
-        let path = format!("{dir}/Library/Application Support/com.yuxino.satori/debug.log");
+    if let Ok(dir) = platform_paths::non_secret_data_dir(app) {
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("debug.log");
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)

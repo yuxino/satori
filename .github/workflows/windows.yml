@@ -1,0 +1,170 @@
+name: Windows packages
+
+"on":
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-packages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  nsis:
+    name: NSIS (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x64
+            runner: windows-2025
+            runner_arch: X64
+            target: x86_64-pc-windows-msvc
+            pe_machine: "8664"
+            installer_arch: x64
+          - name: arm64
+            runner: windows-11-arm
+            runner_arch: ARM64
+            target: aarch64-pc-windows-msvc
+            pe_machine: "AA64"
+            installer_arch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-05
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+          components: rustfmt, clippy
+
+      - name: Confirm runner architecture
+        shell: pwsh
+        run: |
+          if ("${{ runner.arch }}" -ne "${{ matrix.runner_arch }}") {
+            throw "Expected runner architecture ${{ matrix.runner_arch }}, got ${{ runner.arch }}."
+          }
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Test frontend
+        run: npm test
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+
+      - name: Test Rust
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --target ${{ matrix.target }}
+
+      - name: Check release Rust
+        run: cargo check --locked --manifest-path src-tauri/Cargo.toml --release --target ${{ matrix.target }}
+
+      - name: Lint release Rust
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --release --target ${{ matrix.target }} -- -D warnings
+
+      - name: Build unsigned NSIS package
+        run: >-
+          npm run tauri -- build
+          --config src-tauri/tauri.windows.conf.json
+          --target ${{ matrix.target }}
+          --bundles nsis
+          --ci
+          --no-sign
+          -- --locked
+
+      - name: Verify executable architecture and installer
+        id: verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          function Get-PeMachine([string] $Path) {
+            $reader = $null
+            $stream = [System.IO.File]::OpenRead($Path)
+            try {
+              $reader = [System.IO.BinaryReader]::new($stream)
+              if ($reader.ReadUInt16() -ne 0x5A4D) {
+                throw "Executable has no DOS header: $Path"
+              }
+              $stream.Position = 0x3C
+              $peOffset = $reader.ReadInt32()
+              $stream.Position = $peOffset
+              if ($reader.ReadUInt32() -ne 0x00004550) {
+                throw "Executable has no PE header: $Path"
+              }
+              return $reader.ReadUInt16()
+            } finally {
+              if ($null -ne $reader) { $reader.Dispose() }
+              $stream.Dispose()
+            }
+          }
+
+          $config = Get-Content "src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json
+          $releaseRoot = Join-Path $env:GITHUB_WORKSPACE "src-tauri\target\${{ matrix.target }}\release"
+          $appExe = Join-Path $releaseRoot "satori.exe"
+          $installer = Join-Path $releaseRoot "bundle\nsis\Satori_$($config.version)_${{ matrix.installer_arch }}-setup.exe"
+
+          if (-not (Test-Path -LiteralPath $appExe -PathType Leaf)) {
+            throw "Missing application executable: $appExe"
+          }
+
+          $nsisDirectory = Split-Path -Parent $installer
+          $installers = @(Get-ChildItem -LiteralPath $nsisDirectory -Filter "*.exe" -File)
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one NSIS installer in $nsisDirectory; found $($installers.Count)."
+          }
+          if ($installers[0].FullName -ne $installer) {
+            throw "Unexpected NSIS installer: $($installers[0].FullName); expected $installer."
+          }
+
+          $extractRoot = Join-Path $env:RUNNER_TEMP "satori-nsis-${{ matrix.name }}"
+          & 7z x -y "-o$extractRoot" $installer | Out-Host
+          if ($LASTEXITCODE -ne 0) {
+            throw "7-Zip could not inspect the NSIS payload."
+          }
+          $payloadExecutables = @(Get-ChildItem -LiteralPath $extractRoot -Recurse -Filter "satori.exe" -File)
+          if ($payloadExecutables.Count -ne 1) {
+            throw "Expected exactly one satori.exe inside the NSIS installer; found $($payloadExecutables.Count)."
+          }
+
+          # The ARM64 NSIS launcher is x86 by design, so verify the bundled app payload.
+          $expectedMachine = [Convert]::ToUInt16("${{ matrix.pe_machine }}", 16)
+          $builtMachine = Get-PeMachine $appExe
+          $payloadMachine = Get-PeMachine $payloadExecutables[0].FullName
+          if ($builtMachine -ne $expectedMachine -or $payloadMachine -ne $expectedMachine) {
+            throw ("Wrong PE machine: expected 0x{0:X4}, built 0x{1:X4}, installer payload 0x{2:X4}." -f $expectedMachine, $builtMachine, $payloadMachine)
+          }
+
+          $builtHash = (Get-FileHash -LiteralPath $appExe -Algorithm SHA256).Hash
+          $payloadHash = (Get-FileHash -LiteralPath $payloadExecutables[0].FullName -Algorithm SHA256).Hash
+          if ($builtHash -ne $payloadHash) {
+            throw "The NSIS payload executable does not match the verified build executable."
+          }
+
+          "Verified $appExe as PE machine 0x$($builtMachine.ToString('X4'))."
+          "Verified the exact installer and its matching PE payload: $installer."
+          "installer=$installer" >> $env:GITHUB_OUTPUT
+
+      - name: Upload unsigned NSIS package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: satori-windows-${{ matrix.name }}-nsis
+          path: ${{ steps.verify.outputs.installer }}
+          if-no-files-found: error
+          retention-days: 14

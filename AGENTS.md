@@ -2,7 +2,7 @@
 
 ## Product intent
 
-Satori is a local-first macOS learning workspace. Its primary job is to help a learner understand PDF-based material. It is not a note-taking product first.
+Satori is a local-first macOS and Windows learning workspace. Its primary job is to help a learner understand PDF-based material. It is not a note-taking product first.
 
 ## Persistent project memory
 
@@ -14,14 +14,14 @@ Satori is a local-first macOS learning workspace. Its primary job is to help a l
 
 ## Scope and privacy
 
-- Build for macOS only unless the user explicitly expands scope.
+- Build for macOS 14+ and Windows 11. Treat Linux, mobile, and browser clients as out of scope unless the user explicitly expands it.
 - Keep study files, reading position, project structure, and learning history local by default.
 - Do not add source PDFs to Git. Store file bookmarks or local references instead.
 - Treat configured AI services as on-demand page-understanding providers, not as file hosting.
-- Support multiple local provider profiles. Keep non-secret endpoints and model IDs in local JSON, but store every user-supplied API key only in macOS Keychain. Never write a key into the repository, local JSON, logs, screenshots, environment variables, or WebView state.
+- Support multiple local provider profiles. Keep non-secret endpoints and model IDs in local JSON, but store every user-supplied API key only in macOS Keychain or the current Windows user's Credential Manager. Never write a key into the repository, local JSON, logs, screenshots, environment variables, or persisted WebView state.
 - Keep the active profile and model configurable and persisted locally. A configured model must support scanned-page image input; never silently fall back to another provider.
 - Treat user-selected question images as ephemeral request context: resize locally, send only on submission, and do not persist them without an explicit product decision.
-- Keep per-document learning sessions in local Application Support storage; send only bounded recent text turns for follow-ups and keep provider response storage disabled.
+- Keep per-document learning sessions in the platform-local application data directory; send only bounded recent text turns for follow-ups and keep provider response storage disabled.
 
 ## Engineering rules
 

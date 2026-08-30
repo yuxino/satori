@@ -1,10 +1,11 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { checkForUpdate } from "./api";
+import type { ReleaseUpdatePhase } from "./platform";
 
 const RELEASES_URL = "https://github.com/yuxino/satori/releases/latest";
 
-export type AppUpdatePhase = "idle" | "checking" | "current" | "available" | "error";
+export type AppUpdatePhase = ReleaseUpdatePhase;
 
 export interface AppUpdateSnapshot {
   phase: AppUpdatePhase;
@@ -71,7 +72,7 @@ export function checkForAppUpdate(manual: boolean): Promise<void> {
     try {
       const info = await checkForUpdate();
       publish({
-        phase: info.available ? "available" : "current",
+        phase: info.available ? "available" : info.release_available ? "release-only" : "current",
         currentVersion: info.current_version,
         latestVersion: info.latest_version,
         errorMessage: "",

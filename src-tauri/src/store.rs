@@ -1,5 +1,5 @@
 //! 本地 JSON 持久化：书库、阅读位置、每页 Q&A 归档。
-//! 全部保存在 Application Support，不上云。
+//! 全部保存在平台本地应用数据目录，不上云。
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -7,7 +7,7 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 const STORE_SCHEMA_VERSION: u32 = 1;
 pub const DEFAULT_PROFILE_ID: &str = "model-studio-default";
@@ -278,10 +278,7 @@ impl Store {
 }
 
 fn store_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("无法定位应用数据目录：{e}"))?;
+    let dir = crate::platform_paths::non_secret_data_dir(app)?;
     Ok(dir.join("store.json"))
 }
 
