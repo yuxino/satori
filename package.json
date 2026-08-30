@@ -1,7 +1,7 @@
 {
   "name": "satori",
   "private": true,
-  "version": "3.4.0",
+  "version": "3.4.1",
   "type": "module",
   "engines": {
     "node": ">=22.13.0"

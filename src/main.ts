@@ -54,6 +54,7 @@ import type { PDFDocument } from "./pdf";
 import { ScrollReader, type RegionSelection } from "./reader";
 import { renderMarkdown } from "./markdown";
 import { pageTransitionDelta } from "./activity";
+import { decideBookRemovalUI } from "./book-removal-ui";
 import { requestedEvidencePages } from "./evidence-policy";
 import { outlineEvidencePlan } from "./outline-evidence-policy";
 import { RequestGate } from "./request-gate";
@@ -2586,6 +2587,8 @@ function confirmBookRemoval(book: BookRecord, qaCount: number): Promise<boolean>
 
 /// 从书架移除一本书（不删除电脑上的原 PDF 文件），连带清掉它的问答记录。
 async function removeBook(book: BookRecord) {
+  const menuWasOpen = bookMenuEl !== null;
+  const homeWasOpen = homeView.classList.contains("open");
   bookMenuEl?.remove();
   bookMenuEl = null;
 
@@ -2597,8 +2600,15 @@ async function removeBook(book: BookRecord) {
   store.qa = store.qa.filter((q) => q.book_id !== book.id);
   await persist();
 
+  const uiActions = decideBookRemovalUI({
+    removingCurrentBook: currentBook?.id === book.id,
+    remainingBookCount: store.books.length,
+    homeWasOpen,
+    menuWasOpen,
+  });
+
   // 删除的是当前书：切换到剩余第一本，或回到空书架。
-  if (currentBook?.id === book.id) {
+  if (uiActions.currentBookAction !== "keep-current") {
     questionGate.invalidate();
     currentDoc?.destroy();
     currentDoc = null;
@@ -2609,14 +2619,16 @@ async function removeBook(book: BookRecord) {
     sheetQA = null;
     closeTeacherSheet();
     tocDrawer.classList.remove("open");
-    if (store.books.length > 0) {
+    if (uiActions.currentBookAction === "open-first-remaining") {
       await openBook(store.books[0]);
     } else {
       showHome();
     }
   } else {
-    // 非当前书：重建书菜单反映变化（若开着）。
-    if (bookMenuEl) toggleBookMenu();
+    // 非当前书：首页与书菜单都可能已经渲染了被删除的书，需要按删除前的
+    // 可见状态刷新。菜单在确认前已关闭，因此这里只能依据快照重开。
+    if (uiActions.renderHome) renderHome();
+    if (uiActions.reopenBookMenu) toggleBookMenu();
   }
 }
 
