@@ -22,7 +22,7 @@ A local-first app for understanding PDF textbooks on macOS and Windows 11. Open 
 
 ## Download
 
-Version 3.4.0 is available from [GitHub Releases](https://github.com/yuxino/satori/releases/latest) for macOS 14+ on Apple silicon and Windows 11 on x64 or ARM64. On macOS, download the ZIP, unzip it, and drag Satori to Applications. On Windows, download the NSIS installer matching your architecture.
+Version 3.4.1 provides Windows 11 x64 and ARM64 installers from [GitHub Releases](https://github.com/yuxino/satori/releases/latest). The current macOS 14+ Apple silicon download remains [version 3.4.0](https://github.com/yuxino/satori/releases/tag/v3.4.0). On macOS, download that release's ZIP, unzip it, and drag Satori to Applications. On Windows, download the NSIS installer matching your architecture.
 
 The current source targets macOS and Windows 11. Use Node.js 22.13+, Rust, and the platform build tools; macOS development also requires a stable code-signing identity (Apple Development or a long-lived self-signed identity). After installing dependencies, run `npm run app` on macOS or `npm run tauri -- dev` on Windows:
 
@@ -36,7 +36,7 @@ npm run tauri -- dev
 
 The current public macOS download has a local code signature but no Apple Team ID, and it is not notarized. On first launch, Control-click Satori, choose **Open**, then confirm once. Updates are downloaded and replaced manually from the official Releases page.
 
-The Windows x64 and ARM64 NSIS installers are unsigned current-user packages, so Windows identifies their publisher as unknown. The ARM64 application has completed native install and interaction checks on Windows 11 25H2; native uninstall and x64 manual interaction checks remain pending. Both architectures pass hosted build, package, install, and uninstall verification before publication.
+The Windows x64 and ARM64 NSIS installers are unsigned current-user packages, so Windows identifies their publisher as unknown. Version 3.4.1 is promoted only from artifacts built at the exact final source commit after hosted build, package, current-user install/uninstall, and hash checks. Native interactive evidence remains architecture-specific; no x64-on-x64 manual acceptance is claimed.
 
 The interface is currently Simplified Chinese. Reading works without AI; to ask questions or recognize a missing scanned outline, open Settings and add a model that accepts image input through OpenAI-compatible Chat Completions.
 

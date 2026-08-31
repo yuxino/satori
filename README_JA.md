@@ -22,7 +22,7 @@ macOS と Windows 11 で PDF 教材を理解するためのローカルファー
 
 ## ダウンロード
 
-バージョン 3.4.0 は [GitHub Releases](https://github.com/yuxino/satori/releases/latest) からダウンロードでき、Apple シリコン搭載の macOS 14+ と、x64 または ARM64 の Windows 11 に対応します。macOS では ZIP をダウンロードして展開し、Satori を「アプリケーション」に移動してください。Windows では、アーキテクチャに合う NSIS インストーラーをダウンロードしてください。
+バージョン 3.4.1 は [GitHub Releases](https://github.com/yuxino/satori/releases/latest) で Windows 11 x64・ARM64 インストーラーを提供します。Apple シリコン搭載 Mac 向け macOS 14+ の公開ダウンロードは引き続き [バージョン 3.4.0](https://github.com/yuxino/satori/releases/tag/v3.4.0) です。macOS ではその Release の ZIP をダウンロードして展開し、Satori を「アプリケーション」に移動してください。Windows では、アーキテクチャに合う NSIS インストーラーをダウンロードしてください。
 
 現在のソースは macOS と Windows 11 を対象としています。Node.js 22.13+、Rust、各プラットフォームのビルドツールを用意してください。macOS での開発には、安定したコード署名 ID（Apple Development または長期利用する自己署名 ID）も必要です。依存関係をインストールした後、macOS では `npm run app`、Windows では `npm run tauri -- dev` を実行します。
 
@@ -36,7 +36,7 @@ npm run tauri -- dev
 
 現在公開中の macOS ダウンロード版にはローカルのコード署名がありますが、Apple Team ID はなく、Apple の公証も受けていません。初回起動時は、Control キーを押しながら Satori をクリックし、「開く」を選んでもう一度確認してください。更新は公式 Releases ページから手動でダウンロードし、置き換える必要があります。
 
-Windows x64・ARM64 向けの NSIS インストーラーは未署名で、現在のユーザーだけにインストールされるため、Windows では発行元が不明と表示されます。ARM64 アプリは Windows 11 25H2 でネイティブのインストールと操作テストを完了しています。ネイティブでのアンインストールと x64 の手動操作テストはまだ完了していません。公開前に、両アーキテクチャでホステッド環境のビルド、パッケージ、インストール、アンインストール検証を行います。
+Windows x64・ARM64 向けの NSIS インストーラーは未署名で、現在のユーザーだけにインストールされるため、Windows では発行元が不明と表示されます。3.4.1 は最終ソースの正確なコミットから生成した成果物だけを、ホステッド環境でのビルド、パッケージ、現在のユーザー単位でのインストール・アンインストール、ハッシュ検証後に公開します。ネイティブ操作の証拠はアーキテクチャごとに扱い、x64-on-x64 の手動操作検証の完了は主張しません。
 
 アプリの表示言語は現在、簡体字中国語のみです。AI を設定しなくても読書できます。質問やスキャン PDF にない目次の認識には、設定で OpenAI 互換 Chat Completions の画像入力に対応するモデルを追加してください。
 
