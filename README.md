@@ -10,21 +10,28 @@
 
 `Satori` comes from the Japanese word 悟り (satori, "enlightenment").
 
-A local-first app for understanding PDF textbooks on macOS and Windows 11. Open a local PDF, keep the page in view, and ask about the current page or a region when you get stuck.
+A local-first PDF learning app for macOS and Windows 11. Keep the page in view and ask about the current page or a selected region only when you need help.
 
 ## Features
 
-- **Ask from the page** — type a question about the current page, or drag over a paragraph, figure, or code block for a visual explanation; text, scanned, and mixed PDFs are supported.
-- **Reading first** — single-page and two-page views, outline navigation, and zoom stay focused on the page; each book reopens where you left it.
-- **Keep each book's context** — reading activity and per-book Q&A stay together, and saved answers reopen their source page.
-- **Use your own visual AI** — save multiple Model Studio, OpenAI, or custom OpenAI-compatible connections and choose the active model.
-- **Stored locally** — source PDFs remain in place; library data, reading state, and past Q&A stay on this computer, while API keys are stored only in macOS Keychain or Windows Credential Manager.
+- Ask about the current page or drag over a paragraph, figure, or code block for a visual explanation. Text, scanned, and mixed PDFs are supported.
+- Read in single- or two-page view with outline navigation and zoom; each book reopens where you left it.
+- Keep reading activity and Q&A organized per book, with links back to the source page.
+- Choose among Model Studio, OpenAI, and custom OpenAI-compatible visual models.
+- Read and manage the library without configuring AI.
 
 ## Download
 
-Version 3.4.1 provides Windows 11 x64 and ARM64 installers from [GitHub Releases](https://github.com/yuxino/satori/releases/latest). The current macOS 14+ Apple silicon download remains [version 3.4.0](https://github.com/yuxino/satori/releases/tag/v3.4.0). On macOS, download that release's ZIP, unzip it, and drag Satori to Applications. On Windows, download the NSIS installer matching your architecture.
+Satori supports Windows 11 on x64 and ARM64, and macOS 14+ on Apple silicon. Download Windows 3.4.1 from [GitHub Releases](https://github.com/yuxino/satori/releases/latest), or the current macOS build from [version 3.4.0](https://github.com/yuxino/satori/releases/tag/v3.4.0).
 
-The current source targets macOS and Windows 11. Use Node.js 22.13+, Rust, and the platform build tools; macOS development also requires a stable code-signing identity (Apple Development or a long-lived self-signed identity). After installing dependencies, run `npm run app` on macOS or `npm run tauri -- dev` on Windows:
+- **Windows:** choose the NSIS installer matching your architecture. It installs for the current user. The installers are not Authenticode-signed, so Windows shows an unknown publisher warning. Interactive validation is architecture-specific; x64-on-x64 manual acceptance is not yet claimed.
+- **macOS:** unzip the download and move Satori to Applications. The build has a local signature but is not notarized; on first launch, Control-click Satori and choose **Open**.
+
+Updates are downloaded and installed manually. The interface is currently available in Simplified Chinese only. Reading works without AI; questions and scanned-outline recognition require an image-capable OpenAI-compatible model.
+
+## Development
+
+Install Node.js 22.13+, stable Rust, and the platform-specific [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/). macOS development also requires a stable code-signing identity.
 
 ```bash
 npm install
@@ -34,14 +41,8 @@ npm run app
 npm run tauri -- dev
 ```
 
-The current public macOS download has a local code signature but no Apple Team ID, and it is not notarized. On first launch, Control-click Satori, choose **Open**, then confirm once. Updates are downloaded and replaced manually from the official Releases page.
-
-The Windows x64 and ARM64 NSIS installers are unsigned current-user packages, so Windows identifies their publisher as unknown. Version 3.4.1 is promoted only from artifacts built at the exact final source commit after hosted build, package, current-user install/uninstall, and hash checks. Native interactive evidence remains architecture-specific; no x64-on-x64 manual acceptance is claimed.
-
-The interface is currently Simplified Chinese. Reading works without AI; to ask questions or recognize a missing scanned outline, open Settings and add a model that accepts image input through OpenAI-compatible Chat Completions.
-
 ## Privacy
 
-Source PDFs stay at their original local paths; library metadata, reading state, and per-book Q&A are stored in Application Support on macOS or application LocalAppData on Windows, and API keys only in macOS Keychain or Windows Credential Manager. Relevant page images are sent to the active AI service only when you submit a question, request a page or region explanation, or confirm outline recognition after its page ranges and image counts are shown; follow-ups may include up to six recent text-only turns. Opening a book or the question panel does not send page content to an AI service. After launch, Satori checks GitHub Releases once for a package matching the current platform, using its current version without including PDF content, reading history, AI profiles, or keys.
+PDFs remain at their original paths. Library data and Q&A stay in Application Support on macOS or application LocalAppData on Windows; API keys stay in macOS Keychain or Windows Credential Manager. Page images are sent to the selected AI service only after an explicit question, explanation request, or confirmed outline scan. Opening a book does not contact an AI service. The launch-time update check sends only the app version to GitHub Releases, never book content, history, AI profiles, or keys.
 
 [MIT](LICENSE) © 2026 yuxino
