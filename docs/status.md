@@ -4,7 +4,7 @@ Updated: 2026-09-02
 
 ## Product
 
-Satori is a local-first macOS and Windows PDF learning workspace. Reading stays central: the learner opens or drags in a local book, returns to the previous page, and explicitly asks for help with the current page or a selected region. It is not a general chat or note-taking product. Version 3.4.3 is a cross-platform packaging maintenance release that preserves the Windows compatibility and regression surface while reducing release-binary code generation duplication.
+Satori is a local-first macOS and Windows PDF learning workspace. Reading stays central: the learner opens or drags in a local book, returns to the previous page, and explicitly asks for help with the current page or a selected region. It is not a general chat or note-taking product. Version 3.4.3 is a cross-platform compatibility and packaging maintenance release that fixes platform-specific guidance leaking into shared UI, removes proven waste, and reduces release size without changing reading, AI, data formats, or intended interface behavior.
 
 ## Current implementation
 
@@ -32,7 +32,7 @@ Satori is a local-first macOS and Windows PDF learning workspace. Reading stays 
 ## Verification baseline
 
 - Frontend: 47 Node tests, strict TypeScript unused-symbol checking, and the Vite production build pass; `npm audit` reports no known vulnerabilities. PDF.js loads as a separate reader-only chunk instead of delaying the home screen.
-- Rust: all 47 tests pass; `cargo fmt --check`, release and `dev-live` checks, and Clippy with warnings denied pass. The PDF preflight includes a sparse 256 MiB fixture, and atomic replacement is tested with repeated writes. A same-source macOS arm64 release build measured `9,401,920` bytes before and `8,708,976` bytes after using one release codegen unit, a `692,944` byte (`7.37%`) reduction without removing code, assets, diagnostics, or security behavior.
+- Rust: all 48 tests pass; `cargo fmt --check`, release and `dev-live` checks, and Clippy with warnings denied pass. The PDF preflight includes a sparse 256 MiB fixture, atomic replacement is tested with repeated writes, and cross-platform permission guidance has a focused regression. Like-for-like macOS arm64 release builds measured `9,401,920` bytes before and `8,246,640` bytes after excluding production source maps and using one release codegen unit, a `1,155,280` byte (`12.29%`) reduction without removing runtime diagnostics, PDF decoders, or security behavior.
 - Real app: the stable signed development shell builds, passes its designated-requirement check, launches a 1100 × 800 native `Satori` window, and exposes the new visible bookshelf removal controls. Host QA did not alter books or credentials.
 - Windows historical baseline: hosted run `33309980178` passed frontend and Rust checks, exact installer naming, unique NSIS payload extraction, PE architecture checks, current-user install identity, shortcuts, uninstall, and artifact upload for x64 and ARM64 at `b4bc922555f138eed45e4a23e667d1bd755949e8`. Windows 11 25H2 ARM64 UTM run `307e21ee-ce24-4a2e-96db-8a7da4d872c8` installed and launched that exact ARM64 candidate, opened the synthetic three-page PDF, navigated pages, zoomed, selected a region, persisted page and Q&A state across two restarts, and passed taskbar, maximize, normal-close, and Alt+F4 interaction checks. Those bytes predate 3.4.3 and are comparison evidence only. Each 3.4.3 Windows asset must still come from the exact final main SHA and pass independent installer, payload, architecture, identity, full-uninstall, and SHA-256 checks; x64-on-x64 manual interaction is not inferred from ARM64 or hosted CI.
 
@@ -44,7 +44,7 @@ Satori is a local-first macOS and Windows PDF learning workspace. Reading stays 
 - Legacy Swift `Info.plist` / `.icns`, the copied public asset README, and the unused browser-preview script were removed. The current Tauri icon source and required macOS bundle sizes remain tracked.
 - Tauri capability schemas generated for desktop, macOS, and Windows are tracked. Their JSON content currently matches, so a Windows build no longer dirties the source tree by introducing `windows-schema.json`.
 - The 3.4.2 cleanup removed an unreachable pre-home empty-state stylesheet, consolidated release-version display logic, and merged the update-copy checks into the existing platform test surface without reducing behavioral coverage.
-- The 3.4.3 audit found no further code, dependency, resource, or regression test that could be safely removed. Release builds now use one codegen unit because the measured binary reduction is material and does not weaken runtime or diagnostic coverage.
+- The 3.4.3 audit removed a superseded PDF-loading wrapper and its dead export, deleted an unreferenced 1,443,308-byte Windows icon source, and stopped embedding 2,074,834 bytes of production source maps. The existing loading behavior tests now exercise the live monitor directly; all 47 frontend behavior tests remain. Release builds also use one codegen unit because the measured binary reduction is material and does not weaken runtime or diagnostic coverage.
 
 ## Durable constraints and pitfalls
 
