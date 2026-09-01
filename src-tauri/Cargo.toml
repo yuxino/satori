@@ -1,6 +1,6 @@
 [package]
 name = "satori"
-version = "3.4.2"
+version = "3.4.3"
 description = "Satori — a local-first PDF learning workspace"
 edition = "2021"
 
@@ -36,3 +36,4 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Secur
 [profile.release]
 strip = true
 lto = true
+codegen-units = 1

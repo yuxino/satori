@@ -22,7 +22,7 @@ A local-first PDF learning app for macOS and Windows 11. Keep the page in view a
 
 ## Download
 
-Satori supports Windows 11 on x64 and ARM64, and macOS 14+ on Apple silicon. Download Satori 3.4.2 from [GitHub Releases](https://github.com/yuxino/satori/releases/latest).
+Satori supports Windows 11 on x64 and ARM64, and macOS 14+ on Apple silicon. Download Satori 3.4.3 from [GitHub Releases](https://github.com/yuxino/satori/releases/latest).
 
 - **Windows:** choose the NSIS installer matching your architecture. It installs for the current user. The installers are not Authenticode-signed, so Windows shows an unknown publisher warning. Interactive validation is architecture-specific; x64-on-x64 manual acceptance is not yet claimed.
 - **macOS:** unzip the download and move Satori to Applications. The build has a local signature but is not notarized; on first launch, Control-click Satori and choose **Open**.

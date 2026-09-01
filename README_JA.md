@@ -22,7 +22,7 @@ macOS と Windows 11 向けのローカルファーストな PDF 学習アプリ
 
 ## ダウンロード
 
-Satori は Windows 11 x64・ARM64 と、Apple シリコン搭載 Mac の macOS 14+ に対応します。Satori 3.4.2 は [GitHub Releases](https://github.com/yuxino/satori/releases/latest) からダウンロードできます。
+Satori は Windows 11 x64・ARM64 と、Apple シリコン搭載 Mac の macOS 14+ に対応します。Satori 3.4.3 は [GitHub Releases](https://github.com/yuxino/satori/releases/latest) からダウンロードできます。
 
 - **Windows**：アーキテクチャに合う NSIS インストーラーを使用してください。現在のユーザーだけにインストールされます。Authenticode 署名がないため、発行元不明の警告が表示されます。ネイティブ操作の検証はアーキテクチャごとに扱い、x64-on-x64 の手動検証完了はまだ主張しません。
 - **macOS**：ZIP を展開して Satori を「アプリケーション」に移動してください。ローカル署名はありますが公証されていないため、初回は Control キーを押しながら Satori をクリックし、「開く」を選びます。
