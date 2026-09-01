@@ -20,7 +20,7 @@ export function pdfOpenErrorMessage(error: unknown): string {
     return "PDF 已损坏或复制不完整。请重新复制原文件后再试。";
   }
   if (/MissingPDFException|UnexpectedResponseException/i.test(name) || /failed to fetch|networkerror/i.test(message)) {
-    return "Windows 无法读取这份 PDF。请确认复制已完成，文件仍在原位置，然后重试。";
+    return "系统无法读取这份 PDF。请确认复制已完成，文件仍在原位置，然后重试。";
   }
   const safe = message || "未知错误";
   return safe.length > 280 ? `${safe.slice(0, 280)}…` : safe;

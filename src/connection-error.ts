@@ -26,13 +26,13 @@ export function actionableConnectionError(error: unknown): string {
     return "找不到 API 地址或模型。请核对服务地址和模型 ID。";
   }
   if (lower.includes("certificate") || lower.includes("tls") || lower.includes("ssl")) {
-    return "安全连接验证失败。请检查 Windows 时间、系统证书和服务地址。";
+    return "安全连接验证失败。请检查系统时间、系统证书和服务地址。";
   }
   if (lower.includes("dns") || lower.includes("name resolution") || lower.includes("failed to lookup")) {
-    return "无法解析服务地址。请检查 Windows 网络和 DNS 后重试。";
+    return "无法解析服务地址。请检查网络和 DNS 后重试。";
   }
   if (lower.includes("proxy")) {
-    return "代理连接失败。请检查 Windows 代理设置，或改用可直接访问的服务地址。";
+    return "代理连接失败。请检查系统代理设置，或改用可直接访问的服务地址。";
   }
   if (lower.includes("connection refused") || lower.includes("actively refused")) {
     return "服务拒绝连接。请确认服务正在运行、地址和端口正确。";

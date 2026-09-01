@@ -16,7 +16,7 @@ pub struct PdfFileInfo {
 fn read_error(error: std::io::Error) -> String {
     match error.kind() {
         std::io::ErrorKind::PermissionDenied => {
-            "Windows 无法读取这份 PDF。请确认复制已经完成，且文件没有被共享工具占用。".to_string()
+            "系统无法读取这份 PDF。请确认复制已经完成，且文件没有被共享工具占用。".to_string()
         }
         _ => format!("无法读取这份 PDF：{error}"),
     }
@@ -114,5 +114,13 @@ mod tests {
         let error = inspect_pdf_path(&path).unwrap_err();
         assert!(error.contains("复制被中断"));
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn permission_guidance_is_valid_on_every_supported_platform() {
+        let message = read_error(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        assert!(message.contains("无法读取"));
+        assert!(!message.contains("Windows"));
+        assert!(!message.contains("macOS"));
     }
 }

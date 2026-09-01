@@ -3,9 +3,14 @@ import test from "node:test";
 
 import { actionableConnectionError } from "../src/connection-error.ts";
 
-test("maps Windows network and provider failures to retry guidance", () => {
-  assert.match(actionableConnectionError("dns name resolution failed"), /DNS/);
-  assert.match(actionableConnectionError("TLS certificate error"), /Windows 时间/);
+test("maps cross-platform network and provider failures to retry guidance", () => {
+  const dns = actionableConnectionError("dns name resolution failed");
+  const tls = actionableConnectionError("TLS certificate error");
+  const proxy = actionableConnectionError("proxy connection failed");
+  assert.match(dns, /DNS/);
+  assert.match(tls, /系统时间/);
+  assert.match(proxy, /系统代理/);
+  assert.doesNotMatch(`${dns} ${tls} ${proxy}`, /Windows|macOS/);
   assert.match(actionableConnectionError("actively refused"), /服务正在运行/);
   assert.match(actionableConnectionError("HTTP 429 rate limit"), /稍后重试/);
 });

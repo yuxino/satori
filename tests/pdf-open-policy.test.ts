@@ -3,13 +3,15 @@ import test from "node:test";
 
 import { fileSizeLabel, pdfOpenErrorMessage } from "../src/pdf-open-policy.ts";
 
-test("turns parser and Windows read failures into recovery guidance", () => {
+test("turns parser and cross-platform read failures into recovery guidance", () => {
   const invalid = new Error("Invalid PDF structure");
   invalid.name = "InvalidPDFException";
   assert.match(pdfOpenErrorMessage(invalid), /重新复制/);
 
   const fetchFailure = new TypeError("Failed to fetch");
-  assert.match(pdfOpenErrorMessage(fetchFailure), /复制已完成/);
+  const message = pdfOpenErrorMessage(fetchFailure);
+  assert.match(message, /复制已完成/);
+  assert.doesNotMatch(message, /Windows|macOS/);
 });
 
 test("keeps large PDF sizes readable without rejecting them", () => {
