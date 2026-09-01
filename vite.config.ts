@@ -14,6 +14,8 @@ export default defineConfig({
   build: {
     target: "es2021",
     outDir: "dist",
-    sourcemap: true,
+    // Production assets are embedded in the desktop binary. Source maps add
+    // package weight and expose sources without helping the supported dev app.
+    sourcemap: false,
   },
 });

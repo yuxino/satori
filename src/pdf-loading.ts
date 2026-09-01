@@ -68,8 +68,3 @@ export function monitorPDFDocument<T>(
 
   return { promise, heartbeat };
 }
-
-/** Release the PDF.js worker when document loading fails before a wrapper owns it. */
-export async function awaitPDFDocument<T>(loadingTask: DestroyableLoadingTask<T>): Promise<T> {
-  return monitorPDFDocument(loadingTask).promise;
-}
