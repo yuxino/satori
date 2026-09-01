@@ -22,7 +22,7 @@
 
 ## 下载
 
-Satori 支持 Windows 11 x64 与 ARM64，以及 Apple 芯片上的 macOS 14+。Windows 3.4.1 请从 [GitHub Releases](https://github.com/yuxino/satori/releases/latest) 下载；当前 macOS 版本为 [3.4.0](https://github.com/yuxino/satori/releases/tag/v3.4.0)。
+Satori 支持 Windows 11 x64 与 ARM64，以及 Apple 芯片上的 macOS 14+。Satori 3.4.2 请从 [GitHub Releases](https://github.com/yuxino/satori/releases/latest) 下载。
 
 - **Windows**：下载与处理器架构匹配的 NSIS 安装包。安装包按当前用户安装且未做 Authenticode 签名，因此 Windows 会提示发布者未知。原生交互验收按架构分别记录，尚不宣称已完成 x64-on-x64 手动验收。
 - **macOS**：解压后把 Satori 移入「应用程序」。当前包有本地签名但未经公证；首次启动时按住 Control 点击 Satori，再选择「打开」。
