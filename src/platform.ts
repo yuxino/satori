@@ -1,9 +1,9 @@
-export interface PrimaryModifierState {
+interface PrimaryModifierState {
   metaKey: boolean;
   ctrlKey: boolean;
 }
 
-export interface WheelModifierState {
+interface WheelModifierState {
   ctrlKey: boolean;
 }
 
@@ -41,25 +41,25 @@ export function shouldHandlePageFlipWheel(event: WheelModifierState): boolean {
 
 export type ReleaseUpdatePhase = "idle" | "checking" | "current" | "available" | "release-only" | "error";
 
-export interface ReleaseUpdatePresentationInput {
+interface ReleaseUpdatePresentationInput {
   phase: ReleaseUpdatePhase;
   latestVersion: string;
 }
 
-export interface ReleaseUpdatePresentation {
+interface ReleaseUpdatePresentation {
   status: string;
   action: string;
   title: string;
 }
 
-function releaseVersionLabel(version: string): string {
+export function versionLabel(version: string): string {
   const normalized = version.trim().replace(/^[vV]/, "");
   return normalized ? `v${normalized}` : "";
 }
 
 /** Copy shared by macOS and Windows update controls. */
 export function updatePresentation(input: ReleaseUpdatePresentationInput): ReleaseUpdatePresentation | null {
-  const latest = releaseVersionLabel(input.latestVersion);
+  const latest = versionLabel(input.latestVersion);
   if (input.phase === "available") {
     return {
       status: "发现适用的新版本",

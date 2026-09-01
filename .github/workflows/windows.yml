@@ -172,7 +172,7 @@ jobs:
           "installer=$installer" >> $env:GITHUB_OUTPUT
           "manifest=$hashManifest" >> $env:GITHUB_OUTPUT
 
-      - name: Install and verify current-user identity
+      - name: Verify current-user install and uninstall lifecycle
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -197,6 +197,7 @@ jobs:
           if ($installedExe.Count -ne 1) {
             throw "Expected one installed satori.exe; found $($installedExe.Count)."
           }
+          $installedExePath = $installedExe[0].FullName
           $versionInfo = $installedExe[0].VersionInfo
           if ($versionInfo.ProductName -cne "Satori" -or $versionInfo.FileDescription -cne "Satori") {
             throw "Installed executable metadata is not consistently named Satori."
@@ -210,6 +211,7 @@ jobs:
           if ($startLinks.Count -ne 1) {
             throw "Expected one Start menu shortcut named Satori; found $($startLinks.Count)."
           }
+          $startShortcutPath = $startLinks[0].FullName
           $desktopRoot = [Environment]::GetFolderPath("Desktop")
           $desktopLinks = @(
             Get-ChildItem -LiteralPath $desktopRoot -Filter "Satori.lnk" |
@@ -218,6 +220,7 @@ jobs:
           if ($desktopLinks.Count -ne 1) {
             throw "Expected one desktop shortcut named Satori; found $($desktopLinks.Count)."
           }
+          $desktopShortcutPath = $desktopLinks[0].FullName
 
           $shell = New-Object -ComObject WScript.Shell
           foreach ($linkPath in @($startLinks[0].FullName, $desktopLinks[0].FullName)) {
@@ -237,7 +240,35 @@ jobs:
           if ($uninstall.ExitCode -ne 0) {
             throw "Silent uninstall failed with exit code $($uninstall.ExitCode)."
           }
-          "Verified current-user install, executable metadata, uninstall entry, Start menu shortcut, desktop shortcut, and uninstall for Satori."
+
+          # An exit code alone does not prove that the current-user install was
+          # removed. Give the NSIS cleanup process a bounded interval, then
+          # require every identity surface and the install directory to be gone.
+          $uninstallDeadline = (Get-Date).AddSeconds(15)
+          do {
+            $remainingUninstallEntries = @(
+              Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+                Where-Object { $_.DisplayName -ceq "Satori" }
+            )
+            $applicationRemains = Test-Path -LiteralPath $installedExePath -PathType Leaf
+            $installDirectoryRemains = Test-Path -LiteralPath $installLocation
+            $startShortcutRemains = Test-Path -LiteralPath $startShortcutPath -PathType Leaf
+            $desktopShortcutRemains = Test-Path -LiteralPath $desktopShortcutPath -PathType Leaf
+            $uninstallComplete =
+              $remainingUninstallEntries.Count -eq 0 -and
+              -not $applicationRemains -and
+              -not $installDirectoryRemains -and
+              -not $startShortcutRemains -and
+              -not $desktopShortcutRemains
+            if (-not $uninstallComplete) {
+              Start-Sleep -Milliseconds 250
+            }
+          } while (-not $uninstallComplete -and (Get-Date) -lt $uninstallDeadline)
+
+          if (-not $uninstallComplete) {
+            throw "Uninstall left application, install-directory, registry, Start menu, or desktop residue."
+          }
+          "Verified current-user install identity and complete uninstall cleanup for Satori."
 
       - name: Upload unsigned NSIS package
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

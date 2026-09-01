@@ -1,4 +1,4 @@
-export interface OutlineEvidencePlan {
+interface OutlineEvidencePlan {
   outlinePages: number[];
   chapterProbePages: number[];
 }

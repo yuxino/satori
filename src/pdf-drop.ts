@@ -1,4 +1,4 @@
-export type PdfDropDecision =
+type PdfDropDecision =
   | { accepted: true; path: string }
   | { accepted: false; message: string };
 

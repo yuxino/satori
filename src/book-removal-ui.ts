@@ -1,16 +1,16 @@
-export type CurrentBookRemovalAction =
+type CurrentBookRemovalAction =
   | "keep-current"
   | "open-first-remaining"
   | "show-empty-home";
 
-export interface BookRemovalUIState {
+interface BookRemovalUIState {
   removingCurrentBook: boolean;
   remainingBookCount: number;
   homeWasOpen: boolean;
   menuWasOpen: boolean;
 }
 
-export interface BookRemovalUIActions {
+interface BookRemovalUIActions {
   currentBookAction: CurrentBookRemovalAction;
   renderHome: boolean;
   reopenBookMenu: boolean;

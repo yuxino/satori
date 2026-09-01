@@ -5,10 +5,8 @@ import type { ReleaseUpdatePhase } from "./platform";
 
 const RELEASES_URL = "https://github.com/yuxino/satori/releases/latest";
 
-export type AppUpdatePhase = ReleaseUpdatePhase;
-
 export interface AppUpdateSnapshot {
-  phase: AppUpdatePhase;
+  phase: ReleaseUpdatePhase;
   currentVersion: string;
   latestVersion: string;
   errorMessage: string;
@@ -27,11 +25,6 @@ let manualCheckRequested = false;
 let initialized = false;
 let automaticCheckTimer: number | null = null;
 const listeners = new Set<UpdateListener>();
-
-export function versionLabel(version: string): string {
-  const normalized = version.trim().replace(/^[vV]/, "");
-  return normalized ? `v${normalized}` : "";
-}
 
 export function getAppUpdateSnapshot(): AppUpdateSnapshot {
   return { ...snapshot };

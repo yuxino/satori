@@ -210,43 +210,6 @@ body {
   }
 }
 
-/* ---- 空书架 ---- */
-
-#empty-state {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 18px;
-  z-index: 30;
-  background: var(--paper-deep);
-}
-
-#empty-state .hint {
-  font-family: var(--serif);
-  font-size: 20px;
-  color: var(--ink-soft);
-  letter-spacing: 2px;
-}
-
-#empty-state .open-book {
-  border: none;
-  background: var(--accent);
-  color: white;
-  font-size: 15px;
-  padding: 10px 26px;
-  border-radius: 999px;
-  cursor: pointer;
-  font-family: var(--sans);
-  box-shadow: 0 4px 14px rgba(35, 48, 59, 0.22);
-}
-
-#empty-state .open-book:hover {
-  background: color-mix(in srgb, var(--accent) 84%, black);
-}
-
 /* ---- 首页：今天的书桌 ---- */
 
 #home-view {

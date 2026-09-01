@@ -9,7 +9,7 @@ interface PDFLoadMonitorOptions {
   stallTimeoutMs?: number;
 }
 
-export interface PDFLoadMonitor<T> {
+interface PDFLoadMonitor<T> {
   promise: Promise<T>;
   heartbeat(): void;
 }

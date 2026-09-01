@@ -62,6 +62,7 @@ import {
   fileNameFromPath,
   hasPrimaryModifier,
   shouldHandlePageFlipWheel,
+  versionLabel,
 } from "./platform";
 import { fileSizeLabel, pdfOpenErrorMessage } from "./pdf-open-policy";
 import { decidePdfDrop } from "./pdf-drop";
@@ -72,7 +73,6 @@ import {
   getAppUpdateSnapshot,
   initializeAppUpdateCheck,
   subscribeToAppUpdates,
-  versionLabel,
   type AppUpdateSnapshot,
 } from "./update";
 

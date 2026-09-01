@@ -1,6 +1,6 @@
 # Current status
 
-Updated: 2026-08-31
+Updated: 2026-09-01
 
 ## Product
 
@@ -9,7 +9,7 @@ Satori is a local-first macOS and Windows PDF learning workspace. Reading stays 
 ## Current implementation
 
 - Stack: Tauri 2, Vite, TypeScript, PDF.js, Rust, and local JSON persistence. The removed Swift app is available only at tag `legacy-swift`.
-- Platforms: the base Tauri configuration keeps the macOS `.app` target. A Windows-only overlay adds current-user NSIS packaging for x64 and ARM64, with local state under application LocalAppData and a transparent multi-resolution ICO shared by the app, installer, and uninstaller. CI installs each candidate and checks exact `Satori` identity in executable metadata, HKCU uninstall data, Start menu, and Desktop shortcuts before uninstalling it.
+- Platforms: the base Tauri configuration keeps the macOS `.app` target. A Windows-only overlay adds current-user NSIS packaging for x64 and ARM64, with local state under application LocalAppData and a transparent multi-resolution ICO shared by the app, installer, and uninstaller. CI installs each candidate, checks exact `Satori` identity in executable metadata, HKCU uninstall data, Start menu, and Desktop shortcuts, then requires the application, install directory, uninstall entry, and shortcuts to be absent after uninstall.
 - Process integrity: Satori allows one process to own its data directory. A secondary launch restores, shows, and focuses the existing window, while a process-lifetime lock is acquired before the renderer can load so two writers cannot race the shared Store.
 - Reader: single/spread layouts, per-book page and zoom restoration, outline navigation, text and scanned-page rendering, and explicitly triggered VLM outline recovery for scanned books. Initial opening now preflights PDF completeness, shows byte/page/render progress, supports cancellation and stall recovery, batches page metadata, bounds canvas memory, and records interrupted opens as retryable bookshelf errors. Ctrl+wheel is reserved for zoom, same-page render/layout callbacks do not inflate reading activity, and normal window/menu exits flush the latest debounced page and zoom snapshot before terminating.
 - Home: a restrained monochrome editorial layout containing the current book, 52-week activity grid, bookshelf, and recent Q&A. Each bookshelf row has a visible removal action whose confirmation states that the disk PDF is preserved. Removing a non-current book now refreshes every open bookshelf surface, while removing the current book opens the first remaining book or returns to the empty home view. Book covers are sharp typographic covers rather than PDF thumbnails; labels describe questions and answers without claiming the learner understood them.
@@ -31,8 +31,8 @@ Satori is a local-first macOS and Windows PDF learning workspace. Reading stays 
 
 ## Verification baseline
 
-- Frontend: 46 Node tests, strict TypeScript unused-symbol checking, and the Vite production build pass; `npm audit` reports no known vulnerabilities. PDF.js loads as a separate reader-only chunk instead of delaying the home screen.
-- Rust: all 45 tests pass; `cargo fmt --check`, release and `dev-live` checks, and Clippy with warnings denied pass. The PDF preflight includes a sparse 256 MiB fixture, and atomic replacement is tested with repeated writes.
+- Frontend: 47 Node tests, strict TypeScript unused-symbol checking, and the Vite production build pass; `npm audit` reports no known vulnerabilities. PDF.js loads as a separate reader-only chunk instead of delaying the home screen.
+- Rust: all 47 tests pass; `cargo fmt --check`, release and `dev-live` checks, and Clippy with warnings denied pass. The PDF preflight includes a sparse 256 MiB fixture, and atomic replacement is tested with repeated writes.
 - Real app: the stable signed development shell builds, passes its designated-requirement check, launches a 1100 × 800 native `Satori` window, and exposes the new visible bookshelf removal controls. Host QA did not alter books or credentials.
 - Windows historical baseline: hosted run `33309980178` passed frontend and Rust checks, exact installer naming, unique NSIS payload extraction, PE architecture checks, current-user install identity, shortcuts, uninstall, and artifact upload for x64 and ARM64 at `b4bc922555f138eed45e4a23e667d1bd755949e8`. Windows 11 25H2 ARM64 UTM run `307e21ee-ce24-4a2e-96db-8a7da4d872c8` installed and launched that exact ARM64 candidate, opened the synthetic three-page PDF, navigated pages, zoomed, selected a region, persisted page and Q&A state across two restarts, and passed taskbar, maximize, normal-close, and Alt+F4 interaction checks. Those bytes predate 3.4.1 and are comparison evidence only. Version 3.4.1 promotion requires successful artifacts from its exact final main SHA, independent installer and payload hashes, and a separate native record; x64-on-x64 manual interaction is not inferred from ARM64 or hosted CI.
 
@@ -43,6 +43,7 @@ Satori is a local-first macOS and Windows PDF learning workspace. Reading stays 
 - Operational details for the stable development shell now live in ADR 0014 instead of an implemented task plan.
 - Legacy Swift `Info.plist` / `.icns`, the copied public asset README, and the unused browser-preview script were removed. The current Tauri icon source and required macOS bundle sizes remain tracked.
 - Tauri capability schemas generated for desktop, macOS, and Windows are tracked. Their JSON content currently matches, so a Windows build no longer dirties the source tree by introducing `windows-schema.json`.
+- The post-3.4.1 cleanup removed an unreachable pre-home empty-state stylesheet, consolidated release-version display logic, and merged the update-copy checks into the existing platform test surface without reducing behavioral coverage.
 
 ## Durable constraints and pitfalls
 

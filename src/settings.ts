@@ -14,10 +14,9 @@ import {
   getAppUpdateSnapshot,
   openLatestRelease,
   subscribeToAppUpdates,
-  versionLabel,
   type AppUpdateSnapshot,
 } from "./update";
-import { updatePresentation } from "./platform";
+import { updatePresentation, versionLabel } from "./platform";
 import { apiBaseURLError, isValidAPIBaseURL } from "./provider-url-policy";
 
 interface OpenAISettingsOptions {
