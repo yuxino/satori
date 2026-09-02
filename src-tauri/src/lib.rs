@@ -6,7 +6,6 @@ mod provider;
 mod qwen;
 mod store;
 mod thumbs;
-mod update;
 
 use fs2::FileExt;
 use tauri::{Emitter, Manager};
@@ -291,6 +290,8 @@ pub fn run() {
                 .open_js_links_on_click(false)
                 .build(),
         )
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState {
             client: build_http_client(false),
             // Loopback AI services are a local privacy boundary. Never let
@@ -375,7 +376,6 @@ pub fn run() {
             qwen::test_ai_profile,
             qwen::extract_outline,
             qwen::find_page_by_title,
-            update::check_for_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

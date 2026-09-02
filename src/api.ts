@@ -77,15 +77,6 @@ export interface PdfFileInfo {
   large: boolean;
 }
 
-export interface AppUpdateInfo {
-  current_version: string;
-  latest_version: string;
-  /** A newer stable GitHub Release exists, regardless of its assets. */
-  release_available: boolean;
-  /** The newer Release contains an installer for this OS and CPU architecture. */
-  available: boolean;
-}
-
 export interface HistoryTurn {
   role: "user" | "assistant";
   content: string;
@@ -140,12 +131,6 @@ export function saveProfileApiKey(profileId: string, apiKey: string): Promise<vo
 
 export function deleteProfileApiKey(profileId: string): Promise<void> {
   return invoke("delete_profile_api_key", { profileId });
-}
-
-// ---- 应用版本 ----
-
-export function checkForUpdate(): Promise<AppUpdateInfo> {
-  return invoke<AppUpdateInfo>("check_for_update");
 }
 
 // ---- Store ----

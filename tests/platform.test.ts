@@ -3,10 +3,10 @@ import test from "node:test";
 
 import {
   desktopPlatformFromNavigator,
+  downloadProgressPresentation,
   fileNameFromPath,
   hasPrimaryModifier,
   shouldHandlePageFlipWheel,
-  updatePresentation,
   versionLabel,
 } from "../src/platform.ts";
 
@@ -41,20 +41,17 @@ test("formats release versions once for every update surface", () => {
   assert.equal(versionLabel("3.4.1"), "v3.4.1");
 });
 
-test("downloadable updates use platform-neutral download wording", () => {
-  assert.deepEqual(updatePresentation({ phase: "available", latestVersion: "3.4.0" }), {
-    status: "发现适用的新版本",
-    action: "下载 v3.4.0",
-    title: "在浏览器中打开 Satori v3.4.0 下载页",
+test("known update sizes produce a real bounded percentage", () => {
+  assert.deepEqual(downloadProgressPresentation(512, 1024), {
+    label: "已下载 512 B / 1.0 KB",
+    percent: 50,
   });
+  assert.equal(downloadProgressPresentation(2048, 1024).percent, 100);
 });
 
-test("a release without a matching installer never claims a download", () => {
-  const presentation = updatePresentation({ phase: "release-only", latestVersion: "3.4.0" });
-  assert.deepEqual(presentation, {
-    status: "新版本暂无适用安装包",
-    action: "查看 Releases",
-    title: "查看 Satori v3.4.0 官方 Release",
+test("unknown update sizes stay indeterminate without a fake percentage", () => {
+  assert.deepEqual(downloadProgressPresentation(1536, null), {
+    label: "已下载 1.5 KB",
+    percent: null,
   });
-  assert.doesNotMatch(`${presentation?.status} ${presentation?.action} ${presentation?.title}`, /下载/);
 });

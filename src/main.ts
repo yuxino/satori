@@ -72,6 +72,7 @@ import { StorePersistence } from "./store-persistence";
 import {
   getAppUpdateSnapshot,
   initializeAppUpdateCheck,
+  setBeforeAppUpdateInstall,
   subscribeToAppUpdates,
   type AppUpdateSnapshot,
 } from "./update";
@@ -411,13 +412,13 @@ function syncHomeUpdateIndicator(): void {
   const settingsButton = homeView.querySelector<HTMLButtonElement>(".home-settings-action");
   if (!settingsButton) return;
   const hasDownload = appUpdateState.phase === "available" && Boolean(appUpdateState.latestVersion);
-  const hasReleaseOnly = appUpdateState.phase === "release-only" && Boolean(appUpdateState.latestVersion);
-  const hasNewRelease = hasDownload || hasReleaseOnly;
+  const updateInProgress = ["downloading", "verifying", "downloaded", "installing", "restart-ready"].includes(appUpdateState.phase);
+  const hasNewRelease = hasDownload || updateInProgress;
   settingsButton.classList.toggle("update-available", hasNewRelease);
   const label = hasDownload
-    ? `打开设置，Satori ${versionLabel(appUpdateState.latestVersion)} 可下载`
-    : hasReleaseOnly
-      ? `打开设置，Satori ${versionLabel(appUpdateState.latestVersion)} 已发布，当前系统暂无适用安装包`
+    ? `打开设置，Satori ${versionLabel(appUpdateState.latestVersion)} 可在应用内下载`
+    : updateInProgress
+      ? "打开设置，继续完成 Satori 更新"
       : "打开设置";
   settingsButton.setAttribute("aria-label", label);
   settingsButton.title = hasNewRelease ? label.replace("打开设置，", "") : "设置";
@@ -1842,6 +1843,22 @@ function requestAppExit(): Promise<void> {
   })();
   return exitRequest;
 }
+
+async function prepareForAppUpdateInstall(): Promise<void> {
+  if (!storeLoaded) return;
+  window.clearTimeout(wheelCommitTimer);
+  wheelCommitTimer = undefined;
+  checkpointCurrentReadingState();
+  try {
+    await storePersistence.flush();
+  } finally {
+    // macOS waits for a separate restart click after installation, so normal
+    // persistence must remain usable while the current process is still open.
+    storePersistence.resume();
+  }
+}
+
+setBeforeAppUpdateInstall(prepareForAppUpdateInstall);
 
 async function setupExitPersistence(): Promise<void> {
   await getCurrentWindow().onCloseRequested((event) => {

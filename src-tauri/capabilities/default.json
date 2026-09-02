@@ -8,6 +8,10 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "dialog:allow-open",
+    "updater:allow-check",
+    "updater:allow-download",
+    "updater:allow-install",
+    "process:allow-restart",
     {
       "identifier": "opener:allow-open-url",
       "allow": [

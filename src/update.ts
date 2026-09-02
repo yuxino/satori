@@ -1,101 +1,63 @@
 import { getVersion } from "@tauri-apps/api/app";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { checkForUpdate } from "./api";
-import type { ReleaseUpdatePhase } from "./platform";
+import { currentDesktopPlatform } from "./platform";
+import {
+  createAppUpdateController,
+  type AppUpdateSnapshot,
+  type UpdateHandle,
+} from "./update-controller";
+
+export type { AppUpdateSnapshot } from "./update-controller";
 
 const RELEASES_URL = "https://github.com/yuxino/satori/releases/latest";
+let prepareInstall: () => Promise<void> = async () => undefined;
+const controller = createAppUpdateController({
+  getVersion,
+  check: () => check({ timeout: 12_000 }) as Promise<UpdateHandle | null>,
+  relaunch,
+  openRelease: () => openUrl(RELEASES_URL),
+  prepareInstall: () => prepareInstall(),
+  platform: currentDesktopPlatform(),
+});
 
-export interface AppUpdateSnapshot {
-  phase: ReleaseUpdatePhase;
-  currentVersion: string;
-  latestVersion: string;
-  errorMessage: string;
-}
-
-type UpdateListener = (snapshot: AppUpdateSnapshot) => void;
-
-let snapshot: AppUpdateSnapshot = {
-  phase: "idle",
-  currentVersion: "",
-  latestVersion: "",
-  errorMessage: "",
-};
-let checkInFlight: Promise<void> | null = null;
-let manualCheckRequested = false;
 let initialized = false;
 let automaticCheckTimer: number | null = null;
-const listeners = new Set<UpdateListener>();
 
 export function getAppUpdateSnapshot(): AppUpdateSnapshot {
-  return { ...snapshot };
+  return controller.snapshot();
 }
 
-export function subscribeToAppUpdates(listener: UpdateListener): () => void {
-  listeners.add(listener);
-  listener(getAppUpdateSnapshot());
-  return () => listeners.delete(listener);
-}
-
-function publish(next: AppUpdateSnapshot): void {
-  snapshot = next;
-  const value = getAppUpdateSnapshot();
-  for (const listener of listeners) listener(value);
-}
-
-async function loadCurrentVersion(): Promise<void> {
-  try {
-    const currentVersion = await getVersion();
-    publish({ ...snapshot, currentVersion });
-  } catch {
-    // Native update results also include the current version. Failure here
-    // must not block the rest of the app or turn into a false update result.
-  }
+export function subscribeToAppUpdates(listener: (snapshot: AppUpdateSnapshot) => void): () => void {
+  return controller.subscribe(listener);
 }
 
 export function checkForAppUpdate(manual: boolean): Promise<void> {
-  manualCheckRequested ||= manual;
   if (manual && automaticCheckTimer !== null) {
     window.clearTimeout(automaticCheckTimer);
     automaticCheckTimer = null;
   }
-  if (checkInFlight) return checkInFlight;
+  return controller.check(manual);
+}
 
-  publish({ ...snapshot, phase: "checking", errorMessage: "" });
-  checkInFlight = (async () => {
-    try {
-      const info = await checkForUpdate();
-      publish({
-        phase: info.available ? "available" : info.release_available ? "release-only" : "current",
-        currentVersion: info.current_version,
-        latestVersion: info.latest_version,
-        errorMessage: "",
-      });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      publish({
-        ...snapshot,
-        phase: manualCheckRequested ? "error" : "idle",
-        errorMessage: manualCheckRequested ? errorMessage : "",
-      });
-    }
-  })().finally(() => {
-    checkInFlight = null;
-    manualCheckRequested = false;
-  });
+export const downloadAppUpdate = (): Promise<void> => controller.download();
+export const installAppUpdate = (): Promise<void> => controller.install();
+export const restartAfterAppUpdate = (): Promise<void> => controller.restart();
+export const cancelAppUpdate = (): Promise<void> => controller.cancel();
+export const retryAppUpdate = (): Promise<void> => controller.retry();
+export const openUpdateRecoveryRelease = (): Promise<void> => controller.openRecoveryRelease();
 
-  return checkInFlight;
+export function setBeforeAppUpdateInstall(callback: () => Promise<void>): void {
+  prepareInstall = callback;
 }
 
 export function initializeAppUpdateCheck(): void {
   if (initialized) return;
   initialized = true;
-  void loadCurrentVersion();
+  void controller.loadCurrentVersion();
   automaticCheckTimer = window.setTimeout(() => {
     automaticCheckTimer = null;
-    if (snapshot.phase === "idle") void checkForAppUpdate(false);
+    if (controller.snapshot().phase === "idle") void controller.check(false);
   }, 1400);
-}
-
-export function openLatestRelease(): Promise<void> {
-  return openUrl(RELEASES_URL);
 }

@@ -10,13 +10,18 @@ import {
 } from "./api";
 import { actionableConnectionError, formatUnknownError as formatError } from "./connection-error";
 import {
+  cancelAppUpdate,
   checkForAppUpdate,
+  downloadAppUpdate,
   getAppUpdateSnapshot,
-  openLatestRelease,
+  installAppUpdate,
+  openUpdateRecoveryRelease,
+  restartAfterAppUpdate,
+  retryAppUpdate,
   subscribeToAppUpdates,
   type AppUpdateSnapshot,
 } from "./update";
-import { updatePresentation, versionLabel } from "./platform";
+import { downloadProgressPresentation, versionLabel } from "./platform";
 import { apiBaseURLError, isValidAPIBaseURL } from "./provider-url-policy";
 
 interface OpenAISettingsOptions {
@@ -179,6 +184,13 @@ class AISettingsController {
   private readonly updateVersion: HTMLSpanElement;
   private readonly updateStatus: HTMLSpanElement;
   private readonly updateButton: HTMLButtonElement;
+  private readonly updatePanel: HTMLElement;
+  private readonly updatePanelTitle: HTMLHeadingElement;
+  private readonly updateNotes: HTMLParagraphElement;
+  private readonly updateProgress: HTMLProgressElement;
+  private readonly updateProgressLabel: HTMLSpanElement;
+  private readonly updateCancelButton: HTMLButtonElement;
+  private readonly updateRecoveryButton: HTMLButtonElement;
   private readonly onDestroyed: () => void;
   private readonly credentialStates = new Map<string, CredentialState>();
   private readonly keyDrafts = new Map<string, string>();
@@ -188,8 +200,6 @@ class AISettingsController {
   private liveMessage = "";
   private liveTone: StatusTone = "neutral";
   private updateState: AppUpdateSnapshot = getAppUpdateSnapshot();
-  private updateOpenError = "";
-  private openingRelease = false;
   private unsubscribeUpdates: (() => void) | null = null;
   private mounted = true;
   private appWasInert = false;
@@ -246,6 +256,29 @@ class AISettingsController {
     headerActions.append(updateControl, closeButton);
     header.append(heading, headerActions);
 
+    this.updatePanel = createElement("section", "settings-update-panel");
+    this.updatePanel.setAttribute("aria-labelledby", "settings-update-title");
+    const updatePanelCopy = createElement("div", "settings-update-panel-copy");
+    this.updatePanelTitle = createElement("h3", "settings-update-panel-title");
+    this.updatePanelTitle.id = "settings-update-title";
+    this.updateNotes = createElement("p", "settings-update-notes");
+    updatePanelCopy.append(this.updatePanelTitle, this.updateNotes);
+    const updateProgressRow = createElement("div", "settings-update-progress-row");
+    this.updateProgress = document.createElement("progress");
+    this.updateProgress.className = "settings-update-progress";
+    this.updateProgress.max = 100;
+    this.updateProgressLabel = createElement("span", "settings-update-progress-label");
+    updateProgressRow.append(this.updateProgress, this.updateProgressLabel);
+    const updatePanelActions = createElement("div", "settings-update-panel-actions");
+    this.updateCancelButton = createButton("settings-button", "取消本次更新");
+    this.updateCancelButton.textContent = "取消";
+    this.updateCancelButton.addEventListener("click", () => void cancelAppUpdate());
+    this.updateRecoveryButton = createButton("settings-button", "在浏览器中打开官方 Releases 作为错误恢复");
+    this.updateRecoveryButton.textContent = "打开 Releases";
+    this.updateRecoveryButton.addEventListener("click", () => void openUpdateRecoveryRelease());
+    updatePanelActions.append(this.updateCancelButton, this.updateRecoveryButton);
+    this.updatePanel.append(updatePanelCopy, updateProgressRow, updatePanelActions);
+
     this.messageBanner = createElement("div", "settings-message");
     this.messageBanner.setAttribute("role", "note");
 
@@ -256,7 +289,7 @@ class AISettingsController {
     content.append(this.sidebar, this.detail);
 
     this.footer = createElement("footer", "settings-footer");
-    this.dialog.append(header, this.messageBanner, content, this.footer);
+    this.dialog.append(header, this.updatePanel, this.messageBanner, content, this.footer);
     this.overlay.appendChild(this.dialog);
 
     this.overlay.addEventListener("mousedown", (event) => {
@@ -268,7 +301,6 @@ class AISettingsController {
     document.body.appendChild(this.overlay);
     this.unsubscribeUpdates = subscribeToAppUpdates((state) => {
       this.updateState = state;
-      this.updateOpenError = "";
       this.renderUpdateControl();
     });
     this.render(false);
@@ -315,34 +347,38 @@ class AISettingsController {
   }
 
   private renderUpdateControl(): void {
-    const { phase, currentVersion, latestVersion, errorMessage } = this.updateState;
+    const { phase, currentVersion, latestVersion, releaseNotes, downloadedBytes, totalBytes, errorMessage, errorStage, platform } =
+      this.updateState;
     this.updateVersion.textContent = currentVersion ? `Satori ${versionLabel(currentVersion)}` : "Satori";
-    this.updateButton.disabled = phase === "checking" || this.openingRelease;
-    this.updateButton.dataset.state = this.updateOpenError ? "error" : phase;
-    this.updateButton.setAttribute("aria-busy", String(phase === "checking" || this.openingRelease));
-    const updateError = Boolean(this.updateOpenError) || phase === "error";
+    const busy = ["checking", "downloading", "verifying", "installing"].includes(phase);
+    this.updateButton.disabled = busy;
+    this.updateButton.dataset.state = phase;
+    this.updateButton.setAttribute("aria-busy", String(busy));
+    const updateError = phase === "error";
     this.updateStatus.setAttribute("role", updateError ? "alert" : "status");
     this.updateStatus.setAttribute("aria-live", updateError ? "assertive" : "polite");
 
-    if (this.openingRelease) {
-      this.updateStatus.textContent = "正在打开版本页";
-      this.updateButton.textContent = "正在打开…";
-      this.updateButton.title = "正在浏览器中打开 Satori 官方 Releases";
-      this.updateButton.setAttribute("aria-label", this.updateButton.title);
-      return;
-    }
-
-    if (this.updateOpenError) {
-      this.updateStatus.textContent = "无法打开版本页";
-      this.updateButton.textContent = "重试打开";
-      this.updateButton.title = this.updateOpenError;
-      this.updateButton.setAttribute("aria-label", `重新打开官方 Releases。${this.updateOpenError}`);
-      return;
-    }
+    const showPanel = ["available", "downloading", "verifying", "downloaded", "installing", "restart-ready", "error"].includes(
+      phase,
+    );
+    this.updatePanel.hidden = !showPanel;
+    this.updatePanelTitle.textContent = latestVersion ? `Satori ${versionLabel(latestVersion)}` : "更新没有完成";
+    this.updateNotes.textContent = releaseNotes || (phase === "error" ? errorMessage : "此版本没有提供更新说明。");
+    const progress = downloadProgressPresentation(downloadedBytes, totalBytes);
+    const showProgress = phase === "downloading" || phase === "verifying";
+    this.updateProgress.hidden = !showProgress;
+    this.updateProgressLabel.hidden = !showProgress;
+    if (showProgress && progress.percent === null) this.updateProgress.removeAttribute("value");
+    else if (showProgress) this.updateProgress.value = progress.percent ?? 0;
+    this.updateProgressLabel.textContent = phase === "verifying" ? "下载完成，正在验证签名" : progress.label;
+    this.updateCancelButton.hidden = !["available", "downloaded", "error"].includes(phase);
+    this.updateCancelButton.disabled = busy;
+    this.updateRecoveryButton.hidden = phase !== "error";
+    this.updateRecoveryButton.disabled = busy;
 
     switch (phase) {
       case "checking":
-        this.updateStatus.textContent = "正在连接 GitHub";
+        this.updateStatus.textContent = "正在检查签名更新";
         this.updateButton.textContent = "检查中…";
         this.updateButton.title = "正在检查更新";
         this.updateButton.setAttribute("aria-label", "正在检查 Satori 更新");
@@ -354,20 +390,57 @@ class AISettingsController {
         this.updateButton.setAttribute("aria-label", "Satori 已是最新版，再次检查更新");
         break;
       case "available":
-      case "release-only": {
-        const presentation = updatePresentation({ phase, latestVersion });
-        if (!presentation) break;
-        this.updateStatus.textContent = presentation.status;
-        this.updateButton.textContent = presentation.action;
-        this.updateButton.title = presentation.title;
+        this.updateStatus.textContent = "发现可用新版本";
+        this.updateButton.textContent = `下载 ${versionLabel(latestVersion)}`;
+        this.updateButton.title = `下载并由 Satori 验证 ${versionLabel(latestVersion)}`;
         this.updateButton.setAttribute("aria-label", this.updateButton.title);
         break;
-      }
+      case "downloading":
+        this.updateStatus.textContent = progress.label;
+        this.updateButton.textContent = "下载中…";
+        this.updateButton.title = "正在下载更新；官方 updater 不支持安全中止正在进行的下载";
+        this.updateButton.setAttribute("aria-label", this.updateButton.title);
+        break;
+      case "verifying":
+        this.updateStatus.textContent = "正在验证签名";
+        this.updateButton.textContent = "验证中…";
+        this.updateButton.title = "下载完成，正在使用内置公钥验证更新签名";
+        this.updateButton.setAttribute("aria-label", this.updateButton.title);
+        break;
+      case "downloaded":
+        this.updateStatus.textContent = "签名验证完成";
+        this.updateButton.textContent = platform === "windows" ? "安装并退出" : "安装更新";
+        this.updateButton.title =
+          platform === "windows"
+            ? "启动可见的 Windows 安装器；Satori 将按系统限制自动退出"
+            : "安装已验证的更新；完成后由你决定何时重启";
+        this.updateButton.setAttribute("aria-label", this.updateButton.title);
+        break;
+      case "installing":
+        this.updateStatus.textContent = platform === "windows" ? "正在启动系统安装器" : "正在安装已验证更新";
+        this.updateButton.textContent = "安装中…";
+        this.updateButton.title =
+          platform === "windows" ? "安装器启动后 Satori 会退出" : "安装完成后将提供重启按钮";
+        this.updateButton.setAttribute("aria-label", this.updateButton.title);
+        break;
+      case "restart-ready":
+        this.updateStatus.textContent = "更新已安装，等待重启";
+        this.updateButton.textContent = "重启并完成";
+        this.updateButton.title = "立即重启 Satori 并运行新版本";
+        this.updateButton.setAttribute("aria-label", this.updateButton.title);
+        break;
       case "error":
-        this.updateStatus.textContent = "检查失败";
+        this.updateStatus.textContent =
+          errorStage === "download" ? "下载或签名验证失败" : errorStage === "install" ? "安装未完成" : "更新失败";
+        this.updateButton.textContent = "重试";
+        this.updateButton.title = errorMessage || "更新没有完成，请重试";
+        this.updateButton.setAttribute("aria-label", `重试更新。${this.updateButton.title}`);
+        break;
+      case "cancelled":
+        this.updateStatus.textContent = "本次更新已取消";
         this.updateButton.textContent = "重新检查";
-        this.updateButton.title = errorMessage || "无法检查更新，请重试";
-        this.updateButton.setAttribute("aria-label", `重新检查更新。${this.updateButton.title}`);
+        this.updateButton.title = "再次检查更新";
+        this.updateButton.setAttribute("aria-label", "本次更新已取消，再次检查更新");
         break;
       default:
         this.updateStatus.textContent = "自动检查已开启";
@@ -379,23 +452,26 @@ class AISettingsController {
   }
 
   private async handleUpdateAction(): Promise<void> {
-    if (this.openingRelease) return;
-    if (this.updateState.phase !== "available" && this.updateState.phase !== "release-only") {
-      await checkForAppUpdate(true);
-      return;
-    }
-
-    this.openingRelease = true;
-    this.updateOpenError = "";
-    this.renderUpdateControl();
-    try {
-      await openLatestRelease();
-    } catch (error) {
-      if (!this.mounted) return;
-      this.updateOpenError = error instanceof Error ? error.message : String(error);
-    } finally {
-      this.openingRelease = false;
-      if (this.mounted) this.renderUpdateControl();
+    switch (this.updateState.phase) {
+      case "available":
+        await downloadAppUpdate();
+        break;
+      case "downloaded":
+        await installAppUpdate();
+        break;
+      case "restart-ready":
+        await restartAfterAppUpdate();
+        break;
+      case "error":
+        await retryAppUpdate();
+        break;
+      case "checking":
+      case "downloading":
+      case "verifying":
+      case "installing":
+        break;
+      default:
+        await checkForAppUpdate(true);
     }
   }
 

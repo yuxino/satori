@@ -15,7 +15,7 @@ export function desktopPlatformFromNavigator(platform: string): DesktopPlatform 
   return "other";
 }
 
-function currentDesktopPlatform(): DesktopPlatform {
+export function currentDesktopPlatform(): DesktopPlatform {
   const platform = typeof navigator === "undefined" ? "" : navigator.platform;
   return desktopPlatformFromNavigator(platform);
 }
@@ -39,40 +39,30 @@ export function shouldHandlePageFlipWheel(event: WheelModifierState): boolean {
   return !event.ctrlKey;
 }
 
-export type ReleaseUpdatePhase = "idle" | "checking" | "current" | "available" | "release-only" | "error";
-
-interface ReleaseUpdatePresentationInput {
-  phase: ReleaseUpdatePhase;
-  latestVersion: string;
-}
-
-interface ReleaseUpdatePresentation {
-  status: string;
-  action: string;
-  title: string;
-}
-
 export function versionLabel(version: string): string {
   const normalized = version.trim().replace(/^[vV]/, "");
   return normalized ? `v${normalized}` : "";
 }
 
-/** Copy shared by macOS and Windows update controls. */
-export function updatePresentation(input: ReleaseUpdatePresentationInput): ReleaseUpdatePresentation | null {
-  const latest = versionLabel(input.latestVersion);
-  if (input.phase === "available") {
-    return {
-      status: "发现适用的新版本",
-      action: `下载 ${latest}`,
-      title: `在浏览器中打开 Satori ${latest} 下载页`,
-    };
+export interface DownloadProgressPresentation {
+  label: string;
+  percent: number | null;
+}
+
+export function downloadProgressPresentation(downloadedBytes: number, totalBytes: number | null): DownloadProgressPresentation {
+  const downloaded = Math.max(0, downloadedBytes);
+  if (!totalBytes || totalBytes <= 0) {
+    return { label: `已下载 ${formatBytes(downloaded)}`, percent: null };
   }
-  if (input.phase === "release-only") {
-    return {
-      status: "新版本暂无适用安装包",
-      action: "查看 Releases",
-      title: `查看 Satori ${latest} 官方 Release`,
-    };
-  }
-  return null;
+  const bounded = Math.min(downloaded, totalBytes);
+  return {
+    label: `已下载 ${formatBytes(bounded)} / ${formatBytes(totalBytes)}`,
+    percent: Math.min(100, Math.round((bounded / totalBytes) * 100)),
+  };
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
