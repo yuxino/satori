@@ -2,6 +2,12 @@ name: Windows packages
 
 "on":
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: true
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: true
 
 permissions:
   contents: read
@@ -79,8 +85,11 @@ jobs:
       - name: Lint release Rust
         run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --release --target ${{ matrix.target }} -- -D warnings
 
-      - name: Build unsigned NSIS package
+      - name: Build unsigned NSIS package and signed updater artifact
         shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: >-
           .\node_modules\.bin\tauri.cmd build
           --config src-tauri/tauri.windows.conf.json
@@ -123,6 +132,7 @@ jobs:
           $releaseRoot = Join-Path $env:GITHUB_WORKSPACE "src-tauri\target\${{ matrix.target }}\release"
           $appExe = Join-Path $releaseRoot "satori.exe"
           $installer = Join-Path $releaseRoot "bundle\nsis\Satori_$($config.version)_${{ matrix.installer_arch }}-setup.exe"
+          $updaterSignature = "$installer.sig"
 
           if (-not (Test-Path -LiteralPath $appExe -PathType Leaf)) {
             throw "Missing application executable: $appExe"
@@ -136,6 +146,14 @@ jobs:
           $expectedInstallerName = [System.IO.Path]::GetFileName($installer)
           if ($installers[0].Name -cne $expectedInstallerName) {
             throw "Unexpected NSIS installer: $($installers[0].Name); expected $expectedInstallerName."
+          }
+          $signatures = @(Get-ChildItem -LiteralPath $nsisDirectory -Filter "*.sig" -File)
+          if ($signatures.Count -ne 1 -or $signatures[0].FullName -cne $updaterSignature) {
+            throw "Expected exactly one updater signature named $([System.IO.Path]::GetFileName($updaterSignature))."
+          }
+          $signatureText = (Get-Content -LiteralPath $updaterSignature -Raw).Trim()
+          if ($signatureText.Length -lt 32 -or $signatureText -notmatch '^[A-Za-z0-9+/=\r\n]+$') {
+            throw "Updater signature is empty or malformed."
           }
 
           $extractRoot = Join-Path $env:RUNNER_TEMP "satori-nsis-${{ matrix.name }}"
@@ -159,9 +177,11 @@ jobs:
           $builtHash = (Get-FileHash -LiteralPath $appExe -Algorithm SHA256).Hash
           $payloadHash = (Get-FileHash -LiteralPath $payloadExecutables[0].FullName -Algorithm SHA256).Hash
           $installerHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
+          $signatureHash = (Get-FileHash -LiteralPath $updaterSignature -Algorithm SHA256).Hash
           $hashManifest = Join-Path $nsisDirectory "Satori_$($config.version)_${{ matrix.installer_arch }}-SHA256SUMS.txt"
           @(
             "$installerHash  $([System.IO.Path]::GetFileName($installer))"
+            "$signatureHash  $([System.IO.Path]::GetFileName($updaterSignature))"
             "$builtHash  satori.exe.pre-bundle"
             "$payloadHash  satori.exe.nsis-payload"
           ) | Set-Content -LiteralPath $hashManifest -Encoding utf8
@@ -170,6 +190,7 @@ jobs:
           "Verified the exact installer and its PE payload: $installer."
           "Recorded separate pre-bundle, NSIS payload, and installer SHA-256 values in $hashManifest."
           "installer=$installer" >> $env:GITHUB_OUTPUT
+          "signature=$updaterSignature" >> $env:GITHUB_OUTPUT
           "manifest=$hashManifest" >> $env:GITHUB_OUTPUT
 
       - name: Verify current-user install and uninstall lifecycle
@@ -270,12 +291,13 @@ jobs:
           }
           "Verified current-user install identity and complete uninstall cleanup for Satori."
 
-      - name: Upload unsigned NSIS package
+      - name: Upload unsigned NSIS package and updater signature
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: satori-windows-${{ matrix.name }}-nsis
           path: |
             ${{ steps.verify.outputs.installer }}
+            ${{ steps.verify.outputs.signature }}
             ${{ steps.verify.outputs.manifest }}
           if-no-files-found: error
           retention-days: 14

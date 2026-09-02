@@ -1,0 +1,141 @@
+name: Publish signed updater release
+
+"on":
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing draft Release tag to verify and publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: updater-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  verify-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      commit: ${{ steps.version.outputs.commit }}
+      pub_date: ${{ steps.version.outputs.pub_date }}
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact main source and version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          test "$RELEASE_TAG" = "v$version"
+          config_version=$(node -p 'JSON.parse(require("fs").readFileSync("src-tauri/tauri.conf.json", "utf8")).version')
+          package_version=$(node -p 'require("./package.json").version')
+          cargo_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' src-tauri/Cargo.toml | head -1)
+          test "$version" = "$config_version"
+          test "$version" = "$package_version"
+          test "$version" = "$cargo_version"
+          git fetch --no-tags origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          release=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName)
+          test "$(jq -r .isDraft <<<"$release")" = "true"
+          test "$(jq -r .tagName <<<"$release")" = "$RELEASE_TAG"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "pub_date=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+
+  windows-packages:
+    needs: verify-source
+    uses: ./.github/workflows/windows.yml
+    secrets: inherit
+
+  publish:
+    needs: [verify-source, windows-packages]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.verify-source.outputs.commit }}
+          persist-credentials: false
+
+      - name: Download verified Windows packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: satori-windows-*-nsis
+          path: release-assets
+          merge-multiple: true
+
+      - name: Download prebuilt exact-source macOS package from draft Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir release-assets \
+            --pattern 'Satori.app.tar.gz' \
+            --pattern 'Satori.app.tar.gz.sig' \
+            --pattern 'Satori-v*-macos-arm64.zip' \
+            --pattern 'Satori-v*-macos-arm64-SHA256SUMS.txt'
+
+      - name: Generate and verify updater manifest and checksums
+        env:
+          VERSION: ${{ needs.verify-source.outputs.version }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          PUB_DATE: ${{ needs.verify-source.outputs.pub_date }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG"
+          node scripts/updater-release.mjs \
+            --dir release-assets \
+            --version "$VERSION" \
+            --base-url "$base_url" \
+            --notes "Satori $VERSION introduces signed in-app updates. Older installations must install this bootstrap release manually once." \
+            --pub-date "$PUB_DATE"
+
+      - name: Cryptographically verify every updater signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes minisign
+          verification_dir="$RUNNER_TEMP/satori-updater-verification"
+          mkdir -p "$verification_dir"
+          node -p 'JSON.parse(require("fs").readFileSync("src-tauri/tauri.conf.json", "utf8")).plugins.updater.pubkey' \
+            | base64 --decode > "$verification_dir/updater.pub"
+          while IFS= read -r signature_path; do
+            asset_path="${signature_path%.sig}"
+            decoded_signature="$verification_dir/$(basename "$signature_path").minisig"
+            base64 --decode < "$signature_path" > "$decoded_signature"
+            minisign -Vm "$asset_path" -p "$verification_dir/updater.pub" -x "$decoded_signature"
+          done < <(find release-assets -maxdepth 1 -type f -name '*.sig' -print | sort)
+          test "$(find release-assets -maxdepth 1 -type f -name '*.sig' | wc -l)" -eq 3
+
+      - name: Publish verified assets and Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t assets < <(find release-assets -maxdepth 1 -type f -print | sort)
+          test "${#assets[@]}" -eq 11
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
