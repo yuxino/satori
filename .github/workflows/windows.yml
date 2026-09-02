@@ -96,7 +96,6 @@ jobs:
           --target ${{ matrix.target }}
           --bundles nsis
           --ci
-          --no-sign
           -- --locked
 
       - name: Verify executable architecture and installer
