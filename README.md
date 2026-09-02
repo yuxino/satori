@@ -18,16 +18,19 @@ A local-first PDF learning app for macOS and Windows 11. Keep the page in view a
 - Read in single- or two-page view with outline navigation and zoom; each book reopens where you left it.
 - Keep reading activity and Q&A organized per book, with links back to the source page.
 - Choose among Model Studio, OpenAI, and custom OpenAI-compatible visual models.
+- Check for a signed update in Settings, review its notes, then explicitly download, verify, and install it.
 - Read and manage the library without configuring AI.
 
 ## Download
 
-Satori supports Windows 11 on x64 and ARM64, and macOS 14+ on Apple silicon. Download Satori 3.4.3 from [GitHub Releases](https://github.com/yuxino/satori/releases/latest).
+Satori supports Windows 11 on x64 and ARM64, and macOS 14+ on Apple silicon. Download Satori 3.4.4 from [GitHub Releases](https://github.com/yuxino/satori/releases/latest).
 
 - **Windows:** choose the NSIS installer matching your architecture. It installs for the current user. The installers are not Authenticode-signed, so Windows shows an unknown publisher warning. Interactive validation is architecture-specific; x64-on-x64 manual acceptance is not yet claimed.
 - **macOS:** unzip the download and move Satori to Applications. The build has a local signature but is not notarized; on first launch, Control-click Satori and choose **Open**.
 
-Updates are downloaded and installed manually. The interface is currently available in Simplified Chinese only. Reading works without AI; questions and scanned-outline recognition require an image-capable OpenAI-compatible model.
+Version 3.4.4 is the updater bootstrap: anyone using 3.4.3 or earlier must install it manually once from GitHub Releases. From 3.4.4 onward, Settings can download and verify later signed releases before an explicit install. Satori never downloads or installs an update in the background. On macOS, the learner clicks **Restart and finish** after installation; on Windows, starting installation closes Satori and hands control to the visible system installer.
+
+The interface is currently available in Simplified Chinese only. Reading works without AI; questions and scanned-outline recognition require an image-capable OpenAI-compatible model.
 
 ## Development
 
@@ -43,6 +46,6 @@ npm run tauri -- dev
 
 ## Privacy
 
-PDFs remain at their original paths. Library data and Q&A stay in Application Support on macOS or application LocalAppData on Windows; API keys stay in macOS Keychain or Windows Credential Manager. Page images are sent to the selected AI service only after an explicit question, explanation request, or confirmed outline scan. Opening a book does not contact an AI service. The launch-time update check sends only the app version to GitHub Releases, never book content, history, AI profiles, or keys.
+PDFs remain at their original paths. Library data and Q&A stay in Application Support on macOS or application LocalAppData on Windows; API keys stay in macOS Keychain or Windows Credential Manager. Page images are sent to the selected AI service only after an explicit question, explanation request, or confirmed outline scan. Opening a book does not contact an AI service. The launch-time update check fetches only the static updater manifest from GitHub Releases; it never sends book content, history, AI profiles, or keys.
 
 [MIT](LICENSE) © 2026 yuxino
