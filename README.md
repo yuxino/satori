@@ -19,7 +19,7 @@ A local-first PDF learning app for macOS and Windows 11. Keep the page in view a
 
 [Full video (MP4)](docs/demos/demo.mp4) · [About this demo](docs/demos/README.md)
 
-PDF page navigation, zoom, spreads and the outline. Recorded from the actual frontend with sample data. Uses an original sample PDF; no AI service is called.
+Pages, zoom, single/spread layouts, chapter jumps, question composition and the history panel. **10x actions with 0.8-second result holds.** Actual frontend with sample data. Uses an original sample PDF; question composition only, with no live AI request or fabricated answer.
 <!-- /project-demo-v1 -->
 
 ## Features
