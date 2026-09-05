@@ -12,6 +12,16 @@
 
 一个面向 macOS 和 Windows 11 的本地优先 PDF 学习应用。书页始终留在视野中央，需要帮助时再问当前页或框选区域。
 
+<!-- project-demo-v1 -->
+## 演示
+
+[![satori — 演示](docs/demos/preview.gif)](docs/demos/demo.mp4)
+
+[完整视频（MP4）](docs/demos/demo.mp4) · [演示说明](docs/demos/README.md)
+
+PDF 翻页、缩放、双页阅读与目录。 真实前端录制，使用示例数据。使用原创样例 PDF，不调用 AI。
+<!-- /project-demo-v1 -->
+
 ## 功能
 
 - 询问当前页，或在段落、图和代码上框选区域，让模型结合画面解释；支持文字版、扫描版和混合 PDF。

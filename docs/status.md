@@ -70,3 +70,8 @@ Satori is a local-first macOS and Windows PDF learning workspace. Reading stays 
 1. Exercise the complete updater flow from an isolated older updater-capable build to the exact 3.4.4 bytes on macOS and both Windows architectures without touching a real bookshelf or credentials; separately complete x64 manual interaction acceptance on x64 Windows 11.
 2. Add an explicit “relink moved PDF” flow that preserves the existing book ID and learning history; missing stored paths currently fail closed and require the learner to choose the file again.
 3. Extend AI acceptance beyond the one configured provider and synthetic PDF used here to Model Studio, OpenAI, and a local OpenAI-compatible visual service with representative learning material, then address extreme-page thumbnail and initial page-sizing memory costs.
+
+
+### 2026-09-06 · README 界面演示
+
+新增真实前端操作录屏、GIF 预览和来源记录，使用原创三页 PDF 展示翻页、缩放、双页与目录。录制环境替代了原生 API 边界，不调用 AI，也不代表原生系统端到端验收。应用代码、模型配置与发布版本均未改变。
