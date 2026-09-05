@@ -1,0 +1,50 @@
+{
+  "project": "satori",
+  "source_commit": "f31740ce5f7f722f1adffc52ce12d08c3e05b7f6",
+  "capture": "Unmodified production frontend in Chrome, documentation-only native-boundary fixtures",
+  "limitations": "PDF reading UI · original local sample · no AI answers",
+  "steps": [
+    {
+      "zh": "带一本示例 PDF 进来。",
+      "en": "Open an original three-page sample PDF."
+    },
+    {
+      "zh": "翻一页，放大看看细节。",
+      "en": "Turn a page and zoom in on the details."
+    },
+    {
+      "zh": "单页、双页，随阅读习惯切换。",
+      "en": "Switch between single-page and spread layouts."
+    },
+    {
+      "zh": "打开目录，回到想读的章节。",
+      "en": "Use the embedded outline to find your place."
+    }
+  ],
+  "browser": "152.0.7977.64",
+  "duration": 38.32,
+  "sha256": "48a146323c37a9d5390a7e2d506af4f16d56ba26e95d0f7dcaba1c64593a1ef0",
+  "recording_tool_sha256": "4167ddf8ad21f68b88e09fccfe56ce753ba4275b9c129b4cc3e2c5c7bbbee1f0",
+  "fixture_sha256": {
+    "page-1.png": "4d3c3aa80d2b0cd34bb8bcb6082273a10359d4fa6db1fbda0c891b9d9ab99518",
+    "page-2.png": "39aa63b25ac99652921004658f87bfc960cd6e13f0873a2141549879b85a72a5",
+    "page-3.png": "c0a63e7280fdcde7a64e7ea24b645853851a863c01d3af40db8780b8250c75d1",
+    "sample.pdf": "3780d846aa7ca61b185d52fa78ecc9b8d9d82555c7a7a77e4b7eefc45bf66444",
+    "source.png": "97d3fefc662fe60947efd6e9870b16164f2fb72fb6aac8883a552c8f0bb41572"
+  },
+  "media": {
+    "demo.mp4": {
+      "bytes": 538551,
+      "sha256": "48a146323c37a9d5390a7e2d506af4f16d56ba26e95d0f7dcaba1c64593a1ef0"
+    },
+    "poster.png": {
+      "bytes": 91479,
+      "sha256": "1449ac83fb28eb0ce60765431b918d27c760f1ad6a19d709e774b4f06393aa53"
+    },
+    "preview.gif": {
+      "bytes": 1947421,
+      "sha256": "7989cd6c00fe175fa4be0e8f3d0c5174b16f56ef82a4b0d4a3872733dcc74cfd"
+    }
+  },
+  "disclosure": "Real frontend interaction recording with synthetic local data and mocked native boundaries. Not native end-to-end validation. No personal data, external content, provider requests, audio capture or task execution."
+}

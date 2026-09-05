@@ -12,6 +12,16 @@
 
 A local-first PDF learning app for macOS and Windows 11. Keep the page in view and ask about the current page or a selected region only when you need help.
 
+<!-- project-demo-v1 -->
+## Demo
+
+[![satori — Demo](docs/demos/preview.gif)](docs/demos/demo.mp4)
+
+[Full video (MP4)](docs/demos/demo.mp4) · [About this demo](docs/demos/README.md)
+
+PDF page navigation, zoom, spreads and the outline. Recorded from the actual frontend with sample data. Uses an original sample PDF; no AI service is called.
+<!-- /project-demo-v1 -->
+
 ## Features
 
 - Ask about the current page or drag over a paragraph, figure, or code block for a visual explanation. Text, scanned, and mixed PDFs are supported.
