@@ -22,8 +22,8 @@
     }
   ],
   "browser": "152.0.7977.64",
-  "duration": 38.32,
-  "sha256": "48a146323c37a9d5390a7e2d506af4f16d56ba26e95d0f7dcaba1c64593a1ef0",
+  "duration": 19.16,
+  "sha256": "a9bf29c4fbd37fe642956c5c38bd3ec9133f85d6bf856a5aec44ad49e4167d5d",
   "recording_tool_sha256": "4167ddf8ad21f68b88e09fccfe56ce753ba4275b9c129b4cc3e2c5c7bbbee1f0",
   "fixture_sha256": {
     "page-1.png": "4d3c3aa80d2b0cd34bb8bcb6082273a10359d4fa6db1fbda0c891b9d9ab99518",
@@ -34,17 +34,28 @@
   },
   "media": {
     "demo.mp4": {
-      "bytes": 538551,
-      "sha256": "48a146323c37a9d5390a7e2d506af4f16d56ba26e95d0f7dcaba1c64593a1ef0"
+      "bytes": 430380,
+      "sha256": "a9bf29c4fbd37fe642956c5c38bd3ec9133f85d6bf856a5aec44ad49e4167d5d"
     },
     "poster.png": {
       "bytes": 91479,
       "sha256": "1449ac83fb28eb0ce60765431b918d27c760f1ad6a19d709e774b4f06393aa53"
     },
     "preview.gif": {
-      "bytes": 1947421,
-      "sha256": "7989cd6c00fe175fa4be0e8f3d0c5174b16f56ef82a4b0d4a3872733dcc74cfd"
+      "bytes": 1998454,
+      "sha256": "b6b5035dae362eaffed25ea56e26e8992efbb380c4af7099eb3d01dfce95a2fb"
     }
   },
-  "disclosure": "Real frontend interaction recording with synthetic local data and mocked native boundaries. Not native end-to-end validation. No personal data, external content, provider requests, audio capture or task execution."
+  "disclosure": "Real frontend interaction recording with synthetic local data and mocked native boundaries. Not native end-to-end validation. No personal data, external content, provider requests, audio capture or task execution.",
+  "retiming": {
+    "speed": 2.0,
+    "source_duration": 38.32,
+    "source_video_sha256": "48a146323c37a9d5390a7e2d506af4f16d56ba26e95d0f7dcaba1c64593a1ef0",
+    "source_preview_sha256": "7989cd6c00fe175fa4be0e8f3d0c5174b16f56ef82a4b0d4a3872733dcc74cfd",
+    "tool_sha256": "d761d3bdbb5c3903f6654e3d9bc109d8baf026cfe5b899199274e5e1e5cdfd9f",
+    "video_fps": 25,
+    "gif_fps": 10,
+    "method": "Uniform timestamp acceleration; no scene removal, cropping, new UI or audio.",
+    "disclosures_preserved": true
+  }
 }
