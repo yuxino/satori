@@ -1,5 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBuildCommand": "node src-tauri/installer-theme/build.mjs && npm run build"
+  },
   "bundle": {
     "targets": ["nsis"],
     "icon": ["icons/icon.ico"],
@@ -7,7 +10,12 @@
       "nsis": {
         "installMode": "currentUser",
         "installerIcon": "icons/icon.ico",
-        "uninstallerIcon": "icons/icon.ico"
+        "uninstallerIcon": "icons/icon.ico",
+        "sidebarImage": "installer-theme/generated/sidebar.bmp",
+        "headerImage": "installer-theme/generated/header.bmp",
+        "installerHooks": "installer-theme/theme.nsh",
+        "languages": ["English", "SimpChinese", "Japanese"],
+        "displayLanguageSelector": false
       }
     }
   }

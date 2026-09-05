@@ -1,0 +1,29 @@
+name: Windows installer validation
+
+on:
+  pull_request:
+    paths:
+      - 'src-tauri/installer-theme/**'
+      - 'src-tauri/tauri.windows.conf.json'
+      - '.github/workflows/windows.yml'
+      - '.github/workflows/windows-installer-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src-tauri/installer-theme/**'
+      - 'src-tauri/tauri.windows.conf.json'
+      - '.github/workflows/windows.yml'
+      - '.github/workflows/windows-installer-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    # Reuse the real x64/ARM64 packaging, payload verification and
+    # current-user install/uninstall checks. Never publishes a release.
+    uses: ./.github/workflows/windows.yml
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
