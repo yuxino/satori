@@ -1,62 +1,99 @@
 {
   "project": "satori",
+  "success": true,
   "source_commit": "f31740ce5f7f722f1adffc52ce12d08c3e05b7f6",
-  "capture": "Actual unmodified frontend; live Alibaba Cloud service responses; native integration replaced only in the documentation harness. Not an installed desktop end-to-end test.",
-  "live_provider": true,
-  "api_calls": [
+  "dimensions": [
+    1920,
+    1080
+  ],
+  "render_scale": 1.5,
+  "single_take": true,
+  "scene_cuts": 0,
+  "added_holds": 0,
+  "speed_factor": 10,
+  "steps": [
     {
-      "model": "qwen3-vl-plus",
-      "transport": "HTTPS SSE",
-      "image_count": 1,
-      "chunks": 77,
-      "http_status": 200,
-      "success": true,
-      "response_sha256": "e307ee2bfdcd0ee79f3eb813fbc10e154132e62d10dab5387dc8e82dd39893c4"
+      "name": "Open PDF",
+      "time": 1.1370405569999988
     },
     {
-      "model": "qwen3-vl-plus",
-      "transport": "HTTPS SSE",
-      "image_count": 1,
-      "chunks": 62,
-      "http_status": 200,
-      "success": true,
-      "response_sha256": "841d650906e718545dcf93d9740e5aabec2005bfe097e11b84ef27548c22df54"
-    }
-  ],
-  "segments": [
-    {
-      "kind": "reading_navigation_excerpt",
-      "seconds": 10.8,
-      "action_speed": 10,
-      "result_hold": 0.8
+      "name": "Page navigation",
+      "time": 6.986618769999993
     },
     {
-      "kind": "live_question_and_followup",
-      "seconds": 10.866667,
-      "speed": 3
+      "name": "Zoom",
+      "time": 12.898360725000003
+    },
+    {
+      "name": "Spread reading",
+      "time": 19.651964827
+    },
+    {
+      "name": "Outline",
+      "time": 26.363436737
+    },
+    {
+      "name": "Return to chapter",
+      "time": 32.632261783000004
+    },
+    {
+      "name": "Answer appears",
+      "time": 43.76737450500001
+    },
+    {
+      "name": "Follow up",
+      "time": 62.147200866999995
+    },
+    {
+      "name": "Conversation history",
+      "time": 75.30875634700001
+    },
+    {
+      "name": "Continue reading",
+      "time": 81.162941534
     }
   ],
-  "duration": 21.666667,
-  "sha256": "1a28b06f755be2e93731ceee4c1e0bc4ff376b208a9b6528a6b8b7d3da290f8e",
-  "previous_media_sha256": "204e8ccd0aec6fa3f7c8e5f1a166480acd2d3f3ca92968bc19d2d3d34d95e526",
-  "live_media_sha256": "2e873e0f6997d4131c978a0722c77b7a6dd286408677d5ecc49baaed042b01d3",
-  "sources": {
-    "existing_source": "f31740ce5f7f722f1adffc52ce12d08c3e05b7f6",
-    "live_run": 34006440880
+  "api_calls": 0,
+  "live_provider": false,
+  "response_replay": {
+    "run": 34006440880,
+    "screens": [
+      "satori/scene-02.png",
+      "satori/scene-03.png"
+    ],
+    "model": "qwen3-vl-plus"
   },
-  "disclosure": "Original synthetic speech / original PDF only. Provider responses are real, not fabricated. Credentials stayed in process memory and are not included in the media, application settings, logs or this documentation. Playback is edited; it is not a latency benchmark.",
+  "capture": "Unmodified production frontend in an isolated browser. Native boundaries are documentation fixtures; prior verified response text is replayed offline. No credentials are used.",
+  "capture_timing": {
+    "master_frames": 1036,
+    "master_fps": 12,
+    "master_seconds": 86.33333333333333,
+    "wall_seconds": 86.45960655100001
+  },
+  "javascript_errors": [],
+  "sha256": "499da9afe14c34dd34611804cf1a3293c4ed71f47c0459cf41088fe3b278b3d1",
+  "capture_run": 34012662273,
+  "capture_artifact": 9982963504,
+  "duration": 8.633333,
+  "previous_media_sha256": "1a28b06f755be2e93731ceee4c1e0bc4ff376b208a9b6528a6b8b7d3da290f8e",
+  "preview_dimensions": [
+    1440,
+    810
+  ],
+  "preview_fps": 12,
+  "disclosure": "Actual frontend with an original sample PDF and offline replay of previously verified answer text. No new provider calls or native end-to-end acceptance is claimed.",
   "media": {
     "demo.mp4": {
-      "bytes": 834925,
-      "sha256": "1a28b06f755be2e93731ceee4c1e0bc4ff376b208a9b6528a6b8b7d3da290f8e"
+      "bytes": 511848,
+      "sha256": "499da9afe14c34dd34611804cf1a3293c4ed71f47c0459cf41088fe3b278b3d1"
     },
     "preview.gif": {
-      "bytes": 3267181,
-      "sha256": "c9d5c83ba859c24d4cd2d689602d38cac295a3eaf2500e120485c3fc49d80556"
+      "bytes": 1985849,
+      "sha256": "91938e3c6cc72f7cea42d735ed6dcfe45dc97eabf67f1725137eb05fe42d1694"
     },
     "poster.png": {
-      "bytes": 131117,
-      "sha256": "1763337af6538514899b178fdf1bda1f9b765c2c8e25903e4bea6f8c0694b567"
+      "bytes": 188487,
+      "sha256": "6699d33831ac134329957717fdb916034dbedeb9a26685065367f1cfff9fc313"
     }
   }
 }
