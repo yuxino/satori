@@ -1,124 +1,62 @@
 {
   "project": "satori",
   "source_commit": "f31740ce5f7f722f1adffc52ce12d08c3e05b7f6",
-  "capture": "Unmodified production frontend in Chrome with isolated local sample data and mocked native APIs",
-  "limitations": "PDF reading UI · original local sample · no AI answers",
-  "browser": "152.0.7977.64",
-  "speed_factor": 10,
-  "result_hold_seconds": 0.8,
-  "duration": 19.2,
-  "source_duration": 103.6362,
-  "sha256": "204e8ccd0aec6fa3f7c8e5f1a166480acd2d3f3ca92968bc19d2d3d34d95e526",
-  "scenes": [
+  "capture": "Actual unmodified frontend; live Alibaba Cloud service responses; native integration replaced only in the documentation harness. Not an installed desktop end-to-end test.",
+  "live_provider": true,
+  "api_calls": [
     {
-      "zh": "打开 PDF，直接开始阅读",
-      "en": "01 / Open the original sample PDF",
-      "start": 3.5129000000000232,
-      "end": 11.367600000000007,
-      "poster": "01.png"
+      "model": "qwen3-vl-plus",
+      "transport": "HTTPS SSE",
+      "image_count": 1,
+      "chunks": 77,
+      "http_status": 200,
+      "success": true,
+      "response_sha256": "e307ee2bfdcd0ee79f3eb813fbc10e154132e62d10dab5387dc8e82dd39893c4"
     },
     {
-      "zh": "下一页，阅读位置自然跟随",
-      "en": "02 / Page navigation",
-      "start": 11.367600000000007,
-      "end": 18.673900000000025,
-      "poster": "02.png"
-    },
-    {
-      "zh": "放大页面，看清图文细节",
-      "en": "03 / Zoom in",
-      "start": 18.673900000000025,
-      "end": 30.702100000000005,
-      "poster": "03.png"
-    },
-    {
-      "zh": "一键恢复适合窗口",
-      "en": "04 / Zoom out and fit to window",
-      "start": 30.702100000000005,
-      "end": 49.366600000000005,
-      "poster": "04.png"
-    },
-    {
-      "zh": "双页并排，像翻开一本书",
-      "en": "05 / Two-page spread",
-      "start": 49.366600000000005,
-      "end": 56.51570000000001,
-      "poster": "05.png"
-    },
-    {
-      "zh": "打开目录，查看章节结构",
-      "en": "06 / Open the embedded outline",
-      "start": 56.51570000000001,
-      "end": 67.5087,
-      "poster": "06.png"
-    },
-    {
-      "zh": "从目录直接跳到目标页",
-      "en": "07 / Jump to a chapter",
-      "start": 67.5087,
-      "end": 75.42090000000002,
-      "poster": "07.png"
-    },
-    {
-      "zh": "问书面板：先组织自己的问题",
-      "en": "08 / Open the question composer",
-      "start": 75.42090000000002,
-      "end": 83.334,
-      "poster": "08.png"
-    },
-    {
-      "zh": "输入问题；这段演示不伪造 AI 回答",
-      "en": "09 / Compose a question, without a fabricated answer",
-      "start": 83.334,
-      "end": 92.29220000000001,
-      "poster": "09.png"
-    },
-    {
-      "zh": "问过的内容，会集中在回看里",
-      "en": "10 / Inspect the question-history view",
-      "start": 92.29220000000001,
-      "end": 98.84620000000001,
-      "poster": "10.png"
-    },
-    {
-      "zh": "收起面板，继续读这一本",
-      "en": "11 / Return to reading",
-      "start": 98.84620000000001,
-      "end": 107.14910000000003,
-      "poster": "11.png"
+      "model": "qwen3-vl-plus",
+      "transport": "HTTPS SSE",
+      "image_count": 1,
+      "chunks": 62,
+      "http_status": 200,
+      "success": true,
+      "response_sha256": "841d650906e718545dcf93d9740e5aabec2005bfe097e11b84ef27548c22df54"
     }
   ],
-  "actions": [
-    "打开 PDF…",
-    "下一页",
-    "放大",
-    "放大",
-    "缩小",
-    "回到适合窗口",
-    "切换为双页（书本展开，两页并排）",
-    "切换为单页",
-    "章节跳转",
-    "跳到第 3 页",
-    "打开问书面板",
-    "继续问这本书",
-    "Type: 请解释这一页的核心观点。",
-    "查看这本书问过的问题",
-    "收起问书面板"
+  "segments": [
+    {
+      "kind": "reading_navigation_excerpt",
+      "seconds": 10.8,
+      "action_speed": 10,
+      "result_hold": 0.8
+    },
+    {
+      "kind": "live_question_and_followup",
+      "seconds": 10.866667,
+      "speed": 3
+    }
   ],
-  "disclosure": "New, expanded frontend interaction recording. Every action interval is retimed at 10x; each result receives a 0.8-second hold. Native API boundaries use original sample data. No live AI request, system capture, task execution or native filesystem acceptance is claimed.",
-  "recording_tool_sha256": "9a88822bb8cffe05bc0c48e805c9d0b843e9b7b8a5bb2e68c64d4e37c108005e",
+  "duration": 21.666667,
+  "sha256": "1a28b06f755be2e93731ceee4c1e0bc4ff376b208a9b6528a6b8b7d3da290f8e",
+  "previous_media_sha256": "204e8ccd0aec6fa3f7c8e5f1a166480acd2d3f3ca92968bc19d2d3d34d95e526",
+  "live_media_sha256": "2e873e0f6997d4131c978a0722c77b7a6dd286408677d5ecc49baaed042b01d3",
+  "sources": {
+    "existing_source": "f31740ce5f7f722f1adffc52ce12d08c3e05b7f6",
+    "live_run": 34006440880
+  },
+  "disclosure": "Original synthetic speech / original PDF only. Provider responses are real, not fabricated. Credentials stayed in process memory and are not included in the media, application settings, logs or this documentation. Playback is edited; it is not a latency benchmark.",
   "media": {
     "demo.mp4": {
-      "bytes": 567958,
-      "sha256": "204e8ccd0aec6fa3f7c8e5f1a166480acd2d3f3ca92968bc19d2d3d34d95e526"
+      "bytes": 834925,
+      "sha256": "1a28b06f755be2e93731ceee4c1e0bc4ff376b208a9b6528a6b8b7d3da290f8e"
     },
     "preview.gif": {
-      "bytes": 2374905,
-      "sha256": "3175177a2fa3163c5736db52eb7972716ed8b24bf71c94ba25cef92057ec2cb4"
+      "bytes": 3267181,
+      "sha256": "c9d5c83ba859c24d4cd2d689602d38cac295a3eaf2500e120485c3fc49d80556"
     },
     "poster.png": {
-      "bytes": 81382,
-      "sha256": "500311eef19bbf6702c29c2fad522a782529d14f4db45fa82717b1b9a10d38f3"
+      "bytes": 131117,
+      "sha256": "1763337af6538514899b178fdf1bda1f9b765c2c8e25903e4bea6f8c0694b567"
     }
   }
 }
