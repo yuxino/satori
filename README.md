@@ -19,7 +19,7 @@ A local-first PDF learning app for macOS and Windows 11. Keep the page in view a
 
 [Full video (MP4)](docs/demos/demo.mp4) · [About this demo](docs/demos/README.md)
 
-Pages, zoom, single/spread layouts, chapter jumps, question composition and the history panel. **10x actions with 0.8-second result holds.** Actual frontend with sample data. Uses an original sample PDF; question composition only, with no live AI request or fabricated answer.
+Turn pages, zoom and browse the outline, then ask about the page, follow up and revisit the conversation. An original sample PDF with **real AI answers**.
 <!-- /project-demo-v1 -->
 
 ## Features
