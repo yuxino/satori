@@ -15,11 +15,11 @@ macOS と Windows 11 向けのローカルファーストな PDF 学習アプリ
 <!-- project-demo-v1 -->
 ## デモ
 
-[![satori — デモ](docs/demos/preview.gif)](docs/demos/demo.mp4)
+[![Satori](docs/demos/preview.gif)](docs/demos/demo.mp4)
 
-[動画（MP4）](docs/demos/demo.mp4) · [デモについて](docs/demos/README.md)
+[動画を見る](docs/demos/demo.mp4)
 
-ページ送り・拡大・目次ジャンプに加え、書籍への質問、追加の質問、回答の振り返りを紹介。オリジナルのサンプル PDF と**実際の AI の回答**を使用しています。
+PDF を読みながら AI に質問し、追加の質問や回答の振り返りができます。
 <!-- /project-demo-v1 -->
 
 ## 機能
