@@ -15,11 +15,11 @@ A local-first PDF learning app for macOS and Windows 11. Keep the page in view a
 <!-- project-demo-v1 -->
 ## Demo
 
-[![satori — Demo](docs/demos/preview.gif)](docs/demos/demo.mp4)
+[![Satori](docs/demos/preview.gif)](docs/demos/demo.mp4)
 
-[Full video (MP4)](docs/demos/demo.mp4) · [About this demo](docs/demos/README.md)
+[Watch video](docs/demos/demo.mp4)
 
-Turn pages, zoom and browse the outline, then ask about the page, follow up and revisit the conversation. An original sample PDF with **real AI answers**.
+Read a PDF, ask a question, follow up, and revisit the conversation.
 <!-- /project-demo-v1 -->
 
 ## Features

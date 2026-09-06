@@ -15,11 +15,11 @@
 <!-- project-demo-v1 -->
 ## 演示
 
-[![satori — 演示](docs/demos/preview.gif)](docs/demos/demo.mp4)
+[![Satori](docs/demos/preview.gif)](docs/demos/demo.mp4)
 
-[完整视频（MP4）](docs/demos/demo.mp4) · [演示说明](docs/demos/README.md)
+[观看视频](docs/demos/demo.mp4)
 
-翻页、缩放、目录跳转，再对着书页提问、继续追问和回看回答。原创样例 PDF，**真实 AI 回答**。
+阅读 PDF，向 AI 提问、继续追问，再回看问答。
 <!-- /project-demo-v1 -->
 
 ## 功能
