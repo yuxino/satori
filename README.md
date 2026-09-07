@@ -5,11 +5,10 @@
   <p>Read PDF textbooks. Ask only when something does not click.</p>
   <p>
     <a href="README_ZH.md">简体中文</a>
-    · <a href="README_JA.md">日本語</a>
   </p>
 </div>
 
-`Satori` comes from the Japanese word 悟り (satori, "enlightenment").
+`Satori` means “enlightenment” in Japanese.
 
 A local-first PDF learning app for macOS and Windows 11. Keep the page in view and ask about the current page or a selected region only when you need help.
 

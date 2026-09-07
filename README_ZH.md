@@ -5,11 +5,10 @@
   <p>读 PDF 教材，卡住时再问一句。</p>
   <p>
     <a href="README.md">English</a>
-    · <a href="README_JA.md">日本語</a>
   </p>
 </div>
 
-`Satori` 来自日语「悟り」——理解、看清事物本质的瞬间。
+`Satori` 在日语中指理解、看清事物本质的瞬间。
 
 一个面向 macOS 和 Windows 11 的本地优先 PDF 学习应用。书页始终留在视野中央，需要帮助时再问当前页或框选区域。
 
