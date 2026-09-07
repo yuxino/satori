@@ -1,6 +1,7 @@
 <div align="center">
   <img src="src-tauri/icons/128x128@2x.png" width="112" alt="satori">
   <h1>satori</h1>
+  <p><a href="https://satori.yuxino.cn">公式サイト · satori.yuxino.cn</a></p>
   <p>PDF の教科書を読み、分からないときだけ質問する。</p>
   <p>
     <a href="README.md">English</a>

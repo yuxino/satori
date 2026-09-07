@@ -1,6 +1,7 @@
 <div align="center">
   <img src="src-tauri/icons/128x128@2x.png" width="112" alt="satori">
   <h1>satori</h1>
+  <p><a href="https://satori.yuxino.cn">Website · satori.yuxino.cn</a></p>
   <p>Read PDF textbooks. Ask only when something does not click.</p>
   <p>
     <a href="README_ZH.md">简体中文</a>
