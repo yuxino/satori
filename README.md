@@ -1,8 +1,8 @@
 <div align="center">
-  <img src="src-tauri/icons/128x128@2x.png" width="112" alt="satori">
-  <h1>satori</h1>
+  <img src="src-tauri/icons/128x128@2x.png" width="128" height="128" alt="Satori cat-ear-hood character">
+  <h1>Satori</h1>
   <p><a href="https://satori.yuxino.cn">Website · satori.yuxino.cn</a></p>
-  <p>Read PDF textbooks. Ask only when something does not click.</p>
+  <p>Read a PDF. Select a passage, figure, or code block and ask about it.</p>
   <p>
     <a href="README_ZH.md">简体中文</a>
   </p>
@@ -10,7 +10,7 @@
 
 `Satori` means “enlightenment” in Japanese.
 
-A local-first PDF learning app for macOS and Windows 11. Keep the page in view and ask about the current page or a selected region only when you need help.
+A local-first PDF learning app for macOS and Windows 11. Ask AI about the current page or a selected region, then compare the explanation with the source. Your reading progress and Q&A are saved locally for each book.
 
 <!-- project-demo-v1 -->
 ## Demo
@@ -27,7 +27,7 @@ A local-first PDF learning app for macOS and Windows 11. Keep the page in view a
 - Ask about the current page or drag over a paragraph, figure, or code block for a visual explanation. Text, scanned, and mixed PDFs are supported.
 - Read in single- or two-page view with outline navigation and zoom; each book reopens where you left it.
 - Keep reading activity and Q&A organized per book, with links back to the source page.
-- Choose among Model Studio, OpenAI, and custom OpenAI-compatible visual models.
+- Choose among Alibaba Cloud Model Studio, OpenAI, and custom OpenAI-compatible visual models.
 - Check for a signed update in Settings, review its notes, then explicitly download, verify, and install it.
 - Read and manage the library without configuring AI.
 
@@ -40,7 +40,7 @@ Satori supports Windows 11 on x64 and ARM64, and macOS 14+ on Apple silicon. Dow
 
 Version 3.4.4 introduced the updater: anyone using 3.4.3 or earlier must manually install the current release once from GitHub Releases. From 3.4.4 onward, Settings can download and verify later signed releases before an explicit install. Satori never downloads or installs an update in the background. On macOS, the learner clicks **Restart and finish** after installation; on Windows, starting installation closes Satori and hands control to the visible system installer.
 
-The interface is currently available in Simplified Chinese only. Reading works without AI; questions and scanned-outline recognition require an image-capable OpenAI-compatible model.
+The interface is currently available in Simplified Chinese only. Reading works without AI; questions and scanned-outline recognition require an image-capable OpenAI-compatible model. Satori is free and open source; your chosen AI service may charge separately.
 
 ## Development
 
