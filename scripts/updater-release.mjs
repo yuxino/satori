@@ -100,6 +100,7 @@ export async function verifyReleaseDirectory(directory, version, baseUrl) {
   const manifest = JSON.parse(await readFile(join(directory, "latest.json"), "utf8"));
   validateUpdaterManifest(manifest, { version, baseUrl });
   await Promise.all([
+    verifyChecksum(directory, `Satori-v${version}-macos-arm64-SHA256SUMS.txt`, "Satori.app.tar.gz"),
     verifyChecksum(directory, `Satori-v${version}-macos-arm64-SHA256SUMS.txt`, `Satori-v${version}-macos-arm64.zip`),
     verifyChecksum(directory, `Satori_${version}_x64-SHA256SUMS.txt`, `Satori_${version}_x64-setup.exe`),
     verifyChecksum(directory, `Satori_${version}_arm64-SHA256SUMS.txt`, `Satori_${version}_arm64-setup.exe`),

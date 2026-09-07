@@ -92,12 +92,29 @@ jobs:
           set -euo pipefail
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir release-assets \
             --pattern 'Satori.app.tar.gz' \
-            --pattern 'Satori.app.tar.gz.sig' \
             --pattern 'Satori-v*-macos-arm64.zip' \
             --pattern 'Satori-v*-macos-arm64-SHA256SUMS.txt'
 
+      - name: Set up Node.js for the locked updater signer
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Install locked signing tools
+        run: npm ci
+
+      # Keep the existing updater private key on the runner. The native app
+      # was already signed locally; this signs only its updater archive.
+      - name: Sign macOS updater archive with the existing key
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri signer sign release-assets/Satori.app.tar.gz
+
       - name: Generate and verify updater manifest and checksums
         env:
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.verify-source.outputs.version }}
           RELEASE_TAG: ${{ inputs.tag }}
           PUB_DATE: ${{ needs.verify-source.outputs.pub_date }}
@@ -105,11 +122,13 @@ jobs:
         run: |
           set -euo pipefail
           base_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG"
+          notes=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+          test -n "$notes"
           node scripts/updater-release.mjs \
             --dir release-assets \
             --version "$VERSION" \
             --base-url "$base_url" \
-            --notes "Satori $VERSION introduces signed in-app updates. Older installations must install this bootstrap release manually once." \
+            --notes "$notes" \
             --pub-date "$PUB_DATE"
 
       - name: Cryptographically verify every updater signature

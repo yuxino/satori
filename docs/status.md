@@ -4,7 +4,7 @@ Updated: 2026-09-07
 
 ## Product
 
-Satori is a local-first macOS and Windows PDF learning workspace. Reading stays central: the learner opens or drags in a local book, returns to the previous page, and explicitly asks for help with the current page or a selected region. It is not a general chat or note-taking product. Version 3.4.4 is the signed-updater bootstrap release: it replaces the browser-first download handoff with an explicit in-app check, release-note review, download, framework signature verification, installation, and platform-accurate restart flow without changing reading, AI, or local data formats.
+Satori is a local-first macOS and Windows PDF learning workspace. Reading stays central: the learner opens or drags in a local book, returns to the previous page, and explicitly asks for help with the current page or a selected region. It is not a general chat or note-taking product. Version 3.4.5 fixes selected-region evidence, bounds PDF canvas allocation, releases replaced canvases, and keeps asynchronous zoom and thumbnail work tied to the correct state. It retains the signed updater introduced in 3.4.4 and does not change local learning data formats.
 
 ## Current implementation
 
@@ -24,7 +24,7 @@ Satori is a local-first macOS and Windows PDF learning workspace. Reading stays 
 
 ## Version and installation
 
-- Current source version: `3.4.4`. This bootstrap release provides macOS 14+ Apple silicon and Windows 11 x64 and ARM64 downloads plus a Tauri updater artifact/signature for each architecture and one static `latest.json`. Installations on 3.4.3 or earlier must install 3.4.4 manually once.
+- Current source version: `3.4.5`. This patch provides macOS 14+ Apple silicon and Windows 11 x64 and ARM64 downloads plus a Tauri updater artifact/signature for each architecture and one static `latest.json`. Installations on 3.4.3 or earlier must install a current version manually once.
 - The downloadable bundle has a stable local signature and hardened-runtime flag, but no Apple Team ID or notarization; Gatekeeper assessment rejects it, so the documented Control-click opening step remains required.
 - The macOS bundle declares macOS 14 as its minimum system version. Release packaging verifies the bundle signature, hardened runtime, version, archive integrity, and SHA-256 before publication.
 - The Windows workflow remains non-publishing when run alone, but the explicit updater release workflow can reuse it. Native x64 and ARM64 runners build unsigned current-user NSIS packages plus updater signatures, extract each installer, verify a unique payload and expected PE architecture, install it, check application and shortcut identity, uninstall it completely, and record separate SHA-256 manifests before publication. The publishing workflow independently verifies all three updater signatures against the embedded public key before making the Release public.
@@ -107,3 +107,8 @@ README 演示区仅保留功能介绍与视频入口，移除制作说明。应�
 ### 2026-09-07 · 常规质量 CI
 
 新增独立 `Quality checks` 工作流，在 main push、指向 main 的 PR，以及手动触发时运行。路径覆盖源码、测试、前端资源、Rust/Tauri、脚本、依赖锁文件、工具链和构建配置；先执行 `npm ci`、前端测试与 build，再执行 macOS Rust fmt、locked test、release check/Clippy 和 dev-live check。沿用 Node 22.13.0、stable Rust 与现有 Actions 提交锁定方式，使用 macOS 15 arm64 runner、2 个 Cargo jobs、40 分钟上限及按工具链/锁文件区分的缓存。工作流只读仓库，无签名私钥、打包、发布或部署步骤；现有 Windows 安装器和手动发布工作流保持不变。新增工作流已通过 YAML 与 actionlint 检查，实际运行结果记录在本次外部交付报告。
+
+
+### 2026-09-07 · 3.4.5 发布准备
+
+版本源与锁文件已同步为 3.4.5，三语下载说明保留官网和演示区，澄清旧版可直接手动安装当前版本。macOS native app 继续使用既有稳定本地签名；macOS updater archive 的签名改由显式发布工作流复用已有 GitHub Secrets 生成，仍必须通过三平台公钥验签、精确资产和 checksum 门禁后才公开 draft。更新清单使用该版实际 Release notes，macOS checksum 同时覆盖 ZIP 与 updater archive。新增 archive 篡改回归，最终公开 Release/CI/资产证据记录在外部交付报告；本轮不操作正式安装应用或用户学习数据。

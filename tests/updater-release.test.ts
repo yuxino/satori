@@ -83,6 +83,9 @@ async function createReleaseFixture(t: test.TestContext): Promise<string> {
       : `Satori_${version}_${architecture}-SHA256SUMS.txt`;
     contents.set(checksumName, `${hash}  ${asset}\n`);
   }
+  const macChecksum = `Satori-v${version}-macos-arm64-SHA256SUMS.txt`;
+  const updaterHash = createHash("sha256").update(contents.get("Satori.app.tar.gz")!).digest("hex");
+  contents.set(macChecksum, contents.get(macChecksum) + `${updaterHash}  Satori.app.tar.gz\n`);
   await Promise.all([...contents].map(([name, content]) => writeFile(join(directory, name), content, "utf8")));
   return directory;
 }
@@ -95,5 +98,11 @@ test("release directory verification accepts matching checksums", async (t) => {
 test("release directory verification rejects a changed installer", async (t) => {
   const directory = await createReleaseFixture(t);
   await writeFile(join(directory, `Satori_${version}_arm64-setup.exe`), "tampered", "utf8");
+  await assert.rejects(() => verifyReleaseDirectory(directory, version, baseUrl), /SHA-256 mismatch/);
+});
+
+test("release directory verification rejects a changed macOS updater archive", async (t) => {
+  const directory = await createReleaseFixture(t);
+  await writeFile(join(directory, "Satori.app.tar.gz"), "tampered", "utf8");
   await assert.rejects(() => verifyReleaseDirectory(directory, version, baseUrl), /SHA-256 mismatch/);
 });

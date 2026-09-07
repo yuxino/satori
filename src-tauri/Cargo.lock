@@ -3285,7 +3285,7 @@ dependencies = [
 
 [[package]]
 name = "satori"
-version = "3.4.4"
+version = "3.4.5"
 dependencies = [
  "base64 0.22.1",
  "fs2",
