@@ -102,3 +102,8 @@ README 演示区仅保留功能介绍与视频入口，移除制作说明。应�
 - 三语 README 演示区保持原资源、alt 与文案，调整为居中的预览、描述、观看链接。演示资源及来源说明未删除。
 - 原生：43 项 Rust 测试、`dev-live` check、release Clippy（warnings denied）和真实 Tauri release `.app` 构建全部通过。使用 CommandLineTools 与既有 `/Users/gavin/.cargo` 缓存，构建串行且最多 2 个 Cargo jobs。验证包为 arm64 / macOS 14+ / 3.4.4，包内文件合计 10,979,554 字节，主程序 8,927,856 字节。此次命令级 `--no-sign` 并关闭 updater artifacts，只保留链接器 ad-hoc 签名，不改变仓库发布配置，未进行安装、原生 UI、Windows 或 updater 升级验收。
 - 同锁文件同 Vite 参数下，前端总资源由 2,380,610 变为 2,381,300 字节（+690）；PDF 主 chunk 减少 772 字节，其余保护逻辑略增。没有同源原生重建前值，不声称整个安装包缩小。本次不升级依赖，不更改版本、发布流程、凭据或数据格式。
+
+
+### 2026-09-07 · 常规质量 CI
+
+新增独立 `Quality checks` 工作流，在 main push、指向 main 的 PR，以及手动触发时运行。路径覆盖源码、测试、前端资源、Rust/Tauri、脚本、依赖锁文件、工具链和构建配置；先执行 `npm ci`、前端测试与 build，再执行 macOS Rust fmt、locked test、release check/Clippy 和 dev-live check。沿用 Node 22.13.0、stable Rust 与现有 Actions 提交锁定方式，使用 macOS 15 arm64 runner、2 个 Cargo jobs、40 分钟上限及按工具链/锁文件区分的缓存。工作流只读仓库，无签名私钥、打包、发布或部署步骤；现有 Windows 安装器和手动发布工作流保持不变。新增工作流已通过 YAML 与 actionlint 检查，实际运行结果记录在本次外部交付报告。
