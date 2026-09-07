@@ -2,7 +2,7 @@
 // 放大后允许页内滚动，并支持缩放、框选区域与页码映射。
 
 import type { PDFDocument } from "./pdf";
-import { scaleWithinCanvasBudget } from "./reader-budget";
+import { releaseCanvas, scaleWithinCanvasBudget } from "./reader-budget";
 
 export interface RegionSelection {
   page: number;
@@ -346,15 +346,25 @@ export class ScrollReader {
         if (p < now - RENDER_RADIUS || p > now + RENDER_RADIUS) continue;
         const mount = this.mounted.get(p);
         if (!mount || !mount.el.isConnected) continue;
+        const layout = this.layouts[p - 1];
+        const renderScale = layout ? layout.width / layout.logicalWidth : 0;
         const canvas = await this.doc.renderPageToCanvas(p, this.canvasScale(p), signal);
         // 渲染耗时较长，期间视口可能又变了；只有页还在时才挂载。
-        if (!mount.el.isConnected) continue;
+        if (!mount.el.isConnected) {
+          releaseCanvas(canvas);
+          continue;
+        }
+        if (mount.canvas) {
+          mount.canvas.remove();
+          releaseCanvas(mount.canvas);
+        }
         canvas.style.width = "100%";
         canvas.style.height = "100%";
         mount.el.appendChild(canvas);
         mount.canvas = canvas;
-        const layout = this.layouts[p - 1];
-        mount.renderScale = layout ? layout.width / layout.logicalWidth : 0;
+        // A zoom/layout may have changed while PDF.js was rendering. Keep
+        // the scale actually requested so the queued pass can replace it.
+        mount.renderScale = renderScale;
         // 让出事件循环，滚动/交互不被长渲染阻塞。
         await new Promise((r) => setTimeout(r, 0));
       }

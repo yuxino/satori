@@ -5,6 +5,7 @@ import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 // 现代 pdfjs-dist 的 worker 通过同源 URL 加载；在 Vite 下直接 import。
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { monitorPDFDocument } from "./pdf-loading";
+import { releaseCanvas, renderPDFPage } from "./reader-budget";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -149,27 +150,7 @@ export class PDFDocument {
     signal?: AbortSignal,
   ): Promise<HTMLCanvasElement> {
     const page = await this.doc.getPage(pageNumber);
-    const viewport = page.getViewport({ scale });
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext("2d")!;
-    const renderTask = page.render({ canvas, canvasContext: ctx, viewport });
-    const onAbort = () => renderTask.cancel();
-    signal?.addEventListener("abort", onAbort, { once: true });
-    try {
-      await renderTask.promise;
-    } catch (error) {
-      if (signal?.aborted) {
-        const cancelled = new Error("已取消打开 PDF。");
-        cancelled.name = "PDFLoadCancelledError";
-        throw cancelled;
-      }
-      throw error;
-    } finally {
-      signal?.removeEventListener("abort", onAbort);
-    }
-    return canvas;
+    return (await renderPDFPage(page, scale, { signal })).canvas;
   }
 
   /// 在 canvas 上按 PDF 坐标（scale=1）画一个选中框，让视觉模型
@@ -209,22 +190,15 @@ export class PDFDocument {
     scale = 1.5,
     highlight?: { x: number; y: number; width: number; height: number },
   ): Promise<string> {
-    const canvas = await this.renderPageToCanvas(pageNumber, scale);
-    // 长边限制，避免超大图浪费 token。
-    const maxSide = 1800;
-    let pxPerPoint = scale;
-    if (canvas.width > maxSide || canvas.height > maxSide) {
-      const ratio = Math.min(maxSide / canvas.width, maxSide / canvas.height);
-      pxPerPoint *= ratio;
-      const resized = document.createElement("canvas");
-      resized.width = Math.floor(canvas.width * ratio);
-      resized.height = Math.floor(canvas.height * ratio);
-      resized.getContext("2d")!.drawImage(canvas, 0, 0, resized.width, resized.height);
-      if (highlight) this.drawHighlight(resized.getContext("2d")!, highlight, pxPerPoint);
-      return resized.toDataURL("image/jpeg", 0.82).split(",")[1];
+    const page = await this.doc.getPage(pageNumber);
+    const rendered = await renderPDFPage(page, scale, { maxSide: 1800 });
+    const { canvas } = rendered;
+    try {
+      if (highlight) this.drawHighlight(canvas.getContext("2d")!, highlight, rendered.scale);
+      return canvas.toDataURL("image/jpeg", 0.82).split(",")[1];
+    } finally {
+      releaseCanvas(canvas);
     }
-    if (highlight) this.drawHighlight(canvas.getContext("2d")!, highlight, pxPerPoint);
-    return canvas.toDataURL("image/jpeg", 0.82).split(",")[1];
   }
 
   /// 导出选中区域（PDF 坐标矩形）为 JPEG，用于「框选理解」。
@@ -234,22 +208,18 @@ export class PDFDocument {
     scale = 3,
   ): Promise<string> {
     const page = await this.doc.getPage(pageNumber);
-    const viewport = page.getViewport({ scale });
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.floor(rect.width * scale);
-    canvas.height = Math.floor(rect.height * scale);
-    const ctx = canvas.getContext("2d")!;
-    await page.render({
-      canvas,
-      canvasContext: ctx,
-      viewport,
-      transform: [scale, 0, 0, scale, -rect.x * scale, -rect.y * scale],
-    }).promise;
-    // 给裁剪图加一圈红边，模型能认出这是被选中的片段。
-    ctx.strokeStyle = "rgba(230, 60, 60, 0.95)";
-    ctx.lineWidth = Math.max(3, Math.round(8 * scale / 3));
-    ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
-    return canvas.toDataURL("image/jpeg", 0.82).split(",")[1];
+    const rendered = await renderPDFPage(page, scale, { region: rect, maxSide: 1800 });
+    const { canvas } = rendered;
+    try {
+      // 给裁剪图加一圈红边，模型能认出这是被选中的片段。
+      const ctx = canvas.getContext("2d")!;
+      ctx.strokeStyle = "rgba(230, 60, 60, 0.95)";
+      ctx.lineWidth = Math.max(3, Math.round(8 * rendered.scale / 3));
+      ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+      return canvas.toDataURL("image/jpeg", 0.82).split(",")[1];
+    } finally {
+      releaseCanvas(canvas);
+    }
   }
 
   destroy(): Promise<void> {

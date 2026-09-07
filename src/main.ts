@@ -1,5 +1,6 @@
 // Satori 3.0 主入口：一本书，旁边坐着一个老师。
 import "./styles.css";
+import { releaseCanvas } from "./reader-budget";
 import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -872,7 +873,7 @@ async function openBook(book: BookRecord) {
     bookMenuEl = null;
     thumbnailBusy = false;
     thumbnailQueued = false;
-    preheating = false;
+    preheating = null;
     preheatPaused = false;
     window.clearTimeout(thumbVirtualTimer);
     readerSurface.replaceChildren();
@@ -2684,14 +2685,14 @@ async function renderAllThumbnails() {
   void preheatThumbCache();
 }
 
-let preheating = false;
+let preheating: PDFDocument | null = null;
 /// 目录识别期间置 true：预热循环暂停，把 PDF.js worker 让给目录页渲染。
 let preheatPaused = false;
 
 /// 后台预热：把还没缓存的页渲染成小图存盘，但不挂 DOM（避免几千页元素占内存）。
 async function preheatThumbCache() {
-  if (preheating || !currentDoc) return;
-  preheating = true;
+  if (!currentDoc || preheating === currentDoc) return;
+  preheating = currentDoc;
   // 捕获本次预热的书身份：切书后 currentDoc 会变，检测到变化立即停止，
   // 避免用新书渲染、按旧书路径写缓存（串书错乱）。
   const doc = currentDoc;
@@ -2719,8 +2720,13 @@ async function preheatThumbCache() {
       try {
         const size = await doc.pageSize(p);
         const canvas = await doc.renderPageToCanvas(p, THUMB_WIDTH / size.width);
-        const jpeg = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
-        void saveThumb(bookPath, p, jpeg);
+        try {
+          if (currentDoc !== doc || currentBook?.path !== bookPath) return;
+          const jpeg = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+          await saveThumb(bookPath, p, jpeg);
+        } finally {
+          releaseCanvas(canvas);
+        }
       } catch {
         // 单页预热失败跳过。
       }
@@ -2728,7 +2734,7 @@ async function preheatThumbCache() {
       await new Promise((r) => setTimeout(r, 0));
     }
   } finally {
-    preheating = false;
+    if (preheating === doc) preheating = null;
   }
 }
 
@@ -2762,6 +2768,8 @@ async function ensureThumbnailsAround(page: number, fromScroll = false) {
   for (const [p, el] of thumbElements) {
     if (p < start - 8 || p > end + 8) {
       el.remove();
+      const canvas = el.querySelector("canvas");
+      if (canvas) releaseCanvas(canvas);
       thumbElements.delete(p);
     }
   }
@@ -2778,19 +2786,23 @@ async function ensureThumbnailsAround(page: number, fromScroll = false) {
     return;
   }
   thumbnailBusy = true;
+  const doc = currentDoc;
   try {
     // 更激进的并行：PDF.js 支持多页并发渲染（内部 worker 排队）。
     // 骨架已同步就位，这里只负责尽快填充图片。
     const BATCH = 12;
     for (let i = 0; i < missing.length; i += BATCH) {
+      if (currentDoc !== doc) return;
       const batch = missing.slice(i, i + BATCH);
       await Promise.all(batch.map((p) => renderThumb(p)));
     }
   } finally {
-    thumbnailBusy = false;
-    if (thumbnailQueued) {
-      thumbnailQueued = false;
-      void ensureThumbnailsAround(currentPage, true);
+    if (currentDoc === doc) {
+      thumbnailBusy = false;
+      if (thumbnailQueued) {
+        thumbnailQueued = false;
+        void ensureThumbnailsAround(currentPage, true);
+      }
     }
   }
 }
@@ -2799,6 +2811,10 @@ async function renderThumb(page: number): Promise<void> {
   if (!currentDoc || !thumbBarEl) return;
   if (thumbElements.has(page)) return;
 
+  const doc = currentDoc;
+  const bar = thumbBarEl;
+  const bookPath = currentBook?.path ?? "";
+  const isCurrent = () => currentDoc === doc && thumbBarEl === bar && currentBook?.path === bookPath;
   const thumb = document.createElement("div");
   thumb.className = "thumb placeholder";
   thumb.dataset.page = String(page);
@@ -2806,7 +2822,13 @@ async function renderThumb(page: number): Promise<void> {
   // 绝对定位：第 page 页的横坐标 = (page-1) * THUMB_STEP。
   thumb.style.left = `${(page - 1) * THUMB_STEP}px`;
 
-  const size = await currentDoc.pageSize(page);
+  let size: { width: number; height: number };
+  try {
+    size = await doc.pageSize(page);
+  } catch {
+    return;
+  }
+  if (!isCurrent() || thumbElements.has(page)) return;
   const h = Math.round((size.height / size.width) * THUMB_WIDTH);
   thumb.style.width = `${THUMB_WIDTH}px`;
   thumb.style.height = `${h + 4}px`;
@@ -2814,13 +2836,13 @@ async function renderThumb(page: number): Promise<void> {
   thumbElements.set(page, thumb);
 
   // 优先读磁盘缓存（之前渲染过 → 秒出，不再解码）。
-  const bookPath = currentBook?.path ?? "";
   let cached: string | null = null;
   try {
     cached = await loadThumb(bookPath, page);
   } catch {
     cached = null;
   }
+  if (!isCurrent() || thumbElements.get(page) !== thumb) return;
   if (cached) {
     const img = document.createElement("img");
     img.src = `data:image/jpeg;base64,${cached}`;
@@ -2833,7 +2855,11 @@ async function renderThumb(page: number): Promise<void> {
 
   // 未命中：渲染后写入缓存，下次秒出。
   try {
-    const canvas = await currentDoc.renderPageToCanvas(page, THUMB_WIDTH / size.width);
+    const canvas = await doc.renderPageToCanvas(page, THUMB_WIDTH / size.width);
+    if (!isCurrent() || thumbElements.get(page) !== thumb) {
+      releaseCanvas(canvas);
+      return;
+    }
     canvas.style.width = `${THUMB_WIDTH}px`;
     canvas.style.height = `${h}px`;
     thumb.appendChild(canvas);
@@ -2841,7 +2867,7 @@ async function renderThumb(page: number): Promise<void> {
     if (bookPath) {
       try {
         const jpeg = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
-        void saveThumb(bookPath, page, jpeg);
+        await saveThumb(bookPath, page, jpeg);
       } catch {
         // 写缓存失败不影响显示。
       }
