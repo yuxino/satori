@@ -15,11 +15,11 @@
 <!-- project-demo-v1 -->
 ## 演示
 
-[![Satori](docs/demos/preview.gif)](docs/demos/demo.mp4)
-
-[观看视频](docs/demos/demo.mp4)
-
-阅读 PDF，向 AI 提问、继续追问，再回看问答。
+<p align="center">
+  <a href="docs/demos/demo.mp4"><img src="docs/demos/preview.gif" alt="Satori"></a>
+</p>
+<p align="center">阅读 PDF，向 AI 提问、继续追问，再回看问答。</p>
+<p align="center"><a href="docs/demos/demo.mp4">观看视频</a></p>
 <!-- /project-demo-v1 -->
 
 ## 功能

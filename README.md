@@ -15,11 +15,11 @@ A local-first PDF learning app for macOS and Windows 11. Keep the page in view a
 <!-- project-demo-v1 -->
 ## Demo
 
-[![Satori](docs/demos/preview.gif)](docs/demos/demo.mp4)
-
-[Watch video](docs/demos/demo.mp4)
-
-Read a PDF, ask a question, follow up, and revisit the conversation.
+<p align="center">
+  <a href="docs/demos/demo.mp4"><img src="docs/demos/preview.gif" alt="Satori"></a>
+</p>
+<p align="center">Read a PDF, ask a question, follow up, and revisit the conversation.</p>
+<p align="center"><a href="docs/demos/demo.mp4">Watch video</a></p>
 <!-- /project-demo-v1 -->
 
 ## Features

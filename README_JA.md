@@ -15,11 +15,11 @@ macOS と Windows 11 向けのローカルファーストな PDF 学習アプリ
 <!-- project-demo-v1 -->
 ## デモ
 
-[![Satori](docs/demos/preview.gif)](docs/demos/demo.mp4)
-
-[動画を見る](docs/demos/demo.mp4)
-
-PDF を読みながら AI に質問し、追加の質問や回答の振り返りができます。
+<p align="center">
+  <a href="docs/demos/demo.mp4"><img src="docs/demos/preview.gif" alt="Satori"></a>
+</p>
+<p align="center">PDF を読みながら AI に質問し、追加の質問や回答の振り返りができます。</p>
+<p align="center"><a href="docs/demos/demo.mp4">動画を見る</a></p>
 <!-- /project-demo-v1 -->
 
 ## 機能
