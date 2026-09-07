@@ -159,4 +159,19 @@ jobs:
           mapfile -t assets < <(find release-assets -maxdepth 1 -type f -print | sort)
           test "${#assets[@]}" -eq 11
           gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          # Upload may leave pre-existing remote attachments in place. Check
+          # the complete remote set before changing draft visibility.
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+            > "$RUNNER_TEMP/satori-release-assets.json"
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+          import { releaseAssetNames } from "./scripts/updater-release.mjs";
+          const actual = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/satori-release-assets.json`, "utf8"))
+            .assets.map((asset) => asset.name).sort();
+          const expected = releaseAssetNames(process.env.RELEASE_TAG.slice(1)).sort();
+          if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+            throw new Error("Remote draft assets do not exactly match the release asset set.");
+          }
+          console.log(`Verified ${actual.length} remote draft assets before publication.`);
+          NODE
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
