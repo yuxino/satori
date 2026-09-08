@@ -1990,12 +1990,15 @@ function setupReaderSurface() {
   // 手势结束才提交真实缩放（重布局 + 重渲染高清画面）。
   let gestureBaseZoom = zoomFactor;
   let gestureActive = false;
+  let gestureReader: ScrollReader | null = null;
 
   readerSurface.addEventListener(
     "gesturestart",
     ((e: Event) => {
       e.preventDefault();
-      gestureActive = true;
+      gestureReader = openingBook ? null : reader;
+      gestureActive = gestureReader !== null;
+      if (!gestureActive) return;
       gestureBaseZoom = zoomFactor;
     }) as EventListener,
   );
@@ -2005,7 +2008,7 @@ function setupReaderSurface() {
     ((e: Event) => {
       e.preventDefault();
       const scale = (e as unknown as { scale?: number }).scale;
-      if (typeof scale !== "number" || !reader) return;
+      if (typeof scale !== "number" || !gestureActive || !reader || openingBook || reader !== gestureReader) return;
       const next = clampZoom(gestureBaseZoom * scale);
       if (Math.abs(next - zoomFactor) > 0.005) {
         zoomFactor = next;
@@ -2018,8 +2021,11 @@ function setupReaderSurface() {
     "gestureend",
     ((e: Event) => {
       e.preventDefault();
+      const activeReader = gestureReader;
       gestureActive = false;
-      if (reader) {
+      gestureReader = null;
+      // 允许加载前已接受的预览在原阅读器上收尾：打开失败会保留它。
+      if (reader && reader === activeReader) {
         void reader.commitZoom(zoomFactor);
         updateBottomBarZoom();
         persistZoom();
@@ -2034,17 +2040,20 @@ function setupReaderSurface() {
     (e) => {
       if (!e.ctrlKey || gestureActive) return;
       e.preventDefault();
+      if (!reader || openingBook) return;
+      const activeReader = reader;
       // deltaY > 0 表示向后滚（缩小），负值放大；取指数让手感平滑。
       const factor = Math.exp(-e.deltaY * 0.002);
       const next = clampZoom(zoomFactor * factor);
       if (Math.abs(next - zoomFactor) > 0.005) {
         zoomFactor = next;
-        if (reader) reader.previewZoom(next);
+        activeReader.previewZoom(next);
         updateBottomBarZoom();
         window.clearTimeout(wheelCommitTimer);
         wheelCommitTimer = window.setTimeout(() => {
           wheelCommitTimer = undefined;
-          if (reader) {
+          // 只完成本阅读器已接受的输入，不能把预览留给失败后的旧书。
+          if (reader === activeReader) {
             void reader.commitZoom(zoomFactor);
             updateBottomBarZoom();
             persistZoom();
@@ -2164,20 +2173,17 @@ document.addEventListener("keydown", (e) => {
   // 缩放：Command（macOS）或 Control（Windows）配合 +/-，0 回到铺满宽度。
   if (primaryModifier && (e.key === "=" || e.key === "+")) {
     e.preventDefault();
-    zoomFactor = Math.min(3, zoomFactor + 0.15);
-    void applyZoom();
+    void applyZoom(zoomFactor + 0.15);
     return;
   }
   if (primaryModifier && e.key === "-") {
     e.preventDefault();
-    zoomFactor = Math.max(0.5, zoomFactor - 0.15);
-    void applyZoom();
+    void applyZoom(zoomFactor - 0.15);
     return;
   }
   if (primaryModifier && e.key === "0") {
     e.preventDefault();
-    zoomFactor = 1;
-    void applyZoom();
+    void applyZoom(1);
     return;
   }
   if (typing) return; // 输入中：不响应全局翻页/缩放
@@ -2190,9 +2196,11 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-async function applyZoom() {
+async function applyZoom(target: number) {
   if (!reader || openingBook) return;
   const activeReader = reader;
+  // 接受输入和修改状态必须同步完成；加载时拒绝的输入不能写进 Store。
+  zoomFactor = clampZoom(target);
   await activeReader.setZoom(zoomFactor);
   if (reader !== activeReader) return;
   updateBottomBarZoom();
@@ -2372,23 +2380,20 @@ function renderBottomBar() {
   zoomOut.textContent = "−";
   zoomOut.title = "缩小";
   zoomOut.addEventListener("click", () => {
-    zoomFactor = clampZoom(zoomFactor - 0.25);
-    void applyZoom();
+    void applyZoom(zoomFactor - 0.25);
   });
   const zoomPct = document.createElement("button");
   zoomPct.type = "button";
   zoomPct.className = "zoom-pct";
   zoomPct.title = "回到适合窗口";
   zoomPct.addEventListener("click", () => {
-    zoomFactor = 1;
-    void applyZoom();
+    void applyZoom(1);
   });
   const zoomIn = document.createElement("button");
   zoomIn.textContent = "+";
   zoomIn.title = "放大";
   zoomIn.addEventListener("click", () => {
-    zoomFactor = clampZoom(zoomFactor + 0.25);
-    void applyZoom();
+    void applyZoom(zoomFactor + 0.25);
   });
   zoomGroup.append(zoomOut, zoomPct, zoomIn);
 

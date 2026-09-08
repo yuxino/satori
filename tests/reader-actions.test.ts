@@ -20,7 +20,7 @@ function fixture() {
     persistZoom: () => { calls.push("persistZoom"); },
     updateLayoutButton: () => undefined,
     updateBottomBarZoom: () => undefined,
-  }, ["relayoutOnResize", "applyZoom", "applyLayout"]);
+  }, ["relayoutOnResize", "clampZoom", "applyZoom", "applyLayout"]);
   const replace = () => {
     const b = { id: "B", last_page: 3, zoom: 0.75, spread: false };
     context.reader = makeReader("B");
@@ -67,7 +67,7 @@ test("zoom completion after removing the current book cannot checkpoint another 
   const f = fixture();
   const gate = deferred();
   f.a.setZoom = () => gate.promise;
-  const pending = f.context.applyZoom();
+  const pending = f.context.applyZoom(1.5);
   f.context.reader = null;
   f.context.currentDoc = null;
   f.context.currentBook = null;
