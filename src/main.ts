@@ -257,10 +257,12 @@ let openingBook = false;
 
 async function relayoutOnResize() {
   if (!reader || !currentDoc || openingBook) return;
-  const anchor = reader.currentPage();
-  await reader.setZoom(zoomFactor);
-  reader.scrollToPage(anchor, true);
-  void reader.onScroll();
+  const activeReader = reader;
+  const anchor = activeReader.currentPage();
+  await activeReader.setZoom(zoomFactor);
+  if (reader !== activeReader) return;
+  activeReader.scrollToPage(anchor, true);
+  void activeReader.onScroll();
 }
 
 // ---- 首页 / 总览 ----
@@ -858,6 +860,11 @@ async function openBook(book: BookRecord) {
 
     // PDF 本身已完成解析，再切换阅读器。失败前保留旧书，避免坏文件
     // 把一个原本可用的阅读会话一起拖垮。
+    // 手势预览和未完成的缩放也属于旧书，切换前同步收下最后状态。
+    checkpointCurrentReadingState();
+    window.clearTimeout(wheelCommitTimer);
+    wheelCommitTimer = undefined;
+    window.clearTimeout(observerTimer);
     reader?.clear();
     void currentDoc?.destroy();
     replacedReader = true;
@@ -889,8 +896,9 @@ async function openBook(book: BookRecord) {
     // 每本书记住各自的缩放，切书时不会互相串。
     zoomFactor = clampZoom(resolved.zoom ?? 1);
     bottomBar.style.display = "flex";
-    reader = new ScrollReader(readerSurface, currentDoc, {
+    const openedReader = new ScrollReader(readerSurface, currentDoc, {
       onPageChange: (page) => {
+        if (reader !== openedReader) return;
         const previousPage = currentPage;
         currentPage = page;
         if (pageTransitionDelta(previousPage, page) > 0) markPageViewed();
@@ -901,9 +909,10 @@ async function openBook(book: BookRecord) {
         void askRegionQuestion(region);
       },
     });
+    reader = openedReader;
     // 打开时直接应用这本书的缩放与布局（单页/双页），
     // 避免先按 100% 渲染再跳变。
-    await reader.open(currentPage, zoomFactor, resolved.spread === true, {
+    await openedReader.open(currentPage, zoomFactor, resolved.spread === true, {
       signal: abort.signal,
       onStage: updateLoading,
     });
@@ -980,7 +989,10 @@ let scrollListenerBound = false;
 function ensureScrollListener() {
   if (scrollListenerBound) return;
   scrollListenerBound = true;
-  readerSurface.addEventListener("scroll", () => void reader?.onScroll(), { passive: true });
+  readerSurface.addEventListener("scroll", () => {
+    // open 自己在目标页准备好后报告页码，忽略替换 DOM 引起的临时滚动。
+    if (!openingBook) void reader?.onScroll();
+  }, { passive: true });
 }
 
 // ---- 渲染：翻页阅读器接管，这里只做翻页/缩放入口 ----
@@ -2179,8 +2191,10 @@ document.addEventListener("keydown", (e) => {
 });
 
 async function applyZoom() {
-  if (!reader) return;
-  await reader.setZoom(zoomFactor);
+  if (!reader || openingBook) return;
+  const activeReader = reader;
+  await activeReader.setZoom(zoomFactor);
+  if (reader !== activeReader) return;
   updateBottomBarZoom();
   persistZoom();
 }
@@ -2441,16 +2455,19 @@ function updateLayoutButton() {
 /// 切换单页/双页布局，并把偏好记到当前书。
 /// 换布局后回到「适合窗口」（单页或整个展开都不超出视口）。
 async function applyLayout(spread: boolean) {
-  if (!reader) return;
+  if (!reader || !currentBook || openingBook) return;
+  const activeReader = reader;
+  const book = currentBook;
   zoomFactor = 1;
-  await reader.setZoom(1);
-  await reader.setSpread(spread);
-  if (currentBook) {
-    currentBook.spread = spread;
-    currentBook.zoom = zoomFactor; // 布局切换后回到适合窗口，一并记住
-    store.books = store.books.map((b) => (b.id === currentBook!.id ? currentBook! : b));
-    await persist();
-  }
+  await activeReader.setZoom(1);
+  if (reader !== activeReader) return;
+  await activeReader.setSpread(spread);
+  if (reader !== activeReader) return;
+  book.spread = spread;
+  book.zoom = zoomFactor; // 布局切换后回到适合窗口，一并记住
+  store.books = store.books.map((b) => (b.id === book.id ? book : b));
+  await persist();
+  if (reader !== activeReader) return;
   updateLayoutButton();
   updateBottomBarZoom();
 }

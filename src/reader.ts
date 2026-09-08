@@ -54,6 +54,9 @@ export class ScrollReader {
   private renderQueued = false;
   /// layout 代次号：并发 layout 保护（旧代次中途放弃）。
   private layoutGen = 0;
+  /// clear 是该阅读会话的终点；旧异步任务不能再碰共享的 surface。
+  private cleared = false;
+  private renderTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(surface: HTMLDivElement, doc: PDFDocument, cb: ReaderCallbacks = {}) {
     this.surface = surface;
@@ -74,23 +77,26 @@ export class ScrollReader {
     options: { signal?: AbortSignal; onStage?: (message: string) => void } = {},
   ): Promise<void> {
     await this.waitForWidth();
+    if (this.cleared) return;
     this.zoom = initialZoom;
     this.spread = spread;
     options.onStage?.("正在读取页面信息…");
-    await this.layout((completed, total) => {
+    const ready = await this.layout((completed, total) => {
       options.onStage?.(`正在准备页面… ${Math.round((completed / Math.max(total, 1)) * 100)}%`);
     }, options.signal);
+    if (!ready) return;
     // 直接渲染目标页附近（跳到上次读的页，不等 scroll 事件异步触发）。
+    // 先定位，否则 renderVisible 会按旧视口把目标页当作远页跳过。
+    this.scrollToPage(targetPage, true);
     options.onStage?.(`正在渲染第 ${targetPage} 页…`);
     await this.renderVisible(targetPage, options.signal);
-    this.scrollToPage(targetPage, true);
     this.emitPage();
   }
 
   /// 切换单页/双页布局，保持视口中心对应的文档位置不动。
   /// 双页：1 = 展开宽度铺满；单页：1 = 单页宽度铺满。
   async setSpread(enabled: boolean): Promise<void> {
-    if (this.spread === enabled) return;
+    if (this.cleared || this.spread === enabled) return;
     this.spread = enabled;
     await this.commitZoom(this.zoom);
   }
@@ -104,6 +110,7 @@ export class ScrollReader {
       const deadline = performance.now() + 2000;
       const poll = () => {
         if (
+          this.cleared ||
           (this.surface.clientWidth > 0 && this.surface.clientHeight > 0) ||
           performance.now() > deadline
         ) {
@@ -125,26 +132,36 @@ export class ScrollReader {
   async layout(
     onProgress?: (completed: number, total: number) => void,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<boolean> {
+    if (this.cleared) return false;
+    const gen = ++this.layoutGen;
     // 防御：等尺寸就绪（WebView 初次布局晚于脚本执行时，
     // clientWidth/Height 为 0，页面会按错误比例建立、需要手动缩放才正常）。
     await this.waitForWidth();
+    if (this.cleared || gen !== this.layoutGen) return false;
 
     // 并发保护：ResizeObserver 可能在 open/commitZoom 的异步 layout 中途
     // 再触发一次 layout。用代次号让旧的 layout 中途放弃，避免两个 layout
     // 交错写坏 layouts（页面 top 不一致 → 页码错乱 → 吸附级联翻到最后一页）。
-    const gen = ++this.layoutGen;
-
-    // 重建内容层：移除旧 spacer，保留已挂载的页面元素与画布
-    // （拖动窗口重排时只改位置尺寸，画布由 renderVisible 决定是否重渲，
-    // 避免每步窗口拖动都重渲扫描页导致卡顿）。
-    this.content.querySelector(".scroll-spacer")?.remove();
-    this.layouts = [];
-
     // 分批读取所有页尺寸。PDF.js 仍能精确布局不同纸张，但不会一次
     // 创建整本书的解析任务；批次间会让出事件循环保持取消/重试可用。
-    const sizes = await this.doc.pageSizes(1, this.doc.pageCount, { signal, onProgress });
-    if (gen !== this.layoutGen) return;
+    let sizes: Array<{ width: number; height: number }>;
+    try {
+      sizes = await this.doc.pageSizes(1, this.doc.pageCount, {
+        signal,
+        onProgress: (completed, total) => {
+          if (!this.cleared && gen === this.layoutGen) onProgress?.(completed, total);
+        },
+      });
+    } catch (error) {
+      if (this.cleared || gen !== this.layoutGen) return false;
+      throw error;
+    }
+    if (this.cleared || gen !== this.layoutGen) return false;
+
+    // 新尺寸就绪前保留完整旧布局，滚动/并发缩放仍能取得正确页码。
+    this.content.querySelector(".scroll-spacer")?.remove();
+    this.layouts = [];
 
     const surfaceW = this.surface.clientWidth;
     const surfaceH = this.surface.clientHeight;
@@ -180,9 +197,9 @@ export class ScrollReader {
       this.content.appendChild(spacer);
       // 尺寸在计算期间变了（拖动窗口）：用最新尺寸重算，确保停在最终尺寸。
       if (gen === this.layoutGen && (this.surface.clientWidth !== surfaceW || this.surface.clientHeight !== surfaceH)) {
-        return this.layout();
+        return this.layout(onProgress, signal);
       }
-      return;
+      return true;
     }
 
     // ---- 双页（书本展开）：两页并排成一行 ----
@@ -240,13 +257,15 @@ export class ScrollReader {
     this.content.appendChild(spacer);
     // 尺寸在计算期间变了（拖动窗口）：用最新尺寸重算，确保停在最终尺寸。
     if (gen === this.layoutGen && (this.surface.clientWidth !== surfaceW || this.surface.clientHeight !== surfaceH)) {
-      return this.layout();
+      return this.layout(onProgress, signal);
     }
+    return true;
   }
 
   /// 缩放手势期间的即时预览：只对内容层做 transform，不重建 DOM。
   /// 视觉上以视口中心为锚缩放（transform-origin 设在中心对应的文档坐标）。
   previewZoom(factor: number): void {
+    if (this.cleared) return;
     const clamped = Math.min(3, Math.max(0.5, factor));
     const centerX = this.surface.scrollLeft + this.surface.clientWidth / 2;
     const centerY = this.surface.scrollTop + this.surface.clientHeight / 2;
@@ -261,6 +280,7 @@ export class ScrollReader {
 
   /// 缩放手势结束：提交真实缩放（重布局 + 重渲染高清），移除 transform。
   async commitZoom(factor: number): Promise<void> {
+    if (this.cleared) return;
     // 记录缩放前视口中心所在的页和页内比例，缩放后恢复。
     const centerY = this.surface.scrollTop + this.surface.clientHeight / 2;
     const anchorPage = this.pageAtOffset(centerY);
@@ -271,18 +291,20 @@ export class ScrollReader {
 
     this.content.style.transform = "";
     this.zoom = factor;
-    await this.layout();
+    if (!await this.layout()) return;
+    const gen = this.layoutGen;
 
     const newLayout = this.layouts[anchorPage - 1];
     if (newLayout) {
       this.surface.scrollTop = newLayout.top + newLayout.displayHeight * ratioInPage - this.surface.clientHeight / 2;
     }
     await this.renderVisible(anchorPage);
-    this.emitPage();
+    if (gen === this.layoutGen) this.emitPage();
   }
 
   /// 渲染视口附近的页（惰性，已渲染的不重绘）。
   private async renderVisible(aroundPage?: number, signal?: AbortSignal): Promise<void> {
+    if (this.cleared) return;
     const center = aroundPage ?? this.currentPage();
     const start = Math.max(1, center - RENDER_RADIUS);
     const end = Math.min(this.doc.pageCount, center + RENDER_RADIUS);
@@ -335,6 +357,7 @@ export class ScrollReader {
     this.rendering = true;
     try {
       for (const p of toRender) {
+        if (this.cleared) return;
         if (signal?.aborted) {
           const error = new Error("已取消打开 PDF。");
           error.name = "PDFLoadCancelledError";
@@ -350,7 +373,7 @@ export class ScrollReader {
         const renderScale = layout ? layout.width / layout.logicalWidth : 0;
         const canvas = await this.doc.renderPageToCanvas(p, this.canvasScale(p), signal);
         // 渲染耗时较长，期间视口可能又变了；只有页还在时才挂载。
-        if (!mount.el.isConnected) {
+        if (this.cleared || !mount.el.isConnected) {
           releaseCanvas(canvas);
           continue;
         }
@@ -368,12 +391,18 @@ export class ScrollReader {
         // 让出事件循环，滚动/交互不被长渲染阻塞。
         await new Promise((r) => setTimeout(r, 0));
       }
+    } catch (error) {
+      // PDF.js may reject work when the replaced document is destroyed.
+      if (!this.cleared) throw error;
     } finally {
       this.rendering = false;
-      if (this.renderQueued) {
+      if (!this.cleared && this.renderQueued) {
         this.renderQueued = false;
         // 延迟一拍再渲染，避免同步递归；滚动中会合并多次触发。
-        setTimeout(() => void this.renderVisible(), 16);
+        this.renderTimer = setTimeout(() => {
+          this.renderTimer = undefined;
+          void this.renderVisible();
+        }, 16);
       }
     }
   }
@@ -451,6 +480,7 @@ export class ScrollReader {
   }
 
   scrollToPage(page: number, instant = false): void {
+    if (this.cleared) return;
     const layout = this.layouts[page - 1];
     if (!layout) return;
     let target = layout.top;
@@ -467,11 +497,13 @@ export class ScrollReader {
   /// 滚动事件处理：更新页码、惰性渲染。
   /// 翻页模式下滚轮/触控板由 main.ts 拦截为翻页（无自由滚动，也就没有吸附环节）。
   async onScroll(): Promise<void> {
+    if (this.cleared) return;
     this.emitPage();
     await this.renderVisible();
   }
 
   private emitPage() {
+    if (this.cleared) return;
     this.cb.onPageChange?.(this.currentPage());
   }
 
@@ -519,6 +551,11 @@ export class ScrollReader {
   }
 
   clear(): void {
+    this.cleared = true;
+    this.layoutGen++;
+    this.renderQueued = false;
+    clearTimeout(this.renderTimer);
+    this.renderTimer = undefined;
     for (const mount of this.mounted.values()) {
       if (mount.canvas) {
         mount.canvas.width = 0;
@@ -527,6 +564,7 @@ export class ScrollReader {
     }
     this.content.innerHTML = "";
     this.content.style.transform = "";
+    this.content.remove();
     this.mounted.clear();
     this.layouts = [];
   }
