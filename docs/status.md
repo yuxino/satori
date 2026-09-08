@@ -4,7 +4,7 @@ Updated: 2026-09-08
 
 ## Product
 
-Satori is a local-first macOS and Windows PDF learning workspace. Reading stays central: the learner opens or drags in a local book, returns to the previous page, and explicitly asks for help with the current page or a selected region. It is not a general chat or note-taking product. Version 3.4.5 fixes selected-region evidence, bounds PDF canvas allocation, releases replaced canvases, and keeps asynchronous zoom and thumbnail work tied to the correct state. It retains the signed updater introduced in 3.4.4 and does not change local learning data formats.
+Satori is a local-first macOS and Windows PDF learning workspace. Reading stays central: the learner opens or drags in a local book, returns to the previous page, and explicitly asks for help with the current page or a selected region. It is not a general chat or note-taking product. Version 3.4.6 keeps pending reader work attached to its original book, renders the restored page before opening completes, and prevents loading-time zoom inputs from saving an unapplied scale. It includes the approved transparent circular app icon, retains the signed updater introduced in 3.4.4, and does not change local learning data formats.
 
 ## Current implementation
 
@@ -25,7 +25,7 @@ Satori is a local-first macOS and Windows PDF learning workspace. Reading stays 
 
 ## Version and installation
 
-- Current source version: `3.4.5`. This patch provides macOS 14+ Apple silicon and Windows 11 x64 and ARM64 downloads plus a Tauri updater artifact/signature for each architecture and one static `latest.json`. Installations on 3.4.3 or earlier must install a current version manually once.
+- Current source version: `3.4.6`. This patch targets macOS 14+ Apple silicon and Windows 11 x64 and ARM64 downloads plus a Tauri updater artifact/signature for each architecture and one static `latest.json`. Installations on 3.4.3 or earlier must install a current version manually once.
 - The downloadable bundle has a stable local signature and hardened-runtime flag, but no Apple Team ID or notarization; Gatekeeper assessment rejects it, so the documented Control-click opening step remains required.
 - The macOS bundle declares macOS 14 as its minimum system version. Release packaging verifies the bundle signature, hardened runtime, version, archive integrity, and SHA-256 before publication.
 - The Windows workflow remains non-publishing when run alone, but the explicit updater release workflow can reuse it. Native x64 and ARM64 runners build unsigned current-user NSIS packages plus updater signatures, extract each installer, verify a unique payload and expected PE architecture, install it, check application and shortcut identity, uninstall it completely, and record separate SHA-256 manifests before publication. The publishing workflow independently verifies all three updater signatures against the embedded public key before making the Release public.
@@ -140,3 +140,7 @@ Completed the authorized circular-alpha treatment of the approved portrait and u
 - A follow-up makes keyboard, toolbar, pinch and Ctrl+wheel zoom inputs leave both the displayed and saved scale unchanged while a PDF is opening. Gestures accepted before loading may still finish on their original reader, so a failed or cancelled open cannot leave the retained book stuck in CSS preview. Eight additional regressions execute the actual input listeners and Store checkpoint; all 89 frontend tests and the production build pass. Independent review passes the 13 zoom/action regressions and both desktop keyboard modifier paths. This frontend-only follow-up does not rerun the unchanged Rust checks.
 - The publishing workflow now passes the verified source commit into Windows packaging. Standalone Windows and installer-validation calls retain their triggering commit. YAML parsing and the caller/input/checkout contract pass; this session did not run the publishing workflow or create packages for release.
 - Source version remains 3.4.5. No personal documents or learning state were accessed. After normal execution approval, isolated ego-lite QA rendered page 40 of a synthetic 50-page PDF with real PDF.js and the production reader; the page label and nearby canvases agree. This verifies restored-page rendering only. Native WebView gestures, persisted desktop state and installed application interaction remain unverified; no release packages were published. The temporary QA page and server were closed.
+
+### 2026-09-08 · 3.4.6 release
+
+Version sources and lockfiles are synchronized to 3.4.6, and the English/Chinese download copy and [release notes](releases/v3.4.6.md) cover the reader fixes and approved icon update. The authorized release follows ADR 0019: build the macOS bundle with the existing stable local identity, then use the explicit release workflow for Windows packages, updater signatures, checksums and the three-platform manifest. Final workflow and public-asset evidence is recorded in the release delivery report. Installed-app and complete native updater interaction acceptance remain separate from these build and publication checks.
