@@ -1,6 +1,6 @@
 # Current status
 
-Updated: 2026-09-07
+Updated: 2026-09-08
 
 ## Product
 
@@ -14,7 +14,7 @@ Satori is a local-first macOS and Windows PDF learning workspace. Reading stays 
 - Reader: single/spread layouts, per-book page and zoom restoration, outline navigation, text and scanned-page rendering, and explicitly triggered VLM outline recovery for scanned books. Initial opening now preflights PDF completeness, shows byte/page/render progress, supports cancellation and stall recovery, batches page metadata, bounds canvas memory, and records interrupted opens as retryable bookshelf errors. Ctrl+wheel is reserved for zoom, same-page render/layout callbacks do not inflate reading activity, and normal window/menu exits flush the latest debounced page and zoom snapshot before terminating.
 - Home: a restrained monochrome editorial layout containing the current book, 52-week activity grid, bookshelf, and recent Q&A. Each bookshelf row has a visible removal action whose confirmation states that the disk PDF is preserved. Removing a non-current book now refreshes every open bookshelf surface, while removing the current book opens the first remaining book or returns to the empty home view. Book covers are sharp typographic covers rather than PDF thumbnails; labels describe questions and answers without claiming the learner understood them.
 - Brand treatment: in-page product-name decoration has been removed so the reading content stays primary. The app name appears as `Satori` only where system context requires it; the home settings entry now uses a quieter, clearer labeled icon.
-- Brand assets: the selected F cat-ear-hood character remains the Satori identity. The English and Chinese READMEs retain the existing opaque square `src-tauri/icons/128x128@2x.png`, displayed at 128px with its original ivory background. The transparent circular avatar is unfinished and awaits user authorization for the local alpha-processing method. This session updates documentation only; source images, platform icons and the existing 3.4.5 release packages are unchanged. Asset details remain documented in [Brand assets](brand-assets.md).
+- Brand assets: the selected F cat-ear-hood character now has a 1254px circular RGBA master with genuinely transparent corners. User-authorized local alpha processing preserves the original RGB artwork exactly. PNG, ICNS and all nine ICO sizes are rebuilt; both READMEs use the updated 256px export at 128px. The original portrait and repeatable generation script are retained. All 23 icon frames pass decoding, dimension and transparency checks. This source update does not replace the published 3.4.5 packages. See [Brand assets](brand-assets.md).
 - Updates: the official Tauri updater checks one fixed HTTPS `latest.json` after launch and offers a manual recheck in settings. It displays the version and Release notes before any download, shows real byte progress or an indeterminate state, exposes installation only after framework signature verification, and never downloads or installs in the background. Installation first flushes the latest reading position and fails closed if persistence fails. macOS waits for an explicit “重启并完成”; Windows exits after the explicit install action and hands control to a visible `basicUi` installer. GitHub Releases appears only as error recovery.
 - Import: the native window accepts one dropped PDF at a time and shares the same import, preflight, progress, cancellation, recovery, and persistence path as the file picker.
 - Teacher: startup, importing, reading, and library management have no AI or secure-credential-store side effects. Credential checking begins only after an explicit question, page explanation, region action, or outline-recognition action whose page range is disclosed first; missing configuration opens settings, request failures have actionable Windows/provider guidance and explicit retry, and page images are ephemeral.
@@ -128,3 +128,7 @@ README 演示区仅保留功能介绍与视频入口，移除制作说明。应�
 - 两版 README 继续引用现有的 `src-tauri/icons/128x128@2x.png`，显示为 128×128；头像仍是带原始象牙色背景的不透明方图。没有新增底色，也没有用 CSS 圆角冒充透明 PNG。
 - 透明圆形头像是本轮品牌调整唯一尚未完成的待办，等待用户授权本地 alpha 处理方法后再制作和验证。本轮仅更新文档，不修改源图、平台图标或 [Brand assets](brand-assets.md) 中记录的现有资源。
 - 下载版本、平台要求、更新迁移、安装提示和隐私说明保持原有边界；文档修改不代表新的原生构建、系统图标验收或 Release。
+
+### 2026-09-08 · Circular transparent logo
+
+Completed the authorized circular-alpha treatment of the approved portrait and updated platform source icons. The website uses the same master under a fresh asset filename, avoiding the old immutable icon cache. Original RGB values, app behavior, source version and published native packages remain unchanged. PNG/ICO/ICNS asset checks, the frontend production build and the release-profile Rust check pass; source assets are not evidence of installed system icon acceptance.
