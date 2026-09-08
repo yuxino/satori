@@ -61,6 +61,8 @@ jobs:
   windows-packages:
     needs: verify-source
     uses: ./.github/workflows/windows.yml
+    with:
+      source_ref: ${{ needs.verify-source.outputs.commit }}
     secrets: inherit
 
   publish:
