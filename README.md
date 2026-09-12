@@ -38,7 +38,7 @@ Satori supports Windows 11 on x64 and ARM64, and macOS 14+ on Apple silicon. Dow
 - **Windows:** choose the NSIS installer matching your architecture. It installs for the current user. The installers are not Authenticode-signed, so Windows shows an unknown publisher warning. Interactive validation is architecture-specific; x64-on-x64 manual acceptance is not yet claimed.
 - **macOS:** unzip the download and move Satori to Applications. The build has a local signature but is not notarized; on first launch, Control-click Satori and choose **Open**.
 
-Version 3.4.4 introduced the updater: anyone using 3.4.3 or earlier must manually install the current release once from GitHub Releases. From 3.4.4 onward, Settings can download and verify later signed releases before an explicit install. Satori never downloads or installs an update in the background. On macOS, the learner clicks **Restart and finish** after installation; on Windows, starting installation closes Satori and hands control to the visible system installer.
+Version 3.4.4 introduced the updater: anyone using 3.4.3 or earlier must manually install the current release once from GitHub Releases. From 3.4.4 onward, Settings can download and verify later signed releases before an explicit install. Satori never downloads or installs an update in the background. On macOS, the learner clicks **Restart and finish** after installation; on Windows, starting installation closes Satori, shows update progress, and reopens the app when finished.
 
 The interface is currently available in Simplified Chinese only. Reading works without AI; questions and scanned-outline recognition require an image-capable OpenAI-compatible model. Satori is free and open source; your chosen AI service may charge separately.
 

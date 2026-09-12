@@ -13,7 +13,7 @@
 3. Capability 只允许 updater 的 check、download、install 和 process restart。应用不使用组合式 `downloadAndInstall`；检查、下载和安装是三个可观察阶段，其中下载与安装都必须由用户明确触发。
 4. 启动时仍可进行一次不含学习内容的元数据检查，但不会后台下载、轮询或静默安装。设置页保留手动检查；发现更新后显示版本和 Release notes，再由用户点击下载。下载有 Content-Length 时显示真实字节与百分比，无总量时显示不定进度；框架返回下载成功前只显示“正在验证签名”，不能提前出现安装入口。
 5. 官方 updater 当前不提供下载中的安全中止 API，因此下载进行中不显示虚假的取消能力。用户可以在开始下载前或签名验证完成后取消并释放本次 updater 资源；网络、签名和安装错误可重试。GitHub Releases 只在错误状态提供恢复入口。
-6. macOS 下载、验签、安装后停在“重启并完成”，只有再次明确点击才调用 process relaunch。Windows 使用可见的 `basicUi` 安装器；点击“安装并退出”后，Tauri 按 Windows 安装器限制自动退出 Satori，并由系统安装器继续，界面不承诺返回应用内的重启完成态。
+6. macOS 下载、验签、安装后停在“重启并完成”，只有再次明确点击才调用 process relaunch。Windows 使用 `passive` 更新模式显示安装进度；点击“安装并重新打开”后，Tauri 按 Windows 安装器限制退出 Satori，安装器完成更新后自动重新打开应用。更新不会要求用户重新选择安装目录或手动卸载旧版本。
 7. `bundle.createUpdaterArtifacts` 使用 Tauri 2 格式：macOS 发布 `Satori.app.tar.gz` 与 `.sig`，Windows x64 / ARM64 分别发布 NSIS `.exe` 与 `.sig`。静态 `latest.json` 必须包含且只包含 `darwin-aarch64`、`windows-x86_64` 和 `windows-aarch64`，每项内嵌签名内容并指向唯一、架构准确的 HTTPS Release asset。
 8. 发布仍是显式操作：本机从精确最终源码用既有稳定 macOS 身份打包并把经过验证的 macOS ZIP、updater archive 与 SHA-256 清单放入 draft Release；发布工作流使用已有 GitHub Secrets 为 macOS updater archive 生成签名（私钥不离开 runner），再复用 Windows 双架构托管验证，校验精确 main SHA、tag/版本一致性、唯一文件名、`.sig`、PE 架构、安装/完整卸载和 SHA-256，再生成 `latest.json` 并公开 Release。普通 main push 与单独 Windows workflow 都不发布。
 9. 3.4.4 是 bootstrap Release。3.4.3 及更早的公开安装无法发现或安装 updater manifest，必须手动下载安装 3.4.4 一次；3.4.4 之后才可在应用内更新。README 和 3.4.4 Release notes 必须明确这条迁移边界。

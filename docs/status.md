@@ -8,6 +8,8 @@ Satori is a local-first macOS and Windows PDF learning workspace. Reading stays 
 
 ## Current implementation
 
+- Windows installer presentation is sourced from [yuxino/desktop-installer](https://github.com/yuxino/desktop-installer) through a pinned offline 2.1.1 bundle: dedicated Satori half-body artwork, filtered full-color 4x sidebar, native language-specific UI fonts, three localized languages, and an optional click-only GitHub link. The generic corner image is removed. The shared source exercises native welcome/directory/finish pages in Windows CI and saves screenshots; real application update and device-scale acceptance remain separate. Application versions, signing identities, and local data are unchanged.
+
 - Stack: Tauri 2, Vite, TypeScript, PDF.js, Rust, and local JSON persistence. The removed Swift app is available only at tag `legacy-swift`.
 - Platforms: the base Tauri configuration keeps the macOS `.app` target. A Windows-only overlay adds current-user NSIS packaging for x64 and ARM64, with local state under application LocalAppData and a multi-resolution ICO shared by the app, installer, and uninstaller. CI installs each candidate, checks exact `Satori` identity in executable metadata, HKCU uninstall data, Start menu, and Desktop shortcuts, then requires the application, install directory, uninstall entry, and shortcuts to be absent after uninstall.
 - Process integrity: Satori allows one process to own its data directory. A secondary launch restores, shows, and focuses the existing window, while a process-lifetime lock is acquired before the renderer can load so two writers cannot race the shared Store.
@@ -15,7 +17,7 @@ Satori is a local-first macOS and Windows PDF learning workspace. Reading stays 
 - Home: a restrained monochrome editorial layout containing the current book, 52-week activity grid, bookshelf, and recent Q&A. Each bookshelf row has a visible removal action whose confirmation states that the disk PDF is preserved. Removing a non-current book now refreshes every open bookshelf surface, while removing the current book opens the first remaining book or returns to the empty home view. Book covers are sharp typographic covers rather than PDF thumbnails; labels describe questions and answers without claiming the learner understood them.
 - Brand treatment: in-page product-name decoration has been removed so the reading content stays primary. The app name appears as `Satori` only where system context requires it; the home settings entry now uses a quieter, clearer labeled icon.
 - Brand assets: the selected F cat-ear-hood character now has a 1254px circular RGBA master with genuinely transparent corners. User-authorized local alpha processing preserves the original RGB artwork exactly. PNG, ICNS and all nine ICO sizes are rebuilt; both READMEs use the updated 256px export at 128px. The original portrait and repeatable generation script are retained. All 23 icon frames pass decoding, dimension and transparency checks. This source update does not replace the published 3.4.5 packages. See [Brand assets](brand-assets.md).
-- Updates: the official Tauri updater checks one fixed HTTPS `latest.json` after launch and offers a manual recheck in settings. It displays the version and Release notes before any download, shows real byte progress or an indeterminate state, exposes installation only after framework signature verification, and never downloads or installs in the background. Installation first flushes the latest reading position and fails closed if persistence fails. macOS waits for an explicit “重启并完成”; Windows exits after the explicit install action and hands control to a visible `basicUi` installer. GitHub Releases appears only as error recovery.
+- Updates: the official Tauri updater checks one fixed HTTPS `latest.json` after launch and offers a manual recheck in settings. It displays the version and Release notes before any download, shows real byte progress or an indeterminate state, exposes installation only after framework signature verification, and never downloads or installs in the background. Installation first flushes the latest reading position and fails closed if persistence fails. macOS waits for an explicit “重启并完成”; Windows exits after the explicit install action, shows passive installer progress, and reopens Satori on completion. GitHub Releases appears only as error recovery.
 - Import: the native window accepts one dropped PDF at a time and shares the same import, preflight, progress, cancellation, recovery, and persistence path as the file picker.
 - Teacher: startup, importing, reading, and library management have no AI or secure-credential-store side effects. Credential checking begins only after an explicit question, page explanation, region action, or outline-recognition action whose page range is disclosed first; missing configuration opens settings, request failures have actionable Windows/provider guidance and explicit retry, and page images are ephemeral.
 - History: completed Q&A is stored locally per book, can reopen the source page, and sends only bounded recent text for follow-ups.
@@ -146,5 +148,15 @@ Completed the authorized circular-alpha treatment of the approved portrait and u
 Version sources and lockfiles are synchronized to 3.4.6, and the English/Chinese download copy and [release notes](releases/v3.4.6.md) cover the reader fixes and approved icon update. The authorized release follows ADR 0019: build the macOS bundle with the existing stable local identity, then use the explicit release workflow for Windows packages, updater signatures, checksums and the three-platform manifest. Final workflow and public-asset evidence is recorded in the release delivery report. Installed-app and complete native updater interaction acceptance remain separate from these build and publication checks.
 
 ## Release documentation
+
+### 2026-09-12 · Application update flow
+
+The Windows updater now uses passive progress instead of the full installation
+wizard and explicitly asks NSIS to reopen Satori when finished. macOS retains
+its user-triggered restart. The existing persistence checkpoint and signature
+verification remain required. Eighteen focused updater/platform tests and the
+TypeScript/Vite build pass. The public 3.4.6 feed is anonymously accessible for
+macOS arm64 and Windows x64/arm64; these source changes have not been packaged
+or released, and no native cross-version update was run in this session.
 
 Release notes use English first and Simplified Chinese second. Historical release descriptions have been prepared in that order, and repository notes preserve their original version-specific behavior and verification boundaries. This documentation change does not rebuild application packages.

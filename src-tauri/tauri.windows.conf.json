@@ -4,18 +4,30 @@
     "beforeBuildCommand": "node src-tauri/installer-theme/build.mjs && npm run build"
   },
   "bundle": {
-    "targets": ["nsis"],
-    "icon": ["icons/icon.ico"],
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ],
     "windows": {
       "nsis": {
         "installMode": "currentUser",
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",
         "sidebarImage": "installer-theme/generated/sidebar.bmp",
-        "headerImage": "installer-theme/generated/header.bmp",
-        "installerHooks": "installer-theme/theme.nsh",
-        "languages": ["English", "SimpChinese", "Japanese"],
-        "displayLanguageSelector": false
+        "installerHooks": "installer-theme/generated/theme.nsh",
+        "languages": [
+          "English",
+          "SimpChinese",
+          "Japanese"
+        ],
+        "displayLanguageSelector": false,
+        "customLanguageFiles": {
+          "English": "installer-theme/generated/English.nsh",
+          "SimpChinese": "installer-theme/generated/SimpChinese.nsh",
+          "Japanese": "installer-theme/generated/Japanese.nsh"
+        }
       }
     }
   }

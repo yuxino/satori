@@ -198,7 +198,7 @@ export function createAppUpdateController(dependencies: UpdateDependencies): App
         publish({ ...state, phase: "installing", errorMessage: "", errorStage: "" });
         try {
           await dependencies.prepareInstall?.();
-          await pendingUpdate?.install({ restartAfterInstall: false });
+          await pendingUpdate?.install({ restartAfterInstall: dependencies.platform === "windows" });
           if (dependencies.platform !== "windows") publish({ ...state, phase: "restart-ready" });
           // On Windows the plugin exits Satori after launching the visible installer.
         } catch (error) {

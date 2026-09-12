@@ -1,0 +1,10 @@
+{
+  "format": "yuxino-installer-lock-v2",
+  "source": "yuxino/desktop-installer",
+  "version": "2.1.1",
+  "product": "satori",
+  "repository": "https://github.com/yuxino/satori",
+  "size": 794248,
+  "unpackedSize": 3327574,
+  "sha256": "dece1a3e5510b9ce1a4345375ed3f7a0487364a2b2a789b33295fc1381e44aa7"
+}

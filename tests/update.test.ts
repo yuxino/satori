@@ -39,7 +39,7 @@ function fixture(options: {
     },
     async install(received?: { restartAfterInstall?: boolean }) {
       installs += 1;
-      assert.equal(received?.restartAfterInstall, false);
+      assert.equal(received?.restartAfterInstall, options.platform === "windows");
       if (options.installError) throw options.installError;
     },
     async close() {
@@ -174,7 +174,7 @@ test("macOS waits for an explicit restart after install", async () => {
   assert.equal(counts().restarts, 1);
 });
 
-test("Windows starts its installer without claiming restart readiness", async () => {
+test("Windows asks its installer to reopen Satori without invoking process relaunch", async () => {
   const { controller, counts } = fixture({ platform: "windows" });
   await controller.check(true);
   await controller.download();

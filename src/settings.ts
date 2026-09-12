@@ -409,10 +409,10 @@ class AISettingsController {
         break;
       case "downloaded":
         this.updateStatus.textContent = "签名验证完成";
-        this.updateButton.textContent = platform === "windows" ? "安装并退出" : "安装更新";
+        this.updateButton.textContent = platform === "windows" ? "安装并重新打开" : "安装更新";
         this.updateButton.title =
           platform === "windows"
-            ? "启动可见的 Windows 安装器；Satori 将按系统限制自动退出"
+            ? "Satori 将关闭并显示更新进度，完成后自动重新打开"
             : "安装已验证的更新；完成后由你决定何时重启";
         this.updateButton.setAttribute("aria-label", this.updateButton.title);
         break;
@@ -420,7 +420,7 @@ class AISettingsController {
         this.updateStatus.textContent = platform === "windows" ? "正在启动系统安装器" : "正在安装已验证更新";
         this.updateButton.textContent = "安装中…";
         this.updateButton.title =
-          platform === "windows" ? "安装器启动后 Satori 会退出" : "安装完成后将提供重启按钮";
+          platform === "windows" ? "正在更新，完成后自动重新打开 Satori" : "安装完成后将提供重启按钮";
         this.updateButton.setAttribute("aria-label", this.updateButton.title);
         break;
       case "restart-ready":
