@@ -1,6 +1,6 @@
 # Current status
 
-Updated: 2026-09-12
+Updated: 2026-09-13
 
 ## Product
 
@@ -27,7 +27,7 @@ Satori is a local-first macOS and Windows PDF learning workspace. Reading stays 
 
 ## Version and installation
 
-- Current source version: `3.4.6`. This patch targets macOS 14+ Apple silicon and Windows 11 x64 and ARM64 downloads plus a Tauri updater artifact/signature for each architecture and one static `latest.json`. Installations on 3.4.3 or earlier must install a current version manually once.
+- Current source version: `3.4.7`. This patch targets macOS 14+ Apple silicon and Windows 11 x64 and ARM64 downloads plus a Tauri updater artifact/signature for each architecture and one static `latest.json`. Installations on 3.4.3 or earlier must install a current version manually once.
 - The downloadable bundle has a stable local signature and hardened-runtime flag, but no Apple Team ID or notarization; Gatekeeper assessment rejects it, so the documented Control-click opening step remains required.
 - The macOS bundle declares macOS 14 as its minimum system version. Release packaging verifies the bundle signature, hardened runtime, version, archive integrity, and SHA-256 before publication.
 - The Windows workflow remains non-publishing when run alone, but the explicit updater release workflow can reuse it. Native x64 and ARM64 runners build unsigned current-user NSIS packages plus updater signatures, extract each installer, verify a unique payload and expected PE architecture, install it, check application and shortcut identity, uninstall it completely, and record separate SHA-256 manifests before publication. The publishing workflow independently verifies all three updater signatures against the embedded public key before making the Release public.
@@ -160,3 +160,13 @@ macOS arm64 and Windows x64/arm64; these source changes have not been packaged
 or released, and no native cross-version update was run in this session.
 
 Release notes use English first and Simplified Chinese second. Historical release descriptions have been prepared in that order, and repository notes preserve their original version-specific behavior and verification boundaries. This documentation change does not rebuild application packages.
+
+### 2026-09-13 · 3.4.7 release source
+
+Version sources and lockfiles are synchronized to 3.4.7. The release includes the
+shared 2.1.2 Windows installer, localized high-resolution character presentation,
+and passive in-app Windows updates that reopen Satori on completion. The
+macOS build retains the existing stable local signing identity. Publication
+uses the canonical draft verification workflow; release signatures and public
+assets are verified independently. A complete installed-app cross-version
+update is not claimed from these packaging and CI checks.
