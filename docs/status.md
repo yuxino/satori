@@ -1,6 +1,6 @@
 # Current status
 
-Updated: 2026-09-08
+Updated: 2026-09-12
 
 ## Product
 
@@ -144,3 +144,7 @@ Completed the authorized circular-alpha treatment of the approved portrait and u
 ### 2026-09-08 · 3.4.6 release
 
 Version sources and lockfiles are synchronized to 3.4.6, and the English/Chinese download copy and [release notes](releases/v3.4.6.md) cover the reader fixes and approved icon update. The authorized release follows ADR 0019: build the macOS bundle with the existing stable local identity, then use the explicit release workflow for Windows packages, updater signatures, checksums and the three-platform manifest. Final workflow and public-asset evidence is recorded in the release delivery report. Installed-app and complete native updater interaction acceptance remain separate from these build and publication checks.
+
+## Release documentation
+
+Release notes use English first and Simplified Chinese second. Historical release descriptions have been prepared in that order, and repository notes preserve their original version-specific behavior and verification boundaries. This documentation change does not rebuild application packages.
