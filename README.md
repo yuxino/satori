@@ -10,7 +10,7 @@
 
 `Satori` means “enlightenment” in Japanese.
 
-A local-first PDF learning app for macOS and Windows 11. Ask AI about the current page or a selected region, then compare the explanation with the source. Your reading progress and Q&A are saved locally for each book.
+Satori is a PDF reader for macOS and Windows 11. When a passage, figure, or code block needs explaining, ask AI about the page or select the part you want help with. Your reading progress and Q&A are saved on your device, organized by book. Reading works without AI; questions use a model service you configure.
 
 <!-- project-demo-v1 -->
 ## Demo
@@ -27,8 +27,8 @@ A local-first PDF learning app for macOS and Windows 11. Ask AI about the curren
 - Ask about the current page or drag over a paragraph, figure, or code block for a visual explanation. Text, scanned, and mixed PDFs are supported.
 - Read in single- or two-page view with outline navigation and zoom; each book reopens where you left it.
 - Keep reading activity and Q&A organized per book, with links back to the source page.
-- Choose among Alibaba Cloud Model Studio, OpenAI, and custom OpenAI-compatible visual models.
-- Check for a signed update in Settings, review its notes, then explicitly download, verify, and install it.
+- Save multiple AI service profiles and choose which one to use. Supported services include Alibaba Cloud Model Studio, OpenAI, and OpenAI-compatible services that accept images.
+- Check for updates in Settings and read the release notes before downloading. Satori verifies the update signature before you can install it.
 - Read and manage the library without configuring AI.
 
 ## Download

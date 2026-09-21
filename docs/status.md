@@ -1,6 +1,8 @@
 # Current status
 
-Updated: 2026-09-13
+Updated: 2026-09-22
+
+The English and Chinese README introductions now describe the PDF reader, optional AI setup, service profiles, and update steps in plain language. Installation, privacy, platform limitations, and demo media are unchanged; this documentation pass does not publish new desktop packages.
 
 ## Product
 
